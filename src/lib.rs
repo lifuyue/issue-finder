@@ -1,0 +1,14 @@
+pub mod cli;
+pub mod config;
+pub mod doctor;
+pub mod errors;
+pub mod github;
+pub mod handoff;
+pub mod inbox;
+pub mod llm;
+pub mod paths;
+pub mod repo_scan;
+pub mod report;
+pub mod scoring;
+pub mod workflow;
+pub mod workspace;

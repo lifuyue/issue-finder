@@ -1,0 +1,30 @@
+[package]
+name = "patchbay-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Local-first task preparation CLI for developers using coding agents"
+license = "MIT"
+repository = "https://github.com/patchbay/patchbay-cli"
+
+[[bin]]
+name = "patchbay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+dirs = "5.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.38", features = ["macros", "rt-multi-thread", "time"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5"
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.10"
