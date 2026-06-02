@@ -1,0 +1,669 @@
+# Patchbay CLI Rust Design
+
+## Summary
+
+Patchbay CLI is a Rust rewrite inspired by the current OpenMeta project, but it uses a new brand and a narrower product boundary. Patchbay is a local-first open-source task preparation tool for developers who use coding agents. It does not compete with Codex, Cursor, Claude Code, Cline, or similar tools. It prepares a clear task package before those tools begin work.
+
+The command name is `patchbay`. The repository and package name should be `patchbay-cli`.
+
+## Product Positioning
+
+Patchbay is a local context and handoff layer for open-source contribution work. Its job is to find suitable `good first issue` tasks, prepare local repository context, create a structured handoff payload, store that payload in a local inbox, and produce a daily task report.
+
+The first version optimizes for a deterministic local workflow:
+
+```text
+Discover good first issues
+  -> Rank with local heuristics
+  -> Prepare repository workspace
+  -> Generate handoff.json and handoff.md
+  -> Store the task in the local inbox
+  -> Generate a daily report.md
+```
+
+`handoff.json` is the canonical output. `handoff.md` is a lightweight human-readable summary.
+
+## Goals
+
+- Discover GitHub issues labeled `good first issue` or `good-first-issue`.
+- Rank discovered issues with deterministic local heuristics.
+- Prepare a local workspace for selected issues.
+- Generate a structured `handoff.json` that a coding agent can consume.
+- Generate a short `handoff.md` for human review.
+- Maintain a local inbox of prepared handoffs.
+- Generate a local Markdown daily report.
+- Support optional OpenAI-compatible LLM enhancement without making LLMs required.
+- Keep the first version safe by avoiding code edits, test execution, commits, pushes, and PR creation.
+
+## Non-Goals
+
+- Do not implement a general coding agent.
+- Do not implement agent adapters in the first version.
+- Do not start Codex, Cursor, Claude Code, Cline, or other coding agents.
+- Do not generate or apply patches.
+- Do not modify target repository source files.
+- Do not run validation commands automatically.
+- Do not commit, push, or open pull requests.
+- Do not implement MCP server support in the first version.
+- Do not implement complex LLM provider profiles.
+- Do not implement repo memory or user memory recommendation learning loops in the first version.
+- Do not publish artifacts to a remote private repository.
+- Do not implement an automation enable/disable state machine in the first version.
+
+## Command Surface
+
+The first version has a complete but restrained command surface:
+
+```bash
+patchbay init
+patchbay scout
+patchbay prepare owner/repo#123
+patchbay handoff <inbox-id>
+patchbay inbox
+patchbay daily
+patchbay report
+patchbay doctor
+```
+
+### `patchbay init`
+
+Initializes local configuration and creates the local Patchbay directory structure.
+
+It captures:
+
+- GitHub token.
+- Optional GitHub username.
+- User profile keywords and tech stack.
+- Daily Top N setting.
+- Optional OpenAI-compatible LLM settings.
+
+The config file is written to:
+
+```text
+~/.patchbay/config.toml
+```
+
+### `patchbay scout`
+
+Discovers and ranks `good first issue` tasks.
+
+Example usage:
+
+```bash
+patchbay scout --limit 20
+patchbay scout --refresh
+```
+
+`scout` only discovers and displays candidates. It does not clone repositories and does not generate handoff payloads.
+
+### `patchbay prepare`
+
+Prepares one issue and writes it to the inbox.
+
+Example usage:
+
+```bash
+patchbay prepare owner/repo#123
+patchbay prepare --url https://github.com/owner/repo/issues/123
+```
+
+The command:
+
+- Fetches issue details if needed.
+- Clones or fetches the repository workspace.
+- Creates or reuses a Patchbay branch.
+- Scans repository structure.
+- Detects candidate files.
+- Detects suggested validation commands.
+- Builds `handoff.json`.
+- Renders `handoff.md`.
+- Upserts the inbox index.
+
+### `patchbay handoff`
+
+Displays or prints an existing handoff.
+
+Example usage:
+
+```bash
+patchbay handoff <inbox-id>
+patchbay handoff <inbox-id> --json
+patchbay handoff <inbox-id> --print
+```
+
+The JSON output is the authoritative payload.
+
+### `patchbay inbox`
+
+Lists the local inbox and supports light status management.
+
+Example usage:
+
+```bash
+patchbay inbox
+patchbay inbox --json
+patchbay inbox archive <inbox-id>
+patchbay inbox done <inbox-id>
+```
+
+First-version inbox statuses are:
+
+```text
+ready
+prepare_failed
+archived
+done
+```
+
+### `patchbay daily`
+
+Runs the daily task preparation flow.
+
+Example usage:
+
+```bash
+patchbay daily
+patchbay daily --top 5
+patchbay daily --refresh
+```
+
+The command:
+
+```text
+scout
+  -> select Top N issues not already in inbox
+  -> prepare each issue
+  -> write or update inbox entries
+  -> write reports/YYYY-MM-DD.md
+```
+
+Single-issue failures do not stop the full daily run. The report records both successful and failed preparations.
+
+### `patchbay report`
+
+Displays local daily reports.
+
+Example usage:
+
+```bash
+patchbay report
+patchbay report --date 2026-06-02
+```
+
+Reports are Markdown files. They are a simple local knowledge base, not a publishing surface.
+
+### `patchbay doctor`
+
+Checks local readiness.
+
+It verifies:
+
+- Git availability.
+- GitHub token presence and basic validity.
+- Patchbay config existence.
+- Patchbay directory permissions.
+- Workspace, inbox, cache, and report paths.
+- Optional LLM reachability when LLM is enabled.
+- Platform details relevant to future scheduler support.
+
+## Local State Layout
+
+Patchbay stores local state under `~/.patchbay`.
+
+```text
+~/.patchbay/
+  config.toml
+  cache/
+    github-issues.json
+  workspaces/
+    owner__repo/
+  inbox/
+    index.json
+    2026-06-02-owner__repo-123/
+      issue.json
+      workspace.json
+      handoff.json
+      handoff.md
+  reports/
+    2026-06-02.md
+```
+
+`PATCHBAY_HOME` can override `~/.patchbay` for tests, development, and advanced users.
+
+## Configuration
+
+The first version uses a single TOML configuration file.
+
+```toml
+[github]
+token = ""
+username = ""
+
+[profile]
+tech_stack = ["Rust", "TypeScript"]
+keywords = ["cli", "developer-tools"]
+
+[daily]
+top_n = 5
+
+[llm]
+enabled = false
+base_url = "https://api.openai.com/v1"
+api_key = ""
+api_key_env = ""
+model = "gpt-4o-mini"
+```
+
+LLM settings are intentionally simple. The first version does not support provider presets, named profiles, or complex custom headers. If `api_key_env` is set, Patchbay reads the API key from that environment variable instead of requiring it in the config file.
+
+## Issue Discovery
+
+The first version discovers issues through the GitHub REST API using search queries for:
+
+```text
+label:"good first issue"
+label:"good-first-issue"
+```
+
+Discovery filters:
+
+- Open issues only.
+- Exclude pull requests.
+- Exclude locked issues.
+- Exclude assigned issues when possible.
+- Exclude archived repositories when possible.
+
+Discovery results are cached in:
+
+```text
+~/.patchbay/cache/github-issues.json
+```
+
+The default discovery cache TTL is 10 minutes. `--refresh` bypasses the cache.
+
+## Local Scoring
+
+The first version uses deterministic local scoring. It does not implement complex agent suitability scoring.
+
+Scoring inputs:
+
+- Issue title keyword matches.
+- Issue body keyword matches.
+- Repository name and description matches.
+- User profile `tech_stack`.
+- User profile `keywords`.
+- Issue freshness.
+- Repository stars.
+- Presence of actionable signals such as file paths, reproduction steps, expected behavior, or actual behavior.
+
+The scoring module returns a ranked list and a short explanation for each score.
+
+## Workspace Preparation
+
+Workspaces are stored under:
+
+```text
+~/.patchbay/workspaces/owner__repo
+```
+
+Preparation steps:
+
+- Clone the repository if no local workspace exists.
+- Fetch the default remote if the workspace already exists.
+- Detect the default branch.
+- Create or reuse a branch named like `patchbay/123-short-title`.
+- Detect whether the workspace is dirty.
+- Scan repository files.
+- Detect candidate files.
+- Detect suggested validation commands.
+
+If the workspace is dirty, Patchbay does not reset or overwrite it. The handoff payload records a warning.
+
+Git operations should use a small Rust wrapper around the local `git` CLI for the first version. This keeps behavior close to what users expect from their own Git configuration, SSH setup, credential helpers, and proxy settings.
+
+## Repo Scan
+
+Repo scanning is lightweight and bounded.
+
+Excluded directories:
+
+```text
+.git
+node_modules
+target
+dist
+build
+.next
+vendor
+coverage
+```
+
+Scan constraints:
+
+- Maximum discovered file count.
+- Maximum single-file read size.
+- No binary file parsing.
+- No dependency installation.
+- No command execution.
+
+Candidate files are selected by matching issue title and body terms against file paths and limited snippets.
+
+Suggested validation command detection:
+
+```text
+Cargo.toml       -> cargo test
+package.json     -> npm test, pnpm test, yarn test, or bun test based on lockfile
+pyproject.toml   -> pytest
+go.mod           -> go test ./...
+Makefile         -> make test when a test target is present
+```
+
+Patchbay only suggests these commands in the handoff. It does not run them in the first version.
+
+## Handoff Payload
+
+`handoff.json` is the canonical payload.
+
+Example shape:
+
+```json
+{
+  "version": 1,
+  "kind": "patchbay_handoff",
+  "id": "2026-06-02-owner__repo-123",
+  "created_at": "2026-06-02T10:00:00Z",
+  "issue": {
+    "repo_full_name": "owner/repo",
+    "number": 123,
+    "title": "Fix accessible button label",
+    "body": "...",
+    "labels": ["good first issue"],
+    "url": "https://github.com/owner/repo/issues/123",
+    "updated_at": "2026-06-02T09:00:00Z"
+  },
+  "workspace": {
+    "path": "/Users/example/.patchbay/workspaces/owner__repo",
+    "default_branch": "main",
+    "branch": "patchbay/123-fix-accessible-button-label",
+    "dirty": false
+  },
+  "context": {
+    "candidate_files": [
+      {
+        "path": "src/button.rs",
+        "reason": "Path matched issue terms"
+      }
+    ],
+    "validation_commands": [
+      {
+        "command": "cargo test",
+        "reason": "Detected Cargo.toml"
+      }
+    ],
+    "warnings": []
+  },
+  "instructions": {
+    "goal": "Investigate and fix the issue with a minimal patch.",
+    "suggested_start": [
+      "Read the issue body",
+      "Inspect candidate files",
+      "Make the smallest targeted change"
+    ],
+    "constraints": [
+      "Keep changes minimal",
+      "Do not open a PR automatically",
+      "Do not overwrite unrelated local changes"
+    ],
+    "expected_output": [
+      "Patch in local workspace",
+      "Validation result",
+      "PR summary draft"
+    ]
+  },
+  "llm_enhancement": {
+    "status": "disabled",
+    "summary": null,
+    "warnings": []
+  }
+}
+```
+
+`handoff.md` is a compact summary that points to the JSON payload:
+
+```md
+# Handoff: owner/repo#123
+
+- JSON payload: ./handoff.json
+- Workspace: /Users/example/.patchbay/workspaces/owner__repo
+- Branch: patchbay/123-fix-accessible-button-label
+- Suggested files: src/button.rs
+- Suggested validation: cargo test
+
+## Goal
+
+Investigate and fix the issue with a minimal patch.
+```
+
+## Inbox
+
+`inbox/index.json` stores task metadata and points to each task directory.
+
+Example:
+
+```json
+{
+  "items": [
+    {
+      "id": "2026-06-02-owner__repo-123",
+      "repo_full_name": "owner/repo",
+      "issue_number": 123,
+      "title": "Fix accessible button label",
+      "score": 82,
+      "status": "ready",
+      "handoff_json_path": "/Users/example/.patchbay/inbox/2026-06-02-owner__repo-123/handoff.json",
+      "handoff_md_path": "/Users/example/.patchbay/inbox/2026-06-02-owner__repo-123/handoff.md",
+      "created_at": "2026-06-02T10:00:00Z"
+    }
+  ]
+}
+```
+
+The inbox index is an index only. Full issue, workspace, and handoff content live in the task directory.
+
+The `instructions.expected_output` field describes what the downstream coding agent or user should produce after accepting the handoff. It is not a list of actions Patchbay performs in the first version.
+
+## Daily Report
+
+Daily reports are written to:
+
+```text
+~/.patchbay/reports/YYYY-MM-DD.md
+```
+
+Report content:
+
+- Run timestamp.
+- Discovery count.
+- Prepared handoff count.
+- Failed preparation count.
+- Prepared handoff list with scores and paths.
+- Failed issue list with reasons.
+- Recommended top 1 to 3 tasks for the day.
+
+Reports are local Markdown knowledge-base entries.
+
+## Optional LLM Enhancement
+
+The LLM is optional and never controls the core workflow.
+
+Without LLM:
+
+- Patchbay still discovers issues.
+- Patchbay still prepares workspaces.
+- Patchbay still generates complete `handoff.json`.
+- Patchbay still generates `handoff.md` and `report.md`.
+
+With LLM enabled:
+
+- Patchbay may improve issue summary.
+- Patchbay may rewrite the goal.
+- Patchbay may improve suggested start steps.
+- Patchbay may add likely risk notes.
+- Patchbay may make the daily report more readable.
+
+LLM failures do not block handoff generation. Failures are recorded in `llm_enhancement.status = "failed"` and in warnings.
+
+The LLM must not decide:
+
+- Git operations.
+- File write locations.
+- Workspace branch names.
+- Validation command detection.
+- Inbox state.
+- Whether a task is safe to modify.
+
+## Rust Architecture
+
+The first version should be a single Rust crate. It can be split into a workspace later if MCP, server mode, or adapters are added.
+
+Suggested modules:
+
+```text
+src/
+  main.rs
+  cli.rs
+  config.rs
+  paths.rs
+  github.rs
+  scoring.rs
+  workspace.rs
+  repo_scan.rs
+  handoff.rs
+  inbox.rs
+  report.rs
+  llm.rs
+  doctor.rs
+  errors.rs
+```
+
+Suggested dependencies:
+
+```text
+clap
+serde
+serde_json
+toml
+reqwest
+tokio
+anyhow
+thiserror
+chrono
+dirs
+walkdir
+tracing
+```
+
+Git operations should be implemented as a wrapper around the local `git` CLI in the first version.
+
+## Error Handling
+
+Patchbay should preserve clear evidence and avoid stopping a whole batch when one task fails.
+
+Rules:
+
+- GitHub rate limit errors are shown explicitly.
+- `scout` can fall back to fresh cache when available.
+- LLM failures degrade to deterministic template output.
+- Clone or fetch failure marks the task as `prepare_failed`.
+- Repo scan failure still allows handoff generation when enough issue and workspace data exists.
+- Dirty workspace never triggers reset or overwrite.
+- `daily` continues after single-task failure.
+- File write failure is a hard failure for that specific output.
+
+File writes for index and payload files should use a temporary file followed by atomic rename where practical.
+
+## Safety Boundary
+
+The first version only writes Patchbay-owned local state and prepares local Git workspaces.
+
+Allowed actions:
+
+- Read GitHub issue and repository metadata.
+- Clone repositories.
+- Fetch repositories.
+- Create or checkout Patchbay branches.
+- Scan repository files under bounded limits.
+- Write files under `~/.patchbay`.
+
+Disallowed actions:
+
+- Modify target repository source files.
+- Run arbitrary repository commands.
+- Install dependencies.
+- Commit.
+- Push.
+- Open PRs.
+- Reset, clean, or delete workspaces.
+
+## Testing Strategy
+
+Unit tests:
+
+- Issue reference parsing.
+- Issue URL parsing.
+- GitHub search query construction.
+- Local scoring behavior.
+- Repo scan directory exclusions.
+- Validation command detection.
+- Handoff JSON generation.
+- Handoff Markdown rendering.
+- Inbox index upsert.
+- Report Markdown rendering.
+- LLM fallback behavior.
+
+Integration tests:
+
+- Use `PATCHBAY_HOME` with a temporary directory.
+- Use a local Git repository to test workspace preparation.
+- Mock GitHub HTTP responses for `scout`.
+- Verify `daily` continues when one preparation fails and another succeeds.
+- Verify `daily` writes both inbox entries and report entries.
+
+## Success Criteria
+
+The first version is successful when a user can run:
+
+```bash
+patchbay init
+patchbay daily --top 3
+patchbay inbox
+patchbay handoff <id> --json
+```
+
+and receive:
+
+- Up to 3 prepared handoffs.
+- A canonical `handoff.json` for each prepared task.
+- A short `handoff.md` for each prepared task.
+- A daily report at `~/.patchbay/reports/YYYY-MM-DD.md`.
+- A workflow that succeeds without LLM configuration.
+- Better summaries when LLM is configured, without LLM becoming required.
+- No source-code edits, commits, pushes, PRs, or test execution performed by Patchbay.
+
+## Implementation Notes
+
+The first implementation should build deterministic core behavior before adding optional LLM enhancement:
+
+1. CLI, config, and path setup.
+2. GitHub discovery.
+3. Local scoring.
+4. Workspace preparation.
+5. Repo scan.
+6. `handoff.json`.
+7. `handoff.md`.
+8. Inbox.
+9. Daily report.
+10. Doctor.
+11. Optional LLM enhancement.
+
+This sequence keeps the project usable even before any AI-dependent behavior is added.

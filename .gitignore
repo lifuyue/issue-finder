@@ -1,0 +1,13 @@
+/reference/
+
+# Local environment
+.env
+.env.*
+
+# Build outputs
+/target/
+/dist/
+/build/
+
+# Editor and OS noise
+.DS_Store
