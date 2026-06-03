@@ -124,9 +124,7 @@ mod tests {
         LlmEnhancement,
     };
     use crate::llm_review::LlmReview;
-    use crate::value_scoring::{
-        GrowthConfidence, OpportunityType, Recommendation, ValueAssessment,
-    };
+    use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
 
     #[tokio::test]
     async fn llm_disabled_is_non_blocking() {
@@ -158,13 +156,16 @@ mod tests {
             },
             context_pack: default_context_pack(),
             value_assessment: ValueAssessment {
-                value_score: 0,
-                execution_gate_score: 0,
-                recommendation: Recommendation::Avoid,
-                opportunity_type: OpportunityType::LowSignal,
-                growth_confidence: GrowthConfidence::Low,
+                final_rank_score: 0,
+                attention_score: 0,
+                execution_score: 0,
+                profile_fit_score: 0,
+                risk_penalty: 0,
+                recommendation_category: RecommendationCategory::NeedsTriage,
+                attention_band: ScoreBand::Low,
+                execution_band: ScoreBand::Low,
                 signals: vec![],
-                risks: vec![],
+                risk_tags: vec![],
                 missing_evidence: vec![],
                 explanation: vec![],
             },

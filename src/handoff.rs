@@ -8,7 +8,7 @@ use crate::github::GitHubIssue;
 use crate::llm_review::LlmReview;
 use crate::paths::{atomic_write, sanitize_repo_name, PatchbayPaths};
 use crate::repo_scan::{CandidateFile, ValidationCommand};
-use crate::value_scoring::{GrowthConfidence, OpportunityType, Recommendation, ValueAssessment};
+use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
 use crate::workspace::PreparedWorkspace;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -171,12 +171,38 @@ impl Handoff {
             format!("- Suggested files: {suggested_files}"),
             format!("- Suggested validation: {validation}"),
             format!(
-                "- Value score: {} ({})",
-                self.value_assessment.value_score, self.value_assessment.recommendation
+                "- Category: {}",
+                self.value_assessment.recommendation_category
             ),
             format!(
-                "- Opportunity type: {}",
-                self.value_assessment.opportunity_type
+                "- Final rank score: {}",
+                self.value_assessment.final_rank_score
+            ),
+            format!(
+                "- Attention score: {} ({})",
+                self.value_assessment.attention_score, self.value_assessment.attention_band
+            ),
+            format!(
+                "- Execution score: {} ({})",
+                self.value_assessment.execution_score, self.value_assessment.execution_band
+            ),
+            format!(
+                "- Profile fit score: {}",
+                self.value_assessment.profile_fit_score
+            ),
+            format!("- Risk penalty: {}", self.value_assessment.risk_penalty),
+            format!(
+                "- Risk tags: {}",
+                if self.value_assessment.risk_tags.is_empty() {
+                    "none".to_string()
+                } else {
+                    self.value_assessment
+                        .risk_tags
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             ),
             String::new(),
             "## Goal".to_string(),
@@ -185,20 +211,20 @@ impl Handoff {
             String::new(),
         ];
 
-        if !self.evidence_pack.why_this_is_high_value.is_empty()
-            || !self.evidence_pack.why_this_is_actionable.is_empty()
+        if !self.evidence_pack.why_this_has_high_attention.is_empty()
+            || !self.evidence_pack.why_this_is_agent_ready.is_empty()
         {
             lines.extend(["## Evidence".to_string(), String::new()]);
-            for item in &self.evidence_pack.why_this_is_high_value {
+            for item in &self.evidence_pack.why_this_has_high_attention {
                 lines.push(format!(
-                    "- Value: {} ({})",
+                    "- High attention: {} ({})",
                     item.summary,
                     item.source_refs.join(", ")
                 ));
             }
-            for item in &self.evidence_pack.why_this_is_actionable {
+            for item in &self.evidence_pack.why_this_is_agent_ready {
                 lines.push(format!(
-                    "- Actionable: {} ({})",
+                    "- Agent-ready: {} ({})",
                     item.summary,
                     item.source_refs.join(", ")
                 ));
@@ -209,7 +235,7 @@ impl Handoff {
         if !self.evidence_pack.risk_factors.is_empty()
             || !self.evidence_pack.missing_evidence.is_empty()
         {
-            lines.extend(["## Value Risks".to_string(), String::new()]);
+            lines.extend(["## Recommendation Risks".to_string(), String::new()]);
             for item in &self.evidence_pack.risk_factors {
                 lines.push(format!(
                     "- {} ({})",
@@ -250,13 +276,16 @@ impl Handoff {
 
 fn fallback_assessment(issue: &GitHubIssue) -> ValueAssessment {
     ValueAssessment {
-        value_score: 0,
-        execution_gate_score: 0,
-        recommendation: Recommendation::Avoid,
-        opportunity_type: OpportunityType::LowSignal,
-        growth_confidence: GrowthConfidence::Low,
+        final_rank_score: 0,
+        attention_score: 0,
+        execution_score: 0,
+        profile_fit_score: 0,
+        risk_penalty: 0,
+        recommendation_category: RecommendationCategory::NeedsTriage,
+        attention_band: ScoreBand::Low,
+        execution_band: ScoreBand::Low,
         signals: Vec::new(),
-        risks: Vec::new(),
+        risk_tags: Vec::new(),
         missing_evidence: vec![format!(
             "Value assessment was not generated for {}#{}",
             issue.repo_full_name, issue.number

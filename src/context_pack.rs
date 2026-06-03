@@ -143,6 +143,14 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
         format!("- URL: {}", handoff.issue.url),
         format!("- Workspace: {}", handoff.workspace.path),
         format!("- Branch: {}", handoff.workspace.branch),
+        format!(
+            "- Category: {} | rank {} | attention {} | execution {} | risk {}",
+            handoff.value_assessment.recommendation_category,
+            handoff.value_assessment.final_rank_score,
+            handoff.value_assessment.attention_score,
+            handoff.value_assessment.execution_score,
+            handoff.value_assessment.risk_penalty
+        ),
         format!("- Handoff pack: {dir}"),
         format!("- Handoff JSON: {handoff_json_path}"),
         format!("- Handoff Markdown: {handoff_md_path}"),
@@ -179,22 +187,27 @@ fn render_entry_md(handoff: &Handoff) -> String {
         "## Why This Was Selected".to_string(),
         String::new(),
         format!(
-            "- Value score: {} ({})",
-            handoff.value_assessment.value_score, handoff.value_assessment.recommendation
+            "- Category: {}",
+            handoff.value_assessment.recommendation_category
         ),
         format!(
-            "- Execution gate: {}",
-            handoff.value_assessment.execution_gate_score
+            "- Final rank score: {}",
+            handoff.value_assessment.final_rank_score
         ),
         format!(
-            "- Opportunity type: {}",
-            handoff.value_assessment.opportunity_type
+            "- Attention score: {} ({})",
+            handoff.value_assessment.attention_score, handoff.value_assessment.attention_band
         ),
+        format!(
+            "- Execution score: {} ({})",
+            handoff.value_assessment.execution_score, handoff.value_assessment.execution_band
+        ),
+        format!("- Risk penalty: {}", handoff.value_assessment.risk_penalty),
     ];
 
     if let Some(summary) = first_nonempty(&handoff.value_assessment.explanation) {
         lines.push(format!("- Summary: {}", single_line(summary)));
-    } else if let Some(item) = handoff.evidence_pack.why_this_is_high_value.first() {
+    } else if let Some(item) = handoff.evidence_pack.why_this_has_high_attention.first() {
         lines.push(format!("- Summary: {}", single_line(&item.summary)));
     }
 
@@ -231,27 +244,31 @@ fn render_entry_md(handoff: &Handoff) -> String {
 
 fn render_value_md(handoff: &Handoff) -> String {
     let mut lines = vec![
-        "# Value".to_string(),
+        "# Recommendation Assessment".to_string(),
         String::new(),
         "## Assessment".to_string(),
         String::new(),
-        format!("- Value score: {}", handoff.value_assessment.value_score),
         format!(
-            "- Execution gate score: {}",
-            handoff.value_assessment.execution_gate_score
+            "- Category: {}",
+            handoff.value_assessment.recommendation_category
         ),
         format!(
-            "- Recommendation: {}",
-            handoff.value_assessment.recommendation
+            "- Final rank score: {}",
+            handoff.value_assessment.final_rank_score
         ),
         format!(
-            "- Opportunity type: {}",
-            handoff.value_assessment.opportunity_type
+            "- Attention score: {} ({})",
+            handoff.value_assessment.attention_score, handoff.value_assessment.attention_band
         ),
         format!(
-            "- Growth confidence: {}",
-            handoff.value_assessment.growth_confidence
+            "- Execution score: {} ({})",
+            handoff.value_assessment.execution_score, handoff.value_assessment.execution_band
         ),
+        format!(
+            "- Profile fit score: {}",
+            handoff.value_assessment.profile_fit_score
+        ),
+        format!("- Risk penalty: {}", handoff.value_assessment.risk_penalty),
         String::new(),
         "## Explanation".to_string(),
         String::new(),
@@ -262,15 +279,48 @@ fn render_value_md(handoff: &Handoff) -> String {
         "No value explanation was generated.",
     );
 
-    lines.extend([String::new(), "## Signals".to_string(), String::new()]);
+    lines.extend([
+        String::new(),
+        "## Attention Signals".to_string(),
+        String::new(),
+    ]);
+    push_signal_axis(
+        &mut lines,
+        handoff,
+        crate::value_signals::SignalAxis::Attention,
+    );
+
+    lines.extend([
+        String::new(),
+        "## Execution Signals".to_string(),
+        String::new(),
+    ]);
+    push_signal_axis(
+        &mut lines,
+        handoff,
+        crate::value_signals::SignalAxis::Execution,
+    );
+
+    lines.extend([
+        String::new(),
+        "## Profile Fit Signals".to_string(),
+        String::new(),
+    ]);
+    push_signal_axis(
+        &mut lines,
+        handoff,
+        crate::value_signals::SignalAxis::ProfileFit,
+    );
+
+    lines.extend([String::new(), "## All Signals".to_string(), String::new()]);
     if handoff.value_assessment.signals.is_empty() {
-        lines.push("- No value signals were generated.".to_string());
+        lines.push("- No recommendation signals were generated.".to_string());
     } else {
         for signal in &handoff.value_assessment.signals {
             lines.push(format!(
                 "- {:?} ({:?}, delta {}): {}{}",
                 signal.kind,
-                signal.confidence,
+                signal.axis,
                 signal.score_delta,
                 single_line(&signal.summary),
                 refs_suffix(&signal.evidence_refs)
@@ -279,11 +329,13 @@ fn render_value_md(handoff: &Handoff) -> String {
     }
 
     lines.extend([String::new(), "## Risks".to_string(), String::new()]);
-    push_string_list(
-        &mut lines,
-        &handoff.value_assessment.risks,
-        "No value risks were identified.",
-    );
+    if handoff.value_assessment.risk_tags.is_empty() {
+        lines.push("- No risk tags were identified.".to_string());
+    } else {
+        for tag in &handoff.value_assessment.risk_tags {
+            lines.push(format!("- {tag}"));
+        }
+    }
 
     lines.extend([
         String::new(),
@@ -298,24 +350,24 @@ fn render_value_md(handoff: &Handoff) -> String {
 
     lines.extend([
         String::new(),
-        "## Evidence Pack: High Value".to_string(),
+        "## Evidence Pack: High Attention".to_string(),
         String::new(),
     ]);
     push_evidence_items(
         &mut lines,
-        &handoff.evidence_pack.why_this_is_high_value,
-        "No high-value evidence was recorded.",
+        &handoff.evidence_pack.why_this_has_high_attention,
+        "No high-attention evidence was recorded.",
     );
 
     lines.extend([
         String::new(),
-        "## Evidence Pack: Actionable".to_string(),
+        "## Evidence Pack: Agent Ready".to_string(),
         String::new(),
     ]);
     push_evidence_items(
         &mut lines,
-        &handoff.evidence_pack.why_this_is_actionable,
-        "No actionable evidence was recorded.",
+        &handoff.evidence_pack.why_this_is_agent_ready,
+        "No agent-ready evidence was recorded.",
     );
 
     lines.extend([
@@ -549,6 +601,32 @@ fn push_evidence_items(lines: &mut Vec<String>, values: &[EvidenceItem], fallbac
                 "- {}{}",
                 single_line(&item.summary),
                 refs_suffix(&item.source_refs)
+            ));
+        }
+    }
+}
+
+fn push_signal_axis(
+    lines: &mut Vec<String>,
+    handoff: &Handoff,
+    axis: crate::value_signals::SignalAxis,
+) {
+    let mut matched = handoff
+        .value_assessment
+        .signals
+        .iter()
+        .filter(|signal| signal.axis == axis)
+        .peekable();
+    if matched.peek().is_none() {
+        lines.push("- None recorded.".to_string());
+    } else {
+        for signal in matched {
+            lines.push(format!(
+                "- {:?} (delta {}): {}{}",
+                signal.kind,
+                signal.score_delta,
+                single_line(&signal.summary),
+                refs_suffix(&signal.evidence_refs)
             ));
         }
     }

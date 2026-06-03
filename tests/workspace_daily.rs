@@ -14,7 +14,7 @@ use patchbay_cli::handoff::handoff_id;
 use patchbay_cli::inbox::{load_index, InboxStatus};
 use patchbay_cli::paths::PatchbayPaths;
 use patchbay_cli::value_scoring::{
-    GrowthConfidence, OpportunityType, RankedValueIssue, Recommendation, ValueAssessment,
+    RankedValueIssue, RecommendationCategory, ScoreBand, ValueAssessment,
 };
 use patchbay_cli::workflow::{self, prepare_value_issue};
 use patchbay_cli::workspace::{git_available, prepare_workspace};
@@ -110,7 +110,7 @@ async fn daily_continues_after_single_prepare_failure() {
 }
 
 #[tokio::test]
-async fn daily_skips_low_execution_gate_candidates() {
+async fn daily_skips_low_attention_triage_candidates() {
     if !git_available() {
         return;
     }
@@ -123,7 +123,7 @@ async fn daily_skips_low_execution_gate_candidates() {
     clone_into_workspace(&remote, &paths, "owner/success");
 
     let config = Config::default();
-    let low_gate = ranked_value(issue("owner/lowgate", 5), 95, 20);
+    let low_gate = ranked_value(issue("owner/lowgate", 5), 35, 20);
     let success = ranked_value(issue("owner/success", 6), 70, 55);
     let (report, _) = workflow::daily_from_ranked(&paths, &config, vec![low_gate, success], 2, 1)
         .await
@@ -171,7 +171,7 @@ async fn daily_continues_after_single_output_write_failure() {
 }
 
 #[tokio::test]
-async fn explicit_prepare_writes_low_gate_warning_and_value_fields() {
+async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
     if !git_available() {
         return;
     }
@@ -193,9 +193,12 @@ async fn explicit_prepare_writes_low_gate_warning_and_value_fields() {
 
     let handoff = fs::read_to_string(item.handoff_json_path).unwrap();
     assert!(handoff.contains("\"value_assessment\""));
+    assert!(handoff.contains("\"final_rank_score\""));
+    assert!(handoff.contains("\"attention_score\""));
+    assert!(handoff.contains("\"execution_score\""));
     assert!(handoff.contains("\"evidence_pack\""));
     assert!(handoff.contains("\"context_pack\""));
-    assert!(handoff.contains("Explicit prepare bypassed low execution gate score 20"));
+    assert!(handoff.contains("Explicit prepare bypassed low execution score 20"));
     let codex = fs::read_to_string(item.codex_md_path).unwrap();
     assert!(codex.contains("Use the local skill at:"));
     assert!(codex.contains("context/entry.md"));
@@ -267,33 +270,55 @@ fn issue(repo_full_name: &str, number: u64) -> GitHubIssue {
 
 fn ranked_value(
     issue: GitHubIssue,
-    value_score: i32,
-    execution_gate_score: i32,
+    final_rank_score: i32,
+    execution_score: i32,
 ) -> RankedValueIssue {
     let enriched_issue = EnrichedIssue::from_issue(&issue);
-    let recommendation = if execution_gate_score < 40 {
-        Recommendation::WeakCandidate
-    } else if value_score >= 75 {
-        Recommendation::StrongCandidate
+    let attention_score = final_rank_score;
+    let recommendation_category = if attention_score < 60 && execution_score < 40 {
+        RecommendationCategory::NeedsTriage
+    } else if attention_score >= 70 && execution_score >= 70 {
+        RecommendationCategory::AgentReadyHighValue
+    } else if attention_score >= 70 {
+        RecommendationCategory::HighAttention
     } else {
-        Recommendation::Candidate
+        RecommendationCategory::NicheButActionable
     };
     RankedValueIssue {
         issue,
-        score: value_score,
+        score: final_rank_score,
         value_assessment: ValueAssessment {
-            value_score,
-            execution_gate_score,
-            recommendation,
-            opportunity_type: OpportunityType::NicheButActionable,
-            growth_confidence: GrowthConfidence::Low,
+            final_rank_score,
+            attention_score,
+            execution_score,
+            profile_fit_score: 40,
+            risk_penalty: if recommendation_category == RecommendationCategory::NeedsTriage {
+                50
+            } else {
+                5
+            },
+            recommendation_category,
+            attention_band: if attention_score >= 70 {
+                ScoreBand::High
+            } else if attention_score >= 40 {
+                ScoreBand::Medium
+            } else {
+                ScoreBand::Low
+            },
+            execution_band: if execution_score >= 70 {
+                ScoreBand::High
+            } else if execution_score >= 40 {
+                ScoreBand::Medium
+            } else {
+                ScoreBand::Low
+            },
             signals: Vec::new(),
-            risks: Vec::new(),
+            risk_tags: Vec::new(),
             missing_evidence: Vec::new(),
-            explanation: vec!["test value evidence".to_string()],
+            explanation: vec!["test recommendation evidence".to_string()],
         },
         enriched_issue,
-        explanation: vec!["test value evidence".to_string()],
+        explanation: vec!["test recommendation evidence".to_string()],
     }
 }
 

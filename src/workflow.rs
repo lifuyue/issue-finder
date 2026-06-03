@@ -13,14 +13,16 @@ use crate::llm_review;
 use crate::paths::PatchbayPaths;
 use crate::report::{self, DailyReport, FailedReportItem, PreparedReportItem};
 use crate::scoring::rank_issues;
-use crate::value_scoring::{assess_issue, RankedValueIssue, Recommendation, ValueAssessment};
+use crate::value_scoring::{
+    assess_issue, is_daily_prepare_candidate, RankedValueIssue, ValueAssessment,
+};
 use crate::workspace;
 
 const ENRICHED_SCOUT_CANDIDATE_LIMIT: usize = 40;
 
 #[derive(Debug, Clone)]
 pub enum PrepareOutcome {
-    Prepared(PreparedReportItem),
+    Prepared(Box<PreparedReportItem>),
     Failed(FailedReportItem),
 }
 
@@ -85,10 +87,10 @@ pub async fn prepare_value_issue(
     match workspace::prepare_workspace(paths, &issue) {
         Ok(workspace) => {
             let mut workspace = workspace;
-            if explicit_prepare && ranked.value_assessment.execution_gate_score < 40 {
+            if explicit_prepare && ranked.value_assessment.execution_score < 40 {
                 workspace.warnings.push(format!(
-                    "Explicit prepare bypassed low execution gate score {}",
-                    ranked.value_assessment.execution_gate_score
+                    "Explicit prepare bypassed low execution score {}",
+                    ranked.value_assessment.execution_score
                 ));
             }
             let evidence_pack = build_evidence_pack(
@@ -113,14 +115,14 @@ pub async fn prepare_value_issue(
             llm::enhance_handoff(config, &mut handoff).await;
             let written = write_handoff(paths, &handoff, &issue)?;
             inbox::upsert_ready(paths, &issue, ranked.score, &written)?;
-            Ok(PrepareOutcome::Prepared(prepared_report_item(
+            Ok(PrepareOutcome::Prepared(Box::new(prepared_report_item(
                 &ranked,
                 &evidence_pack,
                 written.id,
                 written.handoff_json_path,
                 written.handoff_md_path,
                 written.codex_md_path,
-            )))
+            ))))
         }
         Err(error) => {
             let reason = error.to_string();
@@ -186,16 +188,14 @@ pub async fn daily_from_ranked(
         )? {
             continue;
         }
-        if ranked_issue.value_assessment.recommendation == Recommendation::Avoid
-            || ranked_issue.value_assessment.execution_gate_score < 40
-        {
+        if !is_daily_prepare_candidate(&ranked_issue.value_assessment) {
             continue;
         }
 
         attempts += 1;
         let issue = ranked_issue.issue.clone();
         match prepare_value_issue(paths, config, ranked_issue.clone(), false).await {
-            Ok(PrepareOutcome::Prepared(item)) => report.prepared.push(item),
+            Ok(PrepareOutcome::Prepared(item)) => report.prepared.push(*item),
             Ok(PrepareOutcome::Failed(item)) => report.failed.push(item),
             Err(error) => {
                 let reason = error.to_string();
@@ -245,25 +245,35 @@ pub fn render_ranked(ranked: &[RankedValueIssue]) -> String {
         .iter()
         .enumerate()
         .map(|(index, issue)| {
-            let detail = format!(
-                "{} | {} | gate {} | evidence: {} | risk: {}",
-                issue.value_assessment.recommendation,
-                issue.value_assessment.opportunity_type,
-                issue.value_assessment.execution_gate_score,
-                issue.explanation.join("; "),
+            let risk_tags = if issue.value_assessment.risk_tags.is_empty() {
+                "none".to_string()
+            } else {
                 issue
                     .value_assessment
-                    .risks
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "none".to_string())
+                    .risk_tags
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let detail = format!(
+                "{} | attention {} ({}) | execution {} ({}) | fit {} | risk {} | evidence: {} | risks: {}",
+                issue.value_assessment.recommendation_category,
+                issue.value_assessment.attention_score,
+                issue.value_assessment.attention_band,
+                issue.value_assessment.execution_score,
+                issue.value_assessment.execution_band,
+                issue.value_assessment.profile_fit_score,
+                issue.value_assessment.risk_penalty,
+                issue.explanation.join("; "),
+                risk_tags
             );
             format!(
-                "{}. {}#{} | score {} | {}\n   {}\n   {}",
+                "{}. {}#{} | rank {} | {}\n   {}\n   {}",
                 index + 1,
                 issue.issue.repo_full_name,
                 issue.issue.number,
-                issue.value_assessment.value_score,
+                issue.value_assessment.final_rank_score,
                 issue.issue.title,
                 issue.issue.url,
                 detail
@@ -276,8 +286,15 @@ pub fn render_ranked(ranked: &[RankedValueIssue]) -> String {
 pub fn render_prepare_outcome(outcome: &PrepareOutcome) -> String {
     match outcome {
         PrepareOutcome::Prepared(item) => format!(
-            "Prepared {}\nJSON: {}\nMarkdown: {}\nCodex: {}",
-            item.id, item.handoff_json_path, item.handoff_md_path, item.codex_md_path
+            "Prepared {}\nCategory: {} | attention {} | execution {} | risk {}\nJSON: {}\nMarkdown: {}\nCodex: {}",
+            item.id,
+            item.recommendation_category,
+            item.attention_score,
+            item.execution_score,
+            item.risk_penalty,
+            item.handoff_json_path,
+            item.handoff_md_path,
+            item.codex_md_path
         ),
         PrepareOutcome::Failed(item) => format!(
             "Preparation failed for {}#{}\nReason: {}",
@@ -325,7 +342,7 @@ fn ranked_value_issue(
     value_assessment: ValueAssessment,
     enriched_issue: crate::github_enrichment::EnrichedIssue,
 ) -> RankedValueIssue {
-    let score = value_assessment.value_score;
+    let score = value_assessment.final_rank_score;
     let explanation = value_assessment.explanation.clone();
     RankedValueIssue {
         issue,
@@ -340,13 +357,19 @@ fn sort_by_value(ranked: &mut [RankedValueIssue]) {
     ranked.sort_by(|left, right| {
         right
             .value_assessment
-            .value_score
-            .cmp(&left.value_assessment.value_score)
+            .final_rank_score
+            .cmp(&left.value_assessment.final_rank_score)
             .then_with(|| {
                 right
                     .value_assessment
-                    .execution_gate_score
-                    .cmp(&left.value_assessment.execution_gate_score)
+                    .attention_score
+                    .cmp(&left.value_assessment.attention_score)
+            })
+            .then_with(|| {
+                right
+                    .value_assessment
+                    .execution_score
+                    .cmp(&left.value_assessment.execution_score)
             })
     });
 }
@@ -365,13 +388,23 @@ fn prepared_report_item(
         issue_number: ranked.issue.number,
         title: ranked.issue.title.clone(),
         score: ranked.score,
-        value_score: ranked.value_assessment.value_score,
-        opportunity_type: ranked.value_assessment.opportunity_type.to_string(),
+        final_rank_score: ranked.value_assessment.final_rank_score,
+        attention_score: ranked.value_assessment.attention_score,
+        execution_score: ranked.value_assessment.execution_score,
+        profile_fit_score: ranked.value_assessment.profile_fit_score,
+        risk_penalty: ranked.value_assessment.risk_penalty,
+        recommendation_category: ranked.value_assessment.recommendation_category.to_string(),
+        risk_tags: ranked
+            .value_assessment
+            .risk_tags
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         why_it_is_worth_doing: evidence_pack
-            .why_this_is_high_value
+            .why_this_has_high_attention
             .first()
             .map(|item| item.summary.clone())
-            .unwrap_or_else(|| "Value evidence is limited".to_string()),
+            .unwrap_or_else(|| "Attention evidence is limited".to_string()),
         biggest_risk: evidence_pack
             .risk_factors
             .first()

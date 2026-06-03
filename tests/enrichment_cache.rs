@@ -56,7 +56,7 @@ async fn partial_enrichment_failure_still_produces_assessment() {
 
     assert!(!enriched.warnings.is_empty());
     let assessment = assess_issue(&enriched, &config.profile);
-    assert!(assessment.value_score >= 0);
+    assert!(assessment.final_rank_score >= 0);
     assert!(!assessment.missing_evidence.is_empty());
 }
 

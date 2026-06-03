@@ -78,6 +78,9 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
     );
     assert_eq!(handoff_value["context_pack"]["entrypoint"], "./codex.md");
     assert!(handoff_value["context_pack"]["body"].is_null());
+    assert!(handoff_value["value_assessment"]["final_rank_score"].is_number());
+    assert!(handoff_value["value_assessment"]["value_score"].is_null());
+    assert!(handoff_value["value_assessment"]["opportunity_type"].is_null());
 
     let codex = std::fs::read_to_string(&written.codex_md_path).unwrap();
     assert!(codex.contains("Use the local skill at:"));
@@ -90,7 +93,8 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
     assert!(entry.contains("## Next Reads"));
     assert!(!entry.contains("Expected a useful label in src/button.rs"));
     let value = std::fs::read_to_string(item_dir.join("context/value.md")).unwrap();
-    assert!(value.contains("## Evidence Pack: High Value"));
+    assert!(value.contains("# Recommendation Assessment"));
+    assert!(value.contains("## Evidence Pack: High Attention"));
     let repo = std::fs::read_to_string(item_dir.join("context/repo.md")).unwrap();
     assert!(repo.contains("src/button.rs"));
     let validation = std::fs::read_to_string(item_dir.join("context/validation.md")).unwrap();
@@ -127,9 +131,14 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
             issue_number: issue.number,
             title: issue.title,
             score: 88,
-            value_score: 88,
-            opportunity_type: "balanced".to_string(),
-            why_it_is_worth_doing: "High value evidence".to_string(),
+            final_rank_score: 88,
+            attention_score: 80,
+            execution_score: 70,
+            profile_fit_score: 40,
+            risk_penalty: 5,
+            recommendation_category: "agent_ready_high_value".to_string(),
+            risk_tags: Vec::new(),
+            why_it_is_worth_doing: "High attention evidence".to_string(),
             biggest_risk: "none".to_string(),
             missing_evidence: Vec::new(),
             handoff_json_path: written.handoff_json_path,

@@ -8,7 +8,7 @@ use std::time::{Duration as StdDuration, Instant};
 use chrono::{Duration, Utc};
 use patchbay_cli::config::Config;
 use patchbay_cli::paths::PatchbayPaths;
-use patchbay_cli::value_scoring::{OpportunityType, Recommendation};
+use patchbay_cli::value_scoring::{RecommendationCategory, RiskTag, ScoreBand};
 use patchbay_cli::value_signals::ValueSignalKind;
 use patchbay_cli::workflow;
 use tempfile::tempdir;
@@ -36,14 +36,11 @@ async fn scout_reorders_candidates_after_value_enrichment() {
 
     assert_eq!(ranked.len(), 3);
     assert_eq!(ranked[0].issue.repo_full_name, "owner/growth");
-    assert_eq!(
-        ranked[0].value_assessment.opportunity_type,
-        OpportunityType::GrowthProject
+    assert_eq!(ranked[0].value_assessment.attention_band, ScoreBand::High);
+    assert_ne!(
+        ranked[0].value_assessment.recommendation_category,
+        RecommendationCategory::NeedsTriage
     );
-    assert!(matches!(
-        ranked[0].value_assessment.recommendation,
-        Recommendation::StrongCandidate | Recommendation::Candidate
-    ));
     assert!(ranked[0]
         .value_assessment
         .signals
@@ -57,20 +54,14 @@ async fn scout_reorders_candidates_after_value_enrichment() {
     assert!(ranked[0].score > noisy.score);
     assert!(noisy
         .value_assessment
-        .signals
-        .iter()
-        .any(|signal| signal.kind == ValueSignalKind::StalenessRisk));
-    assert!(noisy
-        .value_assessment
-        .signals
-        .iter()
-        .any(|signal| signal.kind == ValueSignalKind::NoiseRisk));
+        .risk_tags
+        .contains(&RiskTag::HighTriageLoad));
 
     let low_gate = ranked
         .iter()
         .find(|issue| issue.issue.repo_full_name == "owner/impact")
         .expect("impact candidate should be present");
-    assert!(low_gate.value_assessment.execution_gate_score < 40);
+    assert!(low_gate.value_assessment.execution_score < 40);
 }
 
 struct EnvGuard;

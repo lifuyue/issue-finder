@@ -3,6 +3,7 @@ use chrono::{Local, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::paths::{atomic_write, PatchbayPaths};
+use crate::value_scoring::RecommendationCategory;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DailyReport {
@@ -19,8 +20,13 @@ pub struct PreparedReportItem {
     pub issue_number: u64,
     pub title: String,
     pub score: i32,
-    pub value_score: i32,
-    pub opportunity_type: String,
+    pub final_rank_score: i32,
+    pub attention_score: i32,
+    pub execution_score: i32,
+    pub profile_fit_score: i32,
+    pub risk_penalty: i32,
+    pub recommendation_category: String,
+    pub risk_tags: Vec<String>,
     pub why_it_is_worth_doing: String,
     pub biggest_risk: String,
     pub missing_evidence: Vec<String>,
@@ -59,15 +65,14 @@ impl DailyReport {
         if self.prepared.is_empty() {
             lines.push("- No prepared tasks today".to_string());
         } else {
-            for item in self.prepared.iter().take(3) {
-                lines.push(format!(
-                    "- {}#{} | value {} | {} | {}",
-                    item.repo_full_name,
-                    item.issue_number,
-                    item.value_score,
-                    item.opportunity_type,
-                    item.why_it_is_worth_doing
-                ));
+            for category in [
+                RecommendationCategory::AgentReadyHighValue,
+                RecommendationCategory::HighAttention,
+                RecommendationCategory::HighAttentionLowDepth,
+                RecommendationCategory::NicheButActionable,
+                RecommendationCategory::NeedsTriage,
+            ] {
+                push_category_group(&mut lines, category, &self.prepared);
             }
         }
 
@@ -81,12 +86,21 @@ impl DailyReport {
         } else {
             for item in &self.prepared {
                 lines.push(format!(
-                    "- [{}] {}#{} | value {} | type {} | risk: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {}",
+                    "- [{}] {}#{} | rank {} | attention {} | execution {} | fit {} | risk {} | category {} | tags: {} | risk detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {}",
                     item.id,
                     item.repo_full_name,
                     item.issue_number,
-                    item.value_score,
-                    item.opportunity_type,
+                    item.final_rank_score,
+                    item.attention_score,
+                    item.execution_score,
+                    item.profile_fit_score,
+                    item.risk_penalty,
+                    item.recommendation_category,
+                    if item.risk_tags.is_empty() {
+                        "none".to_string()
+                    } else {
+                        item.risk_tags.join(", ")
+                    },
                     item.biggest_risk,
                     if item.missing_evidence.is_empty() {
                         "none".to_string()
@@ -118,6 +132,46 @@ impl DailyReport {
 
         lines.push(String::new());
         lines.join("\n")
+    }
+}
+
+fn push_category_group(
+    lines: &mut Vec<String>,
+    category: RecommendationCategory,
+    prepared: &[PreparedReportItem],
+) {
+    lines.push(format!("### {}", category_heading(category)));
+    lines.push(String::new());
+    let mut matched = prepared
+        .iter()
+        .filter(|item| item.recommendation_category == category.to_string())
+        .peekable();
+    if matched.peek().is_none() {
+        lines.push("- None".to_string());
+    } else {
+        for item in matched {
+            lines.push(format!(
+                "- {}#{} | rank {} | attention {} | execution {} | risk {} | {}",
+                item.repo_full_name,
+                item.issue_number,
+                item.final_rank_score,
+                item.attention_score,
+                item.execution_score,
+                item.risk_penalty,
+                item.why_it_is_worth_doing
+            ));
+        }
+    }
+    lines.push(String::new());
+}
+
+fn category_heading(category: RecommendationCategory) -> &'static str {
+    match category {
+        RecommendationCategory::AgentReadyHighValue => "Agent-Ready High Value Tasks",
+        RecommendationCategory::HighAttention => "High Attention Tasks",
+        RecommendationCategory::HighAttentionLowDepth => "High Attention, Low Depth",
+        RecommendationCategory::NicheButActionable => "Niche but Actionable",
+        RecommendationCategory::NeedsTriage => "Needs Triage",
     }
 }
 
@@ -154,8 +208,13 @@ mod tests {
                 issue_number: 1,
                 title: "Issue".to_string(),
                 score: 90,
-                value_score: 90,
-                opportunity_type: "balanced".to_string(),
+                final_rank_score: 90,
+                attention_score: 80,
+                execution_score: 85,
+                profile_fit_score: 50,
+                risk_penalty: 5,
+                recommendation_category: "agent_ready_high_value".to_string(),
+                risk_tags: Vec::new(),
                 why_it_is_worth_doing: "High value evidence".to_string(),
                 biggest_risk: "none".to_string(),
                 missing_evidence: Vec::new(),
@@ -168,6 +227,6 @@ mod tests {
 
         let markdown = report.render_markdown();
         assert!(markdown.contains("Prepared handoff count: 1"));
-        assert!(markdown.contains("Recommended Tasks"));
+        assert!(markdown.contains("Agent-Ready High Value Tasks"));
     }
 }

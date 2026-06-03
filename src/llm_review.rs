@@ -82,11 +82,11 @@ pub async fn review_handoff(
         return LlmReview::disabled();
     }
 
-    let before_score = assessment.value_score;
-    let before_recommendation = assessment.recommendation.clone();
+    let before_score = assessment.final_rank_score;
+    let before_category = assessment.recommendation_category;
     let result = request_review(config, issue, assessment, evidence_pack).await;
-    debug_assert_eq!(before_score, assessment.value_score);
-    debug_assert_eq!(before_recommendation, assessment.recommendation);
+    debug_assert_eq!(before_score, assessment.final_rank_score);
+    debug_assert_eq!(before_category, assessment.recommendation_category);
 
     match result {
         Ok(text) if !text.trim().is_empty() => LlmReview {
@@ -125,12 +125,15 @@ async fn request_review(
         .timeout(LLM_REVIEW_TIMEOUT)
         .build()?;
     let prompt = format!(
-        "Review this Patchbay evidence package for display only. Do not change scores or recommendations.\nRepo issue: {}#{}\nTitle: {}\nValue score: {}\nRecommendation: {}\nSource refs: {}\nEvidence JSON: {}",
+        "Review this Patchbay evidence package for display only. Do not change scores or recommendation categories.\nRepo issue: {}#{}\nTitle: {}\nFinal rank score: {}\nCategory: {}\nAttention score: {}\nExecution score: {}\nRisk penalty: {}\nSource refs: {}\nEvidence JSON: {}",
         issue.repo_full_name,
         issue.number,
         issue.title,
-        assessment.value_score,
-        assessment.recommendation,
+        assessment.final_rank_score,
+        assessment.recommendation_category,
+        assessment.attention_score,
+        assessment.execution_score,
+        assessment.risk_penalty,
         evidence_pack.source_refs.join(", "),
         serde_json::to_string(evidence_pack)?
     );
@@ -173,9 +176,7 @@ mod tests {
     use crate::evidence_pack::EvidencePack;
     use crate::github::GitHubIssue;
     use crate::llm_review::review_handoff;
-    use crate::value_scoring::{
-        GrowthConfidence, OpportunityType, Recommendation, ValueAssessment,
-    };
+    use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
 
     #[tokio::test]
     async fn llm_review_cannot_affect_score_or_recommendation_when_disabled() {
@@ -194,18 +195,21 @@ mod tests {
             updated_at: String::new(),
         };
         let assessment = ValueAssessment {
-            value_score: 80,
-            execution_gate_score: 70,
-            recommendation: Recommendation::StrongCandidate,
-            opportunity_type: OpportunityType::Balanced,
-            growth_confidence: GrowthConfidence::Medium,
+            final_rank_score: 80,
+            attention_score: 90,
+            execution_score: 70,
+            profile_fit_score: 50,
+            risk_penalty: 10,
+            recommendation_category: RecommendationCategory::AgentReadyHighValue,
+            attention_band: ScoreBand::High,
+            execution_band: ScoreBand::High,
             signals: Vec::new(),
-            risks: Vec::new(),
+            risk_tags: Vec::new(),
             missing_evidence: Vec::new(),
             explanation: Vec::new(),
         };
-        let before_score = assessment.value_score;
-        let before_recommendation = assessment.recommendation.clone();
+        let before_score = assessment.final_rank_score;
+        let before_category = assessment.recommendation_category;
         let review = review_handoff(
             &Config::default(),
             &issue,
@@ -214,7 +218,7 @@ mod tests {
         )
         .await;
         assert_eq!(review.status, "disabled");
-        assert_eq!(assessment.value_score, before_score);
-        assert_eq!(assessment.recommendation, before_recommendation);
+        assert_eq!(assessment.final_rank_score, before_score);
+        assert_eq!(assessment.recommendation_category, before_category);
     }
 }

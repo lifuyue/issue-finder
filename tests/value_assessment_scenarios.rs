@@ -3,65 +3,64 @@ use patchbay_cli::config::ProfileConfig;
 use patchbay_cli::github::GitHubIssue;
 use patchbay_cli::github_enrichment::{EnrichedIssue, TimestampedSample};
 use patchbay_cli::value_scoring::{
-    aggregate_signals, assess_issue, GrowthConfidence, OpportunityType, Recommendation,
+    aggregate_signals, assess_issue, RecommendationCategory, RiskTag, ScoreBand,
 };
-use patchbay_cli::value_signals::{ValueSignal, ValueSignalKind};
+use patchbay_cli::value_signals::{SignalAxis, ValueSignal, ValueSignalKind};
 
 #[test]
-fn classifies_established_project_from_visible_impact() {
+fn high_attention_and_high_execution_classifies_agent_ready() {
     let enriched = fixture()
         .stars(2_500)
         .forks(220)
-        .recent_repo_activity()
+        .recent_stargazers(20)
+        .recent_forks(12)
+        .maintainer_response()
         .good_first_actionable_issue()
         .build();
 
     let assessment = assess_issue(&enriched, &matching_profile());
 
+    assert_eq!(assessment.attention_band, ScoreBand::High);
+    assert_eq!(assessment.execution_band, ScoreBand::High);
     assert_eq!(
-        assessment.opportunity_type,
-        OpportunityType::EstablishedProject
+        assessment.recommendation_category,
+        RecommendationCategory::AgentReadyHighValue
     );
-    assert!(is_at_least_candidate(&assessment.recommendation));
     assert_has_signal(&assessment.signals, ValueSignalKind::EstablishedImpact);
-}
-
-#[test]
-fn classifies_growth_project_from_recent_attention_sample() {
-    let enriched = fixture()
-        .stars(80)
-        .recent_repo_activity()
-        .good_first_actionable_issue()
-        .recent_stargazers(16)
-        .build();
-
-    let assessment = assess_issue(&enriched, &non_matching_profile());
-
-    assert_eq!(assessment.opportunity_type, OpportunityType::GrowthProject);
     assert_has_signal(&assessment.signals, ValueSignalKind::GrowthMomentum);
-    assert_ne!(assessment.growth_confidence, GrowthConfidence::Low);
+    assert_has_signal(&assessment.signals, ValueSignalKind::ReproductionSteps);
 }
 
 #[test]
-fn classifies_balanced_project_when_impact_and_growth_are_strong() {
+fn high_attention_low_depth_keeps_visibility_but_marks_risks() {
     let enriched = fixture()
         .stars(2_500)
         .forks(220)
-        .recent_repo_activity()
-        .good_first_actionable_issue()
-        .recent_stargazers(16)
+        .recent_stargazers(20)
+        .body(
+            "No Code Required. This contribution can be done from your browser in under 60 seconds. Add Grammar Point content.",
+        )
+        .title("Add new Grammar Point")
+        .labels(["good first issue", "hacktoberfest"])
         .build();
 
     let assessment = assess_issue(&enriched, &matching_profile());
 
-    assert_eq!(assessment.opportunity_type, OpportunityType::Balanced);
-    assert_has_signal(&assessment.signals, ValueSignalKind::EstablishedImpact);
-    assert_has_signal(&assessment.signals, ValueSignalKind::GrowthMomentum);
+    assert_eq!(assessment.attention_band, ScoreBand::High);
+    assert_eq!(
+        assessment.recommendation_category,
+        RecommendationCategory::HighAttentionLowDepth
+    );
+    assert!(assessment.risk_tags.contains(&RiskTag::NoCodeRequired));
+    assert!(assessment.risk_tags.contains(&RiskTag::MicroContribution));
+    assert!(assessment.risk_tags.contains(&RiskTag::ContentFill));
 }
 
 #[test]
-fn classifies_niche_but_actionable_when_fit_and_gate_are_strong() {
+fn low_attention_but_clear_issue_is_niche_but_actionable() {
     let enriched = fixture()
+        .stars(0)
+        .forks(0)
         .recent_repo_activity()
         .good_first_actionable_issue()
         .topics(["rust", "cli", "parser"])
@@ -69,142 +68,88 @@ fn classifies_niche_but_actionable_when_fit_and_gate_are_strong() {
 
     let assessment = assess_issue(&enriched, &matching_profile());
 
+    assert_ne!(assessment.attention_band, ScoreBand::High);
+    assert_eq!(assessment.execution_band, ScoreBand::High);
     assert_eq!(
-        assessment.opportunity_type,
-        OpportunityType::NicheButActionable
-    );
-    assert!(assessment.execution_gate_score >= 60);
-    assert!(is_at_least_candidate(&assessment.recommendation));
-}
-
-#[test]
-fn classifies_low_signal_when_value_evidence_is_missing() {
-    let enriched = fixture().stale_issue().stale_repo().vague_issue().build();
-
-    let assessment = assess_issue(&enriched, &non_matching_profile());
-
-    assert_eq!(assessment.opportunity_type, OpportunityType::LowSignal);
-    assert!(matches!(
-        assessment.recommendation,
-        Recommendation::WeakCandidate | Recommendation::Avoid
-    ));
-    assert!(assessment
-        .missing_evidence
-        .iter()
-        .any(|item| item.contains("stargazer sample")));
-    assert!(assessment
-        .missing_evidence
-        .iter()
-        .any(|item| item.contains("fork sample")));
-}
-
-#[test]
-fn avoids_high_impact_issue_when_execution_gate_is_low() {
-    let enriched = fixture()
-        .stars(12_000)
-        .forks(1_100)
-        .recent_repo_activity()
-        .vague_issue()
-        .build();
-
-    let assessment = assess_issue(&enriched, &non_matching_profile());
-
-    assert!(assessment.execution_gate_score < 40);
-    assert!(matches!(
-        assessment.recommendation,
-        Recommendation::Avoid | Recommendation::WeakCandidate
-    ));
-    assert_eq!(
-        assessment.opportunity_type,
-        OpportunityType::EstablishedProject
+        assessment.recommendation_category,
+        RecommendationCategory::NicheButActionable
     );
 }
 
 #[test]
-fn exposes_staleness_and_noise_risks() {
+fn high_attention_with_template_noise_needs_triage() {
     let enriched = fixture()
-        .stars(2_500)
-        .good_first_actionable_issue()
-        .stale_issue()
-        .stale_repo()
+        .stars(150)
+        .forks(500)
+        .recent_stargazers(50)
+        .recent_forks(50)
         .comments_count(60)
         .open_issues(1_200)
+        .body(
+            "Create the new test file ProfileOptimizerModal.mock-integrations.test.tsx. Variation 9 for GSSoC. Complete coverage for asynchronous service layer mocking.",
+        )
+        .title("test(ProfileOptimizerModal-mock-integrations): verify Variation 9")
+        .labels(["good first issue", "GSSoC 2026", "tests"])
         .build();
 
     let assessment = assess_issue(&enriched, &matching_profile());
 
-    assert_has_signal(&assessment.signals, ValueSignalKind::StalenessRisk);
-    assert_has_signal(&assessment.signals, ValueSignalKind::NoiseRisk);
-    assert!(assessment
-        .risks
-        .iter()
-        .any(|risk| risk.contains("not recent")));
-    assert!(assessment
-        .risks
-        .iter()
-        .any(|risk| risk.contains("extra triage")));
+    assert_eq!(assessment.attention_band, ScoreBand::High);
+    assert_eq!(
+        assessment.recommendation_category,
+        RecommendationCategory::NeedsTriage
+    );
+    assert!(assessment.risk_tags.contains(&RiskTag::TemplateLike));
+    assert!(assessment.risk_tags.contains(&RiskTag::EventNoise));
+    assert!(assessment.risk_tags.contains(&RiskTag::HighTriageLoad));
 }
 
 #[test]
-fn profile_fit_improves_score_and_explanation() {
+fn profile_fit_is_token_aware_for_short_aliases() {
     let enriched = fixture()
-        .recent_repo_activity()
-        .good_first_actionable_issue()
-        .topics(["rust", "cli", "parser"])
+        .body("This issue mentions strings and status words but does not reference the configured technologies.")
+        .title("Update user settings")
+        .repo_description("General utility")
+        .topics([])
         .build();
 
-    let matching = assess_issue(&enriched, &matching_profile());
-    let non_matching = assess_issue(&enriched, &non_matching_profile());
+    let matching = assess_issue(
+        &enriched,
+        &ProfileConfig {
+            tech_stack: vec!["Rust".to_string(), "TypeScript".to_string()],
+            keywords: Vec::new(),
+        },
+    );
 
-    assert_has_signal(&matching.signals, ValueSignalKind::IssueFit);
-    assert!(!non_matching
-        .signals
-        .iter()
-        .any(|signal| signal.kind == ValueSignalKind::IssueFit));
-    assert!(matching.value_score > non_matching.value_score);
-    assert!(matching
-        .explanation
-        .iter()
-        .any(|item| item.contains("Matched profile terms")));
+    assert_eq!(matching.profile_fit_score, 0);
 }
 
 #[test]
-fn covers_recommendation_threshold_behaviors() {
-    let strong = aggregate_signals(
+fn aggregate_signals_applies_axis_scores_and_formula() {
+    let assessment = aggregate_signals(
         vec![
-            signal(ValueSignalKind::EstablishedImpact, 24),
-            signal(ValueSignalKind::GrowthMomentum, 22),
-            signal(ValueSignalKind::ExecutionReadiness, 16),
-            signal(ValueSignalKind::IssueClarity, 14),
+            signal(
+                ValueSignalKind::EstablishedImpact,
+                SignalAxis::Attention,
+                35,
+            ),
+            signal(ValueSignalKind::GrowthMomentum, SignalAxis::Attention, 35),
+            signal(ValueSignalKind::IssueClarity, SignalAxis::Execution, 25),
+            signal(
+                ValueSignalKind::ReproductionSteps,
+                SignalAxis::Execution,
+                25,
+            ),
+            signal(ValueSignalKind::IssueFit, SignalAxis::ProfileFit, 50),
         ],
+        vec![],
         &fixture().build(),
     );
-    assert_eq!(strong.recommendation, Recommendation::StrongCandidate);
 
-    let candidate = aggregate_signals(
-        vec![
-            signal(ValueSignalKind::EstablishedImpact, 24),
-            signal(ValueSignalKind::IssueFit, 15),
-            signal(ValueSignalKind::ExecutionReadiness, 10),
-        ],
-        &fixture().build(),
-    );
-    assert_eq!(candidate.recommendation, Recommendation::Candidate);
-
-    let weak = aggregate_signals(
-        vec![
-            signal(ValueSignalKind::EstablishedImpact, 24),
-            signal(ValueSignalKind::IssueClarity, 10),
-        ],
-        &fixture().build(),
-    );
-    assert_eq!(weak.recommendation, Recommendation::WeakCandidate);
-
-    let avoid = aggregate_signals(
-        vec![signal(ValueSignalKind::EstablishedImpact, 24)],
-        &fixture().build(),
-    );
-    assert_eq!(avoid.recommendation, Recommendation::Avoid);
+    assert_eq!(assessment.attention_score, 70);
+    assert_eq!(assessment.execution_score, 50);
+    assert_eq!(assessment.profile_fit_score, 50);
+    assert!(assessment.final_rank_score > 50);
 }
 
 fn fixture() -> EnrichedIssueFixture {
@@ -227,6 +172,7 @@ struct EnrichedIssueFixture {
     comments_count: u64,
     recent_stargazers: usize,
     recent_forks: usize,
+    maintainer_response: bool,
 }
 
 impl Default for EnrichedIssueFixture {
@@ -246,11 +192,32 @@ impl Default for EnrichedIssueFixture {
             comments_count: 1,
             recent_stargazers: 0,
             recent_forks: 0,
+            maintainer_response: false,
         }
     }
 }
 
 impl EnrichedIssueFixture {
+    fn title(mut self, value: &str) -> Self {
+        self.title = value.to_string();
+        self
+    }
+
+    fn body(mut self, value: &str) -> Self {
+        self.body = value.to_string();
+        self
+    }
+
+    fn repo_description(mut self, value: &str) -> Self {
+        self.repo_description = value.to_string();
+        self
+    }
+
+    fn labels<const N: usize>(mut self, values: [&str; N]) -> Self {
+        self.labels = values.into_iter().map(ToOwned::to_owned).collect();
+        self
+    }
+
     fn stars(mut self, value: u64) -> Self {
         self.repo_stars = value;
         self
@@ -281,16 +248,6 @@ impl EnrichedIssueFixture {
         self
     }
 
-    fn stale_repo(mut self) -> Self {
-        self.repo_pushed_at = Some(stale_timestamp());
-        self
-    }
-
-    fn stale_issue(mut self) -> Self {
-        self.issue_updated_at = stale_timestamp();
-        self
-    }
-
     fn good_first_actionable_issue(mut self) -> Self {
         self.title = "Fix Rust CLI parser regression".to_string();
         self.body = actionable_body();
@@ -298,16 +255,18 @@ impl EnrichedIssueFixture {
         self
     }
 
-    fn vague_issue(mut self) -> Self {
-        self.title = "Needs investigation".to_string();
-        self.body = "Something is wrong.".to_string();
-        self.labels = Vec::new();
-        self.topics = Vec::new();
+    fn recent_stargazers(mut self, count: usize) -> Self {
+        self.recent_stargazers = count;
         self
     }
 
-    fn recent_stargazers(mut self, count: usize) -> Self {
-        self.recent_stargazers = count;
+    fn recent_forks(mut self, count: usize) -> Self {
+        self.recent_forks = count;
+        self
+    }
+
+    fn maintainer_response(mut self) -> Self {
+        self.maintainer_response = true;
         self
     }
 
@@ -340,7 +299,7 @@ impl EnrichedIssueFixture {
             .as_deref()
             .map(is_recent_timestamp)
             .unwrap_or(false);
-        enriched.activity.maintainer_recent_response = false;
+        enriched.activity.maintainer_recent_response = self.maintainer_response;
         enriched.growth.recent_stargazer_sample =
             timestamp_samples("repo:stargazers.sample_recent_100", self.recent_stargazers);
         enriched.growth.newest_fork_sample =
@@ -356,23 +315,12 @@ fn matching_profile() -> ProfileConfig {
     }
 }
 
-fn non_matching_profile() -> ProfileConfig {
-    ProfileConfig {
-        tech_stack: vec!["Python".to_string()],
-        keywords: vec!["database".to_string()],
-    }
-}
-
 fn actionable_body() -> String {
-    "The parser currently panics when a subcommand contains repeated flags. Expected behavior is a graceful error in src/main.rs, actual behavior is a panic with a short stack trace. Steps to reproduce are included and the fix should be small.".to_string()
+    "Steps to reproduce: run `cargo test`. The parser currently panics when a subcommand contains repeated flags. Expected behavior is a graceful error in src/main.rs, actual behavior is a panic with a short stack trace. Suggested fix: guard empty input and verify with tests.".to_string()
 }
 
 fn recent_timestamp() -> String {
     Utc::now().to_rfc3339()
-}
-
-fn stale_timestamp() -> String {
-    (Utc::now() - Duration::days(90)).to_rfc3339()
 }
 
 fn is_recent_timestamp(value: &str) -> bool {
@@ -391,11 +339,11 @@ fn timestamp_samples(prefix: &str, count: usize) -> Vec<TimestampedSample> {
         .collect()
 }
 
-fn signal(kind: ValueSignalKind, delta: i32) -> ValueSignal {
+fn signal(kind: ValueSignalKind, axis: SignalAxis, delta: i32) -> ValueSignal {
     ValueSignal {
         kind,
+        axis,
         score_delta: delta,
-        confidence: patchbay_cli::value_signals::SignalConfidence::High,
         summary: "summary".to_string(),
         evidence_refs: vec!["issue:body".to_string()],
     }
@@ -406,11 +354,4 @@ fn assert_has_signal(signals: &[ValueSignal], kind: ValueSignalKind) {
         signals.iter().any(|signal| signal.kind == kind),
         "expected signal {kind:?}, got {signals:?}"
     );
-}
-
-fn is_at_least_candidate(recommendation: &Recommendation) -> bool {
-    matches!(
-        recommendation,
-        Recommendation::StrongCandidate | Recommendation::Candidate
-    )
 }

@@ -4,7 +4,9 @@ use std::fmt;
 use crate::config::ProfileConfig;
 use crate::github::GitHubIssue;
 use crate::github_enrichment::EnrichedIssue;
-use crate::value_signals::{build_value_signals, SignalConfidence, ValueSignal, ValueSignalKind};
+use crate::value_signals::{
+    build_risk_tags, build_value_signals, risk_penalty, SignalAxis, ValueSignal,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RankedValueIssue {
@@ -17,188 +19,206 @@ pub struct RankedValueIssue {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ValueAssessment {
-    pub value_score: i32,
-    pub execution_gate_score: i32,
-    pub recommendation: Recommendation,
-    pub opportunity_type: OpportunityType,
-    pub growth_confidence: GrowthConfidence,
+    pub final_rank_score: i32,
+    pub attention_score: i32,
+    pub execution_score: i32,
+    pub profile_fit_score: i32,
+    pub risk_penalty: i32,
+    pub recommendation_category: RecommendationCategory,
+    pub attention_band: ScoreBand,
+    pub execution_band: ScoreBand,
     pub signals: Vec<ValueSignal>,
-    pub risks: Vec<String>,
+    pub risk_tags: Vec<RiskTag>,
     pub missing_evidence: Vec<String>,
     pub explanation: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Recommendation {
-    StrongCandidate,
-    Candidate,
-    WeakCandidate,
-    Avoid,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum OpportunityType {
-    EstablishedProject,
-    GrowthProject,
-    Balanced,
+pub enum RecommendationCategory {
+    AgentReadyHighValue,
+    HighAttention,
+    HighAttentionLowDepth,
     NicheButActionable,
-    LowSignal,
+    NeedsTriage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
-pub enum GrowthConfidence {
-    High,
-    Medium,
+pub enum ScoreBand {
     Low,
+    Medium,
+    High,
 }
 
-impl fmt::Display for Recommendation {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::StrongCandidate => "strong_candidate",
-            Self::Candidate => "candidate",
-            Self::WeakCandidate => "weak_candidate",
-            Self::Avoid => "avoid",
-        })
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskTag {
+    NoCodeRequired,
+    MicroContribution,
+    ContentFill,
+    TemplateLike,
+    EventNoise,
+    ThinTask,
+    HighTriageLoad,
+    MissingMaintainerSignal,
+    WeakValidationPath,
 }
 
-impl fmt::Display for OpportunityType {
+impl fmt::Display for RecommendationCategory {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::EstablishedProject => "established_project",
-            Self::GrowthProject => "growth_project",
-            Self::Balanced => "balanced",
+            Self::AgentReadyHighValue => "agent_ready_high_value",
+            Self::HighAttention => "high_attention",
+            Self::HighAttentionLowDepth => "high_attention_low_depth",
             Self::NicheButActionable => "niche_but_actionable",
-            Self::LowSignal => "low_signal",
+            Self::NeedsTriage => "needs_triage",
         })
     }
 }
 
-impl fmt::Display for GrowthConfidence {
+impl fmt::Display for ScoreBand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::High => "high",
-            Self::Medium => "medium",
             Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        })
+    }
+}
+
+impl fmt::Display for RiskTag {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NoCodeRequired => "no_code_required",
+            Self::MicroContribution => "micro_contribution",
+            Self::ContentFill => "content_fill",
+            Self::TemplateLike => "template_like",
+            Self::EventNoise => "event_noise",
+            Self::ThinTask => "thin_task",
+            Self::HighTriageLoad => "high_triage_load",
+            Self::MissingMaintainerSignal => "missing_maintainer_signal",
+            Self::WeakValidationPath => "weak_validation_path",
         })
     }
 }
 
 pub fn assess_issue(enriched: &EnrichedIssue, profile: &ProfileConfig) -> ValueAssessment {
-    aggregate_signals(build_value_signals(enriched, profile), enriched)
+    let signals = build_value_signals(enriched, profile);
+    let risk_tags = build_risk_tags(enriched);
+    aggregate_signals(signals, risk_tags, enriched)
 }
 
-pub fn aggregate_signals(signals: Vec<ValueSignal>, enriched: &EnrichedIssue) -> ValueAssessment {
-    let value_score = signals
-        .iter()
-        .map(|signal| signal.score_delta)
-        .sum::<i32>()
-        .clamp(0, 100);
-    let execution_gate_score = execution_gate_score(&signals);
-    let growth_confidence = growth_confidence(&signals, enriched);
-    let opportunity_type = classify_opportunity_type(&signals, value_score, execution_gate_score);
-    let recommendation = recommendation(value_score, execution_gate_score);
-    let risks = risks(&signals);
+pub fn aggregate_signals(
+    signals: Vec<ValueSignal>,
+    risk_tags: Vec<RiskTag>,
+    enriched: &EnrichedIssue,
+) -> ValueAssessment {
+    let attention_score = axis_score(&signals, SignalAxis::Attention);
+    let execution_score = axis_score(&signals, SignalAxis::Execution);
+    let profile_fit_score = axis_score(&signals, SignalAxis::ProfileFit);
+    let risk_penalty = risk_penalty(&risk_tags);
+    let final_rank_score = final_rank_score(
+        attention_score,
+        execution_score,
+        profile_fit_score,
+        risk_penalty,
+    );
+    let attention_band = score_band(attention_score);
+    let execution_band = score_band(execution_score);
+    let recommendation_category =
+        recommendation_category(attention_band, execution_band, risk_penalty, &risk_tags);
     let missing_evidence = missing_evidence(enriched);
     let explanation = top_explanations(&signals);
 
     ValueAssessment {
-        value_score,
-        execution_gate_score,
-        recommendation,
-        opportunity_type,
-        growth_confidence,
+        final_rank_score,
+        attention_score,
+        execution_score,
+        profile_fit_score,
+        risk_penalty,
+        recommendation_category,
+        attention_band,
+        execution_band,
         signals,
-        risks,
+        risk_tags,
         missing_evidence,
         explanation,
     }
 }
 
-pub fn execution_gate_score(signals: &[ValueSignal]) -> i32 {
-    let mut score = 20;
-    for signal in signals {
-        match signal.kind {
-            ValueSignalKind::ExecutionReadiness => score += signal.score_delta * 2,
-            ValueSignalKind::IssueClarity => score += signal.score_delta,
-            ValueSignalKind::IssueFit => score += signal.score_delta,
-            ValueSignalKind::MaintainerAttention => score += 6,
-            ValueSignalKind::StalenessRisk | ValueSignalKind::NoiseRisk => {
-                score += signal.score_delta
-            }
-            _ => {}
-        }
-    }
-    score.clamp(0, 100)
+pub fn final_rank_score(
+    attention_score: i32,
+    execution_score: i32,
+    profile_fit_score: i32,
+    risk_penalty: i32,
+) -> i32 {
+    ((attention_score as f64 * 0.55)
+        + (execution_score as f64 * 0.30)
+        + (profile_fit_score as f64 * 0.10)
+        - (risk_penalty as f64 * 0.15))
+        .round()
+        .clamp(0.0, 100.0) as i32
 }
 
-pub fn classify_opportunity_type(
-    signals: &[ValueSignal],
-    value_score: i32,
-    execution_gate_score: i32,
-) -> OpportunityType {
-    let established = signal_delta(signals, ValueSignalKind::EstablishedImpact);
-    let growth = signal_delta(signals, ValueSignalKind::GrowthMomentum);
-    if established >= 18 && growth >= 14 {
-        OpportunityType::Balanced
-    } else if established >= 18 {
-        OpportunityType::EstablishedProject
-    } else if growth >= 14 {
-        OpportunityType::GrowthProject
-    } else if execution_gate_score >= 60 && value_score >= 35 {
-        OpportunityType::NicheButActionable
+pub fn score_band(score: i32) -> ScoreBand {
+    if score >= 70 {
+        ScoreBand::High
+    } else if score >= 30 {
+        ScoreBand::Medium
     } else {
-        OpportunityType::LowSignal
+        ScoreBand::Low
     }
 }
 
-fn recommendation(value_score: i32, execution_gate_score: i32) -> Recommendation {
-    if execution_gate_score < 30 || value_score < 20 {
-        Recommendation::Avoid
-    } else if value_score >= 75 && execution_gate_score >= 60 {
-        Recommendation::StrongCandidate
-    } else if value_score >= 45 && execution_gate_score >= 40 {
-        Recommendation::Candidate
-    } else {
-        Recommendation::WeakCandidate
+pub fn recommendation_category(
+    attention_band: ScoreBand,
+    execution_band: ScoreBand,
+    risk_penalty: i32,
+    risk_tags: &[RiskTag],
+) -> RecommendationCategory {
+    if attention_band == ScoreBand::High && has_low_depth_tag(risk_tags) {
+        return RecommendationCategory::HighAttentionLowDepth;
     }
+    if attention_band == ScoreBand::High && risk_penalty >= 45 {
+        return RecommendationCategory::NeedsTriage;
+    }
+    if attention_band == ScoreBand::High && execution_band == ScoreBand::High && risk_penalty < 30 {
+        return RecommendationCategory::AgentReadyHighValue;
+    }
+    if attention_band == ScoreBand::High {
+        return RecommendationCategory::HighAttention;
+    }
+    if execution_band == ScoreBand::High {
+        return RecommendationCategory::NicheButActionable;
+    }
+    RecommendationCategory::NeedsTriage
 }
 
-fn growth_confidence(signals: &[ValueSignal], enriched: &EnrichedIssue) -> GrowthConfidence {
-    let has_growth = signals
-        .iter()
-        .find(|signal| signal.kind == ValueSignalKind::GrowthMomentum);
-    match has_growth.map(|signal| &signal.confidence) {
-        Some(SignalConfidence::High) => GrowthConfidence::High,
-        Some(SignalConfidence::Medium) => GrowthConfidence::Medium,
-        _ if enriched.growth.recent_stargazer_sample.is_empty() => GrowthConfidence::Low,
-        _ => GrowthConfidence::Low,
-    }
+pub fn is_daily_prepare_candidate(assessment: &ValueAssessment) -> bool {
+    !(assessment.recommendation_category == RecommendationCategory::NeedsTriage
+        && assessment.attention_score < 60)
 }
 
-fn signal_delta(signals: &[ValueSignal], kind: ValueSignalKind) -> i32 {
+fn axis_score(signals: &[ValueSignal], axis: SignalAxis) -> i32 {
     signals
         .iter()
-        .filter(|signal| signal.kind == kind)
+        .filter(|signal| signal.axis == axis)
         .map(|signal| signal.score_delta)
-        .sum()
+        .sum::<i32>()
+        .clamp(0, 100)
 }
 
-fn risks(signals: &[ValueSignal]) -> Vec<String> {
-    signals
-        .iter()
-        .filter(|signal| {
-            matches!(
-                signal.kind,
-                ValueSignalKind::StalenessRisk | ValueSignalKind::NoiseRisk
-            )
-        })
-        .map(|signal| signal.summary.clone())
-        .collect()
+fn has_low_depth_tag(risk_tags: &[RiskTag]) -> bool {
+    risk_tags.iter().any(|tag| {
+        matches!(
+            tag,
+            RiskTag::NoCodeRequired
+                | RiskTag::MicroContribution
+                | RiskTag::ContentFill
+                | RiskTag::ThinTask
+        )
+    })
 }
 
 fn missing_evidence(enriched: &EnrichedIssue) -> Vec<String> {
@@ -225,7 +245,7 @@ fn top_explanations(signals: &[ValueSignal]) -> Vec<String> {
     ordered
         .into_iter()
         .filter(|signal| signal.score_delta > 0)
-        .take(4)
+        .take(5)
         .map(|signal| signal.summary)
         .collect()
 }
@@ -233,18 +253,18 @@ fn top_explanations(signals: &[ValueSignal]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        aggregate_signals, classify_opportunity_type, execution_gate_score, OpportunityType,
-        Recommendation,
+        aggregate_signals, final_rank_score, recommendation_category, RecommendationCategory,
+        RiskTag, ScoreBand,
     };
     use crate::github::GitHubIssue;
     use crate::github_enrichment::EnrichedIssue;
-    use crate::value_signals::{SignalConfidence, ValueSignal, ValueSignalKind};
+    use crate::value_signals::{SignalAxis, ValueSignal, ValueSignalKind};
 
-    fn signal(kind: ValueSignalKind, delta: i32) -> ValueSignal {
+    fn signal(kind: ValueSignalKind, axis: SignalAxis, delta: i32) -> ValueSignal {
         ValueSignal {
             kind,
+            axis,
             score_delta: delta,
-            confidence: SignalConfidence::High,
             summary: "summary".to_string(),
             evidence_refs: vec!["issue:body".to_string()],
         }
@@ -269,38 +289,57 @@ mod tests {
     }
 
     #[test]
-    fn classifies_balanced_opportunity() {
-        let signals = vec![
-            signal(ValueSignalKind::EstablishedImpact, 20),
-            signal(ValueSignalKind::GrowthMomentum, 18),
-        ];
+    fn applies_final_rank_formula() {
+        assert_eq!(final_rank_score(100, 100, 100, 100), 80);
+    }
+
+    #[test]
+    fn classifies_agent_ready_high_value() {
         assert_eq!(
-            classify_opportunity_type(&signals, 70, 60),
-            OpportunityType::Balanced
+            recommendation_category(ScoreBand::High, ScoreBand::High, 10, &[]),
+            RecommendationCategory::AgentReadyHighValue
         );
     }
 
     #[test]
-    fn applies_execution_gate_threshold() {
-        let signals = vec![
-            signal(ValueSignalKind::ExecutionReadiness, 5),
-            signal(ValueSignalKind::IssueClarity, 5),
-        ];
-        assert!(execution_gate_score(&signals) < 40);
+    fn low_depth_tag_overrides_high_attention() {
+        assert_eq!(
+            recommendation_category(
+                ScoreBand::High,
+                ScoreBand::Low,
+                40,
+                &[RiskTag::NoCodeRequired]
+            ),
+            RecommendationCategory::HighAttentionLowDepth
+        );
     }
 
     #[test]
-    fn aggregates_value_score_and_recommendation() {
+    fn aggregates_axis_scores_and_risk_penalty() {
         let assessment = aggregate_signals(
             vec![
-                signal(ValueSignalKind::EstablishedImpact, 24),
-                signal(ValueSignalKind::GrowthMomentum, 22),
-                signal(ValueSignalKind::ExecutionReadiness, 16),
-                signal(ValueSignalKind::IssueClarity, 14),
+                signal(
+                    ValueSignalKind::EstablishedImpact,
+                    SignalAxis::Attention,
+                    35,
+                ),
+                signal(ValueSignalKind::GrowthMomentum, SignalAxis::Attention, 35),
+                signal(ValueSignalKind::IssueClarity, SignalAxis::Execution, 25),
+                signal(
+                    ValueSignalKind::ReproductionSteps,
+                    SignalAxis::Execution,
+                    25,
+                ),
+                signal(ValueSignalKind::IssueFit, SignalAxis::ProfileFit, 50),
             ],
+            vec![],
             &enriched(),
         );
-        assert!(assessment.value_score >= 70);
-        assert_eq!(assessment.recommendation, Recommendation::StrongCandidate);
+        assert_eq!(assessment.attention_score, 70);
+        assert_eq!(assessment.execution_score, 50);
+        assert_eq!(
+            assessment.recommendation_category,
+            RecommendationCategory::HighAttention
+        );
     }
 }

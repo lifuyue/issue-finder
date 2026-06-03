@@ -1,0 +1,274 @@
+{
+  "samples": [
+    {
+      "id": "kana_dojo_grammar_microtask",
+      "issue": {
+        "repo_full_name": "lingdojo/kana-dojo",
+        "repo_name": "kana-dojo",
+        "number": 19364,
+        "title": "[Good First Issue] Add new Grammar Point 46 - Beginner-Friendly Open-source Contribution",
+        "body": "No prerequisites needed. You don't need to clone the repo, install anything, or write code. This entire contribution can be done from your browser in under 60 seconds. Add Grammar Point content.",
+        "labels": ["enhancement", "help wanted", "good first issue", "hacktoberfest", "first-timers-only"],
+        "repo_description": "TypeScript Japanese learning app",
+        "repo_stars": 2543
+      },
+      "enrichment": {
+        "forks": 2166,
+        "recent_stars": 89,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 0,
+        "open_issues": 120,
+        "topics": ["typescript", "education"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "low",
+        "category": "high_attention_low_depth",
+        "required_risk_tags": ["no_code_required", "micro_contribution", "content_fill"],
+        "forbidden_risk_tags": []
+      }
+    },
+    {
+      "id": "kana_dojo_trivia_microtask",
+      "issue": {
+        "repo_full_name": "lingdojo/kana-dojo",
+        "repo_name": "kana-dojo",
+        "number": 19362,
+        "title": "[Good First Issue] Add new Trivia Question 28 - Beginner-Friendly Open-source Contribution",
+        "body": "No Code Required. This entire contribution can be done from your browser in under 60 seconds. Add new trivia question content for learners.",
+        "labels": ["enhancement", "help wanted", "good first issue", "hacktoberfest", "first-timers-only"],
+        "repo_description": "TypeScript Japanese learning app",
+        "repo_stars": 2543
+      },
+      "enrichment": {
+        "forks": 2166,
+        "recent_stars": 89,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 0,
+        "open_issues": 120,
+        "topics": ["typescript", "education"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "low",
+        "category": "high_attention_low_depth",
+        "required_risk_tags": ["no_code_required", "micro_contribution", "content_fill"],
+        "forbidden_risk_tags": []
+      }
+    },
+    {
+      "id": "devtrack_mobile_overflow",
+      "issue": {
+        "repo_full_name": "Priyanshu-byte-coder/devtrack",
+        "repo_name": "devtrack",
+        "number": 1025,
+        "title": "fix: mobile bento grid widgets overflow on screens < 375px",
+        "body": "Bug Report. Steps to Reproduce: open the landing page and use Chrome DevTools to emulate a 320x568 screen. Expected behavior: widgets should stack vertically and remain within the viewport. Actual behavior: ChartWidget and StreakWidget overflow horizontally. File: src/components/landing/BentoGrid.tsx.",
+        "labels": ["good first issue", "gssoc26", "level:beginner", "type:bug"],
+        "repo_description": "Developer tools dashboard in TypeScript",
+        "repo_stars": 98
+      },
+      "enrichment": {
+        "forks": 296,
+        "recent_stars": 37,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 2,
+        "open_issues": 180,
+        "topics": ["typescript", "developer-tools"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "high",
+        "category": "agent_ready_high_value",
+        "required_risk_tags": [],
+        "forbidden_risk_tags": ["no_code_required", "micro_contribution"]
+      }
+    },
+    {
+      "id": "devtrack_export_button_loading",
+      "issue": {
+        "repo_full_name": "Priyanshu-byte-coder/devtrack",
+        "repo_name": "devtrack",
+        "number": 1912,
+        "title": "[BUG] ExportButton does not indicate progress for large data exports",
+        "body": "Clicking the ExportButton triggers a large data export but the button shows no loading state. Expected behaviour: Button should show a spinner and disabled state while the export is in progress. File: src/components/ExportButton.tsx. Suggested fix: set exporting state before awaiting triggerExport and clear it in finally. Verify with a component test.",
+        "labels": ["bug", "good first issue", "gssoc26", "level:beginner", "type:bug"],
+        "repo_description": "Developer tools dashboard in TypeScript",
+        "repo_stars": 98
+      },
+      "enrichment": {
+        "forks": 296,
+        "recent_stars": 37,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 2,
+        "open_issues": 180,
+        "topics": ["typescript", "developer-tools"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "high",
+        "category": "agent_ready_high_value",
+        "required_risk_tags": [],
+        "forbidden_risk_tags": ["no_code_required", "micro_contribution"]
+      }
+    },
+    {
+      "id": "devtrack_copy_profile_url",
+      "issue": {
+        "repo_full_name": "Priyanshu-byte-coder/devtrack",
+        "repo_name": "devtrack",
+        "number": 1890,
+        "title": "[FEAT] Add 'Copy public profile URL' button to dashboard settings",
+        "body": "Add a Copy public profile URL button to dashboard settings so users can share their public profile. Keep the change focused and match existing settings UI patterns.",
+        "labels": ["enhancement", "good first issue", "gssoc26", "level:beginner", "type:feature"],
+        "repo_description": "Developer tools dashboard in TypeScript",
+        "repo_stars": 98
+      },
+      "enrichment": {
+        "forks": 296,
+        "recent_stars": 37,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 2,
+        "open_issues": 180,
+        "topics": ["typescript", "developer-tools"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "medium",
+        "category": "high_attention",
+        "required_risk_tags": ["weak_validation_path"],
+        "forbidden_risk_tags": ["no_code_required"]
+      }
+    },
+    {
+      "id": "agent_playground_jsdoc",
+      "issue": {
+        "repo_full_name": "xevrion-v2/agent-playground",
+        "repo_name": "agent-playground",
+        "number": 1,
+        "title": "Add JSDoc to userService",
+        "body": "Add concise JSDoc comments to the user service functions so future contributors can understand the intended behavior. Acceptance Criteria: keep the pull request focused, include a short summary, link this issue.",
+        "labels": ["good first issue", "bounty", "AI agent friendly"],
+        "repo_description": "TypeScript AI agent playground",
+        "repo_stars": 9
+      },
+      "enrichment": {
+        "forks": 17,
+        "recent_stars": 9,
+        "recent_forks": 17,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 0,
+        "open_issues": 15,
+        "topics": ["typescript", "ai"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "medium",
+        "category": "high_attention_low_depth",
+        "required_risk_tags": ["thin_task"],
+        "forbidden_risk_tags": ["no_code_required"]
+      }
+    },
+    {
+      "id": "commitpulse_template_variation",
+      "issue": {
+        "repo_full_name": "JhaSourav07/commitpulse",
+        "repo_name": "commitpulse",
+        "number": 2691,
+        "title": "test(ProfileOptimizerModal-mock-integrations): verify Asynchronous Service Layer Mocking & Local Cache Stubs (Variation 9)",
+        "body": "Create the new test file components/dashboard/ProfileOptimizerModal.mock-integrations.test.tsx targeting Asynchronous Service Layer Mocking & Local Cache Stubs and achieve complete coverage. This GSSoC 2026 issue is Variation 9.",
+        "labels": ["good first issue", "GSSoC 2026", "ui", "tests"],
+        "repo_description": "TypeScript contributor dashboard",
+        "repo_stars": 113
+      },
+      "enrichment": {
+        "forks": 458,
+        "recent_stars": 65,
+        "recent_forks": 100,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 30,
+        "open_issues": 1200,
+        "topics": ["typescript", "tests"]
+      },
+      "expected": {
+        "attention_band": "high",
+        "execution_band": "high",
+        "category": "needs_triage",
+        "required_risk_tags": ["template_like", "event_noise", "high_triage_load"],
+        "forbidden_risk_tags": ["no_code_required"]
+      }
+    },
+    {
+      "id": "context_drift_min_confidence_docs",
+      "issue": {
+        "repo_full_name": "7shep/context-drift",
+        "repo_name": "context-drift",
+        "number": 4,
+        "title": "Document --min-confidence in the README CLI options",
+        "body": "Problem: README examples show npx context-drift check --changed src/components/user_profile_card.tsx --min-confidence 0.9, but the CLI options list documents only --base, --changed, and --format. Impact: users do not know valid range, default value, or effect. Suggested Fix: add --min-confidence <number> to README options list.",
+        "labels": ["documentation", "good first issue"],
+        "repo_description": "CLI tool for detecting context drift",
+        "repo_stars": 0
+      },
+      "enrichment": {
+        "forks": 0,
+        "recent_stars": 0,
+        "recent_forks": 0,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 0,
+        "open_issues": 4,
+        "topics": ["cli", "typescript"]
+      },
+      "expected": {
+        "attention_band": "low",
+        "execution_band": "high",
+        "category": "niche_but_actionable",
+        "required_risk_tags": [],
+        "forbidden_risk_tags": ["no_code_required", "template_like"]
+      }
+    },
+    {
+      "id": "ad_product_forge_stale_comment_audit",
+      "issue": {
+        "repo_full_name": "alternative-down/ad-product-forge",
+        "repo_name": "ad-product-forge",
+        "number": 5405,
+        "title": "[tech-debt] audit stale code comments in 293 test files (6+ confirmed)",
+        "body": "Audit stale NOTE comments in 293 test files. Confirmed findings are spread across many files and require checking whether comments are still true after refactors. This task has 6 confirmed and 2 WIP unverified occurrences.",
+        "labels": ["tech-debt", "tests", "good-first-issue"],
+        "repo_description": "TypeScript product forge",
+        "repo_stars": 0
+      },
+      "enrichment": {
+        "forks": 0,
+        "recent_stars": 0,
+        "recent_forks": 0,
+        "recent_repo_activity": true,
+        "maintainer_attention": false,
+        "comments_count": 0,
+        "open_issues": 40,
+        "topics": ["typescript", "tests"]
+      },
+      "expected": {
+        "attention_band": "low",
+        "execution_band": "medium",
+        "category": "needs_triage",
+        "required_risk_tags": ["high_triage_load"],
+        "forbidden_risk_tags": ["no_code_required"]
+      }
+    }
+  ]
+}
