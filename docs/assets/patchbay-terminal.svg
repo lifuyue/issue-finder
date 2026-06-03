@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1120 520">
+  <title id="title">Patchbay CLI terminal preview</title>
+  <desc id="desc">A terminal preview of Patchbay CLI commands and help output.</desc>
+  <defs>
+    <filter id="terminal-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#0f172a" flood-opacity="0.22"/>
+    </filter>
+    <style>
+      .shell { fill: #101827; }
+      .chrome { fill: #1e293b; }
+      .muted { fill: #91a4b7; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 21px; }
+      .text { fill: #e5edf6; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 21px; }
+      .ok { fill: #8ee6ad; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 21px; }
+      .accent { fill: #95c8ff; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 21px; }
+      .dim { fill: #7890a6; font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 18px; }
+    </style>
+  </defs>
+
+  <rect x="24" y="24" width="1072" height="472" rx="24" fill="#e9eff5"/>
+  <g filter="url(#terminal-shadow)">
+    <rect class="shell" x="64" y="56" width="992" height="408" rx="18"/>
+    <rect class="chrome" x="64" y="56" width="992" height="54" rx="18"/>
+    <path d="M64 92h992v28H64z" fill="#1e293b"/>
+    <circle cx="94" cy="83" r="8" fill="#ff6b65"/>
+    <circle cx="120" cy="83" r="8" fill="#f5b941"/>
+    <circle cx="146" cy="83" r="8" fill="#4ecb71"/>
+    <text class="dim" x="483" y="90">patchbay</text>
+
+    <text class="accent" x="92" y="154">$ patchbay --help</text>
+    <text class="text" x="92" y="194">Prepare local-first contribution handoffs for coding agents</text>
+    <text class="muted" x="92" y="244">Commands:</text>
+    <text class="ok" x="120" y="282">init</text>
+    <text class="text" x="220" y="282">Initialize Patchbay config and local state directories</text>
+    <text class="ok" x="120" y="320">scout</text>
+    <text class="text" x="220" y="320">Discover and rank good-first-issue tasks</text>
+    <text class="ok" x="120" y="358">prepare</text>
+    <text class="text" x="220" y="358">Prepare one issue and write a handoff into the inbox</text>
+    <text class="ok" x="120" y="396">daily</text>
+    <text class="text" x="220" y="396">Run scout, prepare Top N, and write today's report</text>
+    <text class="accent" x="92" y="438">$ patchbay prepare owner/repo#123</text>
+  </g>
+</svg>

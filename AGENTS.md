@@ -1,32 +1,38 @@
-# Repository Guidelines
+# 仓库协作指南
 
-## Project Structure & Module Organization
+## 项目结构与模块划分
 
-This repository is a Rust 2021 CLI crate. The binary entry point is `src/main.rs`, and reusable logic is exported from `src/lib.rs`. Command parsing lives in `src/cli.rs`; workflow orchestration is in `src/workflow.rs`; state paths, inbox, reports, GitHub access, workspace prep, scoring, scanning, config, doctor checks, and LLM support are split across matching `src/*.rs` modules. Integration tests are in `tests/`. Design notes live under `docs/specs/`. The ignored `reference/` directory is external reference material.
+本仓库是一个 Rust 2021 命令行程序包。二进制入口在 `src/main.rs`，可复用逻辑从 `src/lib.rs` 导出。命令解析位于 `src/cli.rs`；工作流编排位于 `src/workflow.rs`；状态路径、收件箱、报告、GitHub 访问、工作区准备、评分、扫描、配置、诊断检查和大模型支持分别放在职责对应的 `src/*.rs` 模块中。集成测试位于 `tests/`。设计说明位于 `docs/specs/`。被忽略的 `reference/` 目录是外部参考资料。
 
-## Build, Test, and Development Commands
+## 面向编码代理的设计方向
 
-- `cargo build`: compile the debug binary at `target/debug/patchbay`.
-- `cargo run -- doctor`: run the CLI locally with readiness checks.
-- `cargo test`: run all unit and integration tests.
-- `cargo clippy --all-targets -- -D warnings`: enforce lint cleanliness for all targets.
-- `cargo fmt --all`: format the crate before committing.
-- `cargo install --path .`: install this checkout as `patchbay`.
+本项目仍处于足够早期的阶段。当大规模重构能够简化模型、移除陈旧架构，或让工作流更容易理解时，应积极推进。不要仅为了兼容旧的本地版本、旧状态结构或旧命令行为而保留遗留逻辑。优先干净地替换过时路径，避免用最小化补丁不断堆叠新旧并存的设计。
 
-For isolated manual runs, set `PATCHBAY_HOME=/tmp/patchbay-demo` so generated state does not touch `~/.patchbay`.
+文档也是产品设计的一部分。发现过期文档时，应在同一次变更中更新它，或删除会误导后续贡献者的章节或文件。不要留下过时说明、待办式备注，或相互冲突的新旧描述让之后的贡献者和编码代理自行判断。
 
-## Coding Style & Naming Conventions
+## 构建、测试与开发命令
 
-Use `rustfmt`; keep code idiomatic and explicit. Prefer small modules aligned with existing responsibilities over broad utility files. Use `snake_case` for functions, variables, modules, and test names; `PascalCase` for structs, enums, and traits. CLI flags should use clear kebab-case names via `clap`, such as `--refresh` or `--date`. Keep comments sparse and useful, especially around safety boundaries.
+- `cargo build`：编译调试版本二进制，输出到 `target/debug/patchbay`。
+- `cargo run -- doctor`：在本地运行命令行程序并执行就绪检查。
+- `cargo test`：运行全部单元测试和集成测试。
+- `cargo clippy --all-targets -- -D warnings`：对所有目标执行代码检查，并把警告视为错误。
+- `cargo fmt --all`：提交前格式化整个程序包。
+- `cargo install --path .`：把当前 checkout 安装为 `patchbay`。
 
-## Testing Guidelines
+进行隔离的手动运行时，设置 `PATCHBAY_HOME=/tmp/patchbay-demo`，避免生成的状态写入 `~/.patchbay`。
 
-Tests use Rust’s built-in test framework with `tokio::test` for async workflows. Add integration coverage in `tests/` for user-visible workflows, local state layout, GitHub API behavior, and workspace preparation. Prefer `tempfile` and `PATCHBAY_HOME`-style isolation. Name tests by behavior, for example `scout_uses_mocked_github_search_responses`.
+## 编码风格与命名约定
 
-## Commit & Pull Request Guidelines
+使用 `rustfmt`，保持代码符合 Rust 习惯并显式清晰。优先按照既有职责拆分小模块，不要创建宽泛的工具文件。函数、变量、模块和测试名称使用 `snake_case`；结构体、枚举和 trait 使用 `PascalCase`。命令行参数应通过 `clap` 使用清晰的 kebab-case 名称，例如 `--refresh` 或 `--date`。注释保持克制且有用，尤其用于说明安全边界。
 
-Recent history uses short imperative summaries, sometimes with a conventional prefix, for example `Fix daily failure handling and workspace branch checks` or `docs: add Patchbay CLI Rust design`. Keep commits focused and mention the affected workflow when useful. Pull requests should include a concise description, tests run, linked issue if applicable, and screenshots only when generated Markdown or reports are relevant.
+## 测试指南
 
-## Security & Configuration Tips
+测试使用 Rust 内置测试框架，异步工作流使用 `tokio::test`。面向用户可见工作流、本地状态布局、GitHub 接口行为和工作区准备逻辑，应在 `tests/` 中增加集成测试覆盖。优先使用 `tempfile` 和类似 `PATCHBAY_HOME` 的隔离方式。测试名称应描述行为，例如 `scout_uses_mocked_github_search_responses`。
 
-Do not commit tokens, `.env` files, generated Patchbay state, or target workspace changes. GitHub and LLM credentials belong in environment variables or `~/.patchbay/config.toml`. Preserve the project’s conservative boundary: Patchbay may prepare local workspaces and write handoff artifacts, but it should not modify target repo source, install dependencies, commit, push, or create PRs.
+## 提交与拉取请求指南
+
+近期历史使用简短的祈使句摘要，有时带常规前缀，例如 `Fix daily failure handling and workspace branch checks` 或 `docs: add Patchbay CLI Rust design`。保持提交聚焦；有帮助时在摘要中提到受影响的工作流。拉取请求应包含简洁描述、已运行的测试、关联议题；只有当生成的 Markdown 或报告相关时才需要截图。
+
+## 安全与配置提示
+
+不要提交令牌、`.env` 文件、生成的 Patchbay 状态或目标工作区改动。GitHub 和大模型凭据应放在环境变量或 `~/.patchbay/config.toml` 中。保持项目的保守边界：Patchbay 可以准备本地工作区并写入交接产物，但不应修改目标仓库源码、安装依赖、提交、推送或创建拉取请求。
