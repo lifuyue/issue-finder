@@ -29,18 +29,17 @@ Optional:
 
 ## Installation
 
-Build the debug binary:
+Install the published crate:
 
 ```bash
-cargo build
-target/debug/issue-finder --help
+cargo install issue-finder
+issue-finder --help
 ```
 
-Install from the current checkout:
+When working from this checkout, use Cargo directly:
 
 ```bash
-cargo install --path .
-issue-finder --help
+cargo run -- --help
 ```
 
 ## GitHub Token
