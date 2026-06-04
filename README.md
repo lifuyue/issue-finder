@@ -1,7 +1,7 @@
 # Patchbay CLI
 
 <p align="center">
-  <strong>Patchbay CLI</strong> prepares local-first contribution handoffs for developers who work with coding agents.
+  <strong>Patchbay CLI</strong> is local-first handoff prep for developers using coding agents.
 </p>
 
 <p align="center">
@@ -20,23 +20,61 @@ It stops before the risky parts: Patchbay does not modify target repository sour
 
 ## Quickstart
 
-### Install from this checkout
+### Install Patchbay CLI
+
+Install the published crate with Cargo:
 
 ```bash
-cargo install --path .
+cargo install patchbay-cli
 ```
 
-Patchbay needs Rust, Git, and a GitHub token with read access:
+The crate is named `patchbay-cli`; the installed command is `patchbay`.
+
+You can also install directly from this repository:
+
+```bash
+cargo install --git https://github.com/lifuyue/patchbay-cli
+```
+
+Prefer a prebuilt binary? Run the following on macOS or Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lifuyue/patchbay-cli/main/install.sh | sh
+```
+
+Or run the following on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lifuyue/patchbay-cli/main/install.ps1 | iex"
+```
+
+You can also download the matching archive from the [latest GitHub Release](https://github.com/lifuyue/patchbay-cli/releases/latest):
+
+- macOS Apple Silicon: `patchbay-aarch64-apple-darwin.tar.gz`
+- macOS Intel: `patchbay-x86_64-apple-darwin.tar.gz`
+- Linux x86_64: `patchbay-x86_64-unknown-linux-gnu.tar.gz`
+- Windows x86_64: `patchbay-x86_64-pc-windows-msvc.zip`
+
+Each archive contains a `patchbay` executable. Put it somewhere on your `PATH`.
+
+### Configure GitHub
+
+Patchbay needs Git and a GitHub token with read access:
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
+```
+
+Then check local readiness:
+
+```bash
+patchbay doctor
 ```
 
 ### Prepare your first handoff
 
 ```bash
 patchbay init
-patchbay doctor
 patchbay scout --limit 10
 patchbay prepare owner/repo#123
 patchbay handoff <inbox-id> --print
@@ -76,4 +114,12 @@ patchbay tools call patchbay.read_context --arguments '{"handoffId":"<inbox-id>"
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
+```
+
+## Release
+
+Patchbay `0.1.0` release assets are published by pushing a `v0.1.0` tag. Use this GitHub repository About text:
+
+```text
+Local-first handoff prep for developers using coding agents.
 ```

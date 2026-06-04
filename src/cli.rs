@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "patchbay")]
-#[command(about = "Prepare local-first contribution handoffs for coding agents")]
+#[command(about = "Local-first handoff prep for developers using coding agents")]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]

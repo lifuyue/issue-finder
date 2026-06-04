@@ -2,9 +2,9 @@
 name = "patchbay-cli"
 version = "0.1.0"
 edition = "2021"
-description = "Local-first task preparation CLI for developers using coding agents"
+description = "Local-first handoff prep for developers using coding agents"
 license = "MIT"
-repository = "https://github.com/patchbay/patchbay-cli"
+repository = "https://github.com/lifuyue/patchbay-cli"
 
 [[bin]]
 name = "patchbay"
