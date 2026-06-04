@@ -19,6 +19,7 @@ pub mod readiness;
 pub mod repo_scan;
 pub mod report;
 pub mod scoring;
+pub mod tool_runtime;
 pub mod value_gates;
 pub mod value_model;
 pub mod value_scores;

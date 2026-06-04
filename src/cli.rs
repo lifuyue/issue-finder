@@ -25,6 +25,8 @@ pub enum Command {
     Daily(DailyArgs),
     /// Display local daily reports.
     Report(ReportArgs),
+    /// List and call Patchbay's JSON tool contract.
+    Tools(ToolsArgs),
     /// Check local readiness.
     Doctor,
 }
@@ -102,4 +104,33 @@ pub struct ReportArgs {
     /// Local date in YYYY-MM-DD form.
     #[arg(long)]
     pub date: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ToolsArgs {
+    #[command(subcommand)]
+    pub command: ToolsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ToolsCommand {
+    /// Print Patchbay tool specs as JSON.
+    List,
+    /// Call one Patchbay tool with a JSON object argument payload.
+    Call(ToolsCallArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ToolsCallArgs {
+    /// Tool name, for example patchbay.scout.
+    pub tool: String,
+    /// Tool arguments as a JSON object.
+    #[arg(long)]
+    pub arguments: String,
+    /// Tool call id to echo in the output envelope.
+    #[arg(long)]
+    pub call_id: Option<String>,
+    /// Optional model turn id to echo in the output envelope.
+    #[arg(long)]
+    pub turn_id: Option<String>,
 }
