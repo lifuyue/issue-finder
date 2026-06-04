@@ -101,6 +101,26 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
     assert!(validation.contains("`cargo test`"));
     let safety = std::fs::read_to_string(item_dir.join("context/safety.md")).unwrap();
     assert!(safety.contains("Patchbay does not install dependencies, commit, push, or create PRs"));
+    let probe = std::fs::read_to_string(item_dir.join("context/probe.md")).unwrap();
+    assert!(probe.contains("# Probe"));
+    let policy = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(item_dir.join("agent-policy.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(policy["kind"], "patchbay_agent_policy");
+    assert!(
+        policy["permission_profile"]["filesystem"]["protected_roots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|root| root.as_str().unwrap().ends_with("/.git"))
+    );
+    let probe_json = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(item_dir.join("probe.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(probe_json["kind"], "patchbay_probe_pack");
+    assert!(item_dir.join("prepare-events.jsonl").exists());
     let skill =
         std::fs::read_to_string(item_dir.join(".agents/skills/patchbay-cli/SKILL.md")).unwrap();
     assert!(skill.starts_with("# patchbay-cli"));
@@ -115,6 +135,7 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
     assert_eq!(index.items.len(), 1);
     assert_eq!(index.items[0].status, InboxStatus::Ready);
     assert_eq!(index.items[0].codex_md_path, written.codex_md_path);
+    assert_eq!(index.items[0].agent_policy_path, written.agent_policy_path);
     assert!(workflow::read_handoff(&paths, &written.id, true)
         .unwrap()
         .contains("\"kind\": \"patchbay_handoff\""));
@@ -144,6 +165,13 @@ fn writes_handoff_inbox_and_report_under_patchbay_home() {
             handoff_json_path: written.handoff_json_path,
             handoff_md_path: written.handoff_md_path,
             codex_md_path: written.codex_md_path,
+            agent_policy_path: written.agent_policy_path,
+            probe_json_path: written.probe_json_path,
+            prepare_events_path: written.prepare_events_path,
+            readiness_score: 80,
+            readiness_band: "high".to_string(),
+            probe_status: "not_run".to_string(),
+            probe_warnings: Vec::new(),
         }],
         failed: Vec::new(),
     };

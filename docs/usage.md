@@ -8,12 +8,13 @@ Patchbay is a local-first task preparation tool for developers who use coding ag
 Discover good first issues
   -> Rank with local heuristics
   -> Prepare repository workspace
-  -> Generate handoff.json and handoff.md
+  -> Run fixed low-risk preparation probes
+  -> Generate handoff, policy, probe, event, and context artifacts
   -> Store the task in the local inbox
   -> Generate a daily report
 ```
 
-`handoff.json` is the canonical output. `handoff.md` is the human-readable summary.
+`handoff.json` is the canonical output. `handoff.md` is the human-readable summary. `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, `codex.md`, and `context/*.md` give downstream coding agents a safer starting point. See [Agent-Safe Preparation Runtime](./agent-safe-preparation-runtime.md) for the full artifact model.
 
 ## Requirements
 
@@ -146,6 +147,23 @@ Patchbay stores local state under `~/.patchbay` by default:
       workspace.json
       handoff.json
       handoff.md
+      codex.md
+      agent-policy.json
+      probe.json
+      prepare-events.jsonl
+      context/
+        entry.md
+        safety.md
+        probe.md
+        value.md
+        issue.md
+        repo.md
+        validation.md
+      .agents/
+        skills/
+          patchbay-cli/
+            SKILL.md
+            refs.json
   reports/
     YYYY-MM-DD.md
 ```
@@ -191,10 +209,27 @@ If `llm.api_key_env` is set, Patchbay reads the LLM key from that environment va
 - Candidate files
 - Suggested validation commands
 - Warnings
+- Progressive context pack references
+- Agent policy manifest
+- Safe probe pack
+- Preparation readiness score
 - Instructions for a coding agent or human contributor
 - Optional LLM summary status
 
-`handoff.md` is a short readable summary that points back to `handoff.json`.
+`handoff.md` is a short readable summary that points back to `handoff.json`, `agent-policy.json`, and `probe.json`.
+
+`codex.md` is the shortest entrypoint to give to Codex. It points to `context/entry.md`, `context/safety.md`, and `context/probe.md` first, then defers value, issue, repo, and validation context until those details are needed.
+
+`agent-policy.json` is an agent-facing safety contract. It marks low-risk probe commands as allowed, validation commands as requiring user approval, and destructive or out-of-bound actions as forbidden. It is not an operating system sandbox.
+
+`probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
+
+Runtime topic docs:
+
+- [Sandbox & approvals](./sandbox.md)
+- [Execution policy](./execpolicy.md)
+- [Safe probes](./safe-probes.md)
+- [Skills and context pack](./skills.md)
 
 ## Safety Boundary
 
@@ -206,6 +241,7 @@ Allowed:
 - Clone or fetch repositories
 - Create or checkout a local Patchbay branch
 - Scan repository files within a limited scope
+- Run fixed low-risk probes such as `git status --porcelain`, `git branch --show-current`, `git ls-files`, and package script metadata reads
 - Write Patchbay state under `~/.patchbay` or `PATCHBAY_HOME`
 
 Not allowed:
@@ -219,3 +255,4 @@ Not allowed:
 - Reset, clean, or delete workspaces
 
 Patchbay writes suggested validation commands into the handoff package but does not run them automatically.
+Validation, build, lint, install, network-heavy, and project-defined script commands are classified as requiring approval or forbidden for downstream agents.

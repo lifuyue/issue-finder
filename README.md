@@ -51,6 +51,7 @@ PATCHBAY_HOME=/tmp/patchbay-demo patchbay doctor
 ## Docs
 
 - [**Usage guide**](./docs/usage.md)
+- [**Agent-safe preparation runtime**](./docs/agent-safe-preparation-runtime.md)
 - [**Rust design notes**](./docs/specs/patchbay-cli-rust-design.md)
 - [**Workflow design specs**](./docs/superpowers/specs/)
 - [**Repository guidance for coding agents**](./AGENTS.md)

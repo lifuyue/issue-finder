@@ -26,6 +26,12 @@ pub struct InboxItem {
     pub handoff_md_path: String,
     #[serde(default)]
     pub codex_md_path: String,
+    #[serde(default)]
+    pub agent_policy_path: String,
+    #[serde(default)]
+    pub probe_json_path: String,
+    #[serde(default)]
+    pub prepare_events_path: String,
     pub created_at: String,
     pub failure_reason: Option<String>,
 }
@@ -83,6 +89,9 @@ pub fn upsert_ready(
         handoff_json_path: written.handoff_json_path.clone(),
         handoff_md_path: written.handoff_md_path.clone(),
         codex_md_path: written.codex_md_path.clone(),
+        agent_policy_path: written.agent_policy_path.clone(),
+        probe_json_path: written.probe_json_path.clone(),
+        prepare_events_path: written.prepare_events_path.clone(),
         created_at: Utc::now().to_rfc3339(),
         failure_reason: None,
     };
@@ -111,6 +120,9 @@ pub fn upsert_prepare_failed(
         handoff_json_path: String::new(),
         handoff_md_path: String::new(),
         codex_md_path: String::new(),
+        agent_policy_path: String::new(),
+        probe_json_path: String::new(),
+        prepare_events_path: String::new(),
         created_at: Utc::now().to_rfc3339(),
         failure_reason: Some(reason.into()),
     };
@@ -226,6 +238,9 @@ mod tests {
             handoff_json_path: "/tmp/handoff.json".to_string(),
             handoff_md_path: "/tmp/handoff.md".to_string(),
             codex_md_path: "/tmp/codex.md".to_string(),
+            agent_policy_path: "/tmp/agent-policy.json".to_string(),
+            probe_json_path: "/tmp/probe.json".to_string(),
+            prepare_events_path: "/tmp/prepare-events.jsonl".to_string(),
         };
 
         upsert_ready(&paths, &issue, 80, &written).unwrap();

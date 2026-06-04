@@ -75,6 +75,7 @@ pub fn default_context_pack() -> ContextPack {
         files: vec![
             context_file("entry", true, false),
             context_file("safety", true, false),
+            context_file("probe", true, false),
             context_file("value", false, true),
             context_file("issue", false, true),
             context_file("repo", false, true),
@@ -106,6 +107,7 @@ pub fn write_context_pack(
         render_validation_md(handoff),
     )?;
     atomic_write(&context_dir.join("safety.md"), render_safety_md(handoff))?;
+    atomic_write(&context_dir.join("probe.md"), render_probe_md(handoff))?;
     atomic_write(&skill_path, render_skill_md())?;
     atomic_write(&refs_path, serde_json::to_vec_pretty(&skill_refs(handoff))?)?;
 
@@ -128,8 +130,11 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
     let skill_path = display_path(skill_path)?;
     let entry_path = display_path(&PathBuf::from(&dir).join("context/entry.md"))?;
     let safety_path = display_path(&PathBuf::from(&dir).join("context/safety.md"))?;
+    let probe_path = display_path(&PathBuf::from(&dir).join("context/probe.md"))?;
     let handoff_json_path = display_path(&PathBuf::from(&dir).join("handoff.json"))?;
     let handoff_md_path = display_path(&PathBuf::from(&dir).join("handoff.md"))?;
+    let agent_policy_path = display_path(&PathBuf::from(&dir).join("agent-policy.json"))?;
+    let probe_json_path = display_path(&PathBuf::from(&dir).join("probe.json"))?;
 
     Ok(vec![
         "# Patchbay Codex Entry".to_string(),
@@ -154,6 +159,8 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
         format!("- Handoff pack: {dir}"),
         format!("- Handoff JSON: {handoff_json_path}"),
         format!("- Handoff Markdown: {handoff_md_path}"),
+        format!("- Agent policy: {agent_policy_path}"),
+        format!("- Probe pack: {probe_json_path}"),
         format!("- Skill: {skill_path}"),
         String::new(),
         "Use the local skill at:".to_string(),
@@ -162,6 +169,7 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
         "Start with:".to_string(),
         entry_path,
         safety_path,
+        probe_path,
         String::new(),
         "Do not read every context file at once. Load value, issue, repo, and validation context only when the work reaches that phase.".to_string(),
     ]
@@ -227,6 +235,7 @@ fn render_entry_md(handoff: &Handoff) -> String {
         "## Next Reads".to_string(),
         String::new(),
         "- Read context/repo.md before planning code changes.".to_string(),
+        "- Read context/probe.md before deciding which commands to run.".to_string(),
         "- Read context/issue.md when you need the full issue body.".to_string(),
         "- Read context/value.md only when reviewing priority or explaining why this is worth doing."
             .to_string(),
@@ -235,6 +244,8 @@ fn render_entry_md(handoff: &Handoff) -> String {
         "## Safety".to_string(),
         String::new(),
         "- Do not treat Patchbay-generated files as target repository source.".to_string(),
+        "- Respect agent-policy.json for allowed, approval-required, and forbidden actions."
+            .to_string(),
         "- Do not install dependencies, commit, push, or create a PR unless the user explicitly asks.".to_string(),
         "- If the workspace is dirty, explain the risk before editing.".to_string(),
     ]);
@@ -473,6 +484,8 @@ fn render_validation_md(handoff: &Handoff) -> String {
         String::new(),
         "Patchbay suggests validation commands only. It does not run them automatically."
             .to_string(),
+        "Detected validation commands require user approval because they may execute repository code."
+            .to_string(),
         String::new(),
         "## Commands".to_string(),
         String::new(),
@@ -496,12 +509,139 @@ fn render_validation_md(handoff: &Handoff) -> String {
     lines.join("\n")
 }
 
+fn render_probe_md(handoff: &Handoff) -> String {
+    let facts = &handoff.probe_pack.facts;
+    let mut lines = vec![
+        "# Probe".to_string(),
+        String::new(),
+        format!("- Status: {}", handoff.probe_pack.status),
+        format!("- Workspace: {}", handoff.probe_pack.workspace),
+        format!(
+            "- Started: {} | completed: {}",
+            handoff.probe_pack.started_at, handoff.probe_pack.completed_at
+        ),
+        format!("- Workspace dirty: {}", facts.workspace_dirty),
+        format!(
+            "- Current branch: {}",
+            facts.current_branch.as_deref().unwrap_or("unknown")
+        ),
+        format!(
+            "- Origin URL: {}",
+            facts.origin_url.as_deref().unwrap_or("unknown")
+        ),
+        format!(
+            "- Tracked files: {}",
+            facts
+                .tracked_file_count
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+        format!(
+            "- Package managers: {}",
+            if facts.package_managers.is_empty() {
+                "none detected".to_string()
+            } else {
+                facts.package_managers.join(", ")
+            }
+        ),
+        String::new(),
+        "## Probes Run".to_string(),
+        String::new(),
+    ];
+
+    if handoff.probe_pack.probes.is_empty() {
+        lines.push("- No safe probes were run.".to_string());
+    } else {
+        for probe in &handoff.probe_pack.probes {
+            lines.push(format!(
+                "- `{}`: exit {:?}, {} ms, risk {}, warnings {}",
+                probe.argv.join(" "),
+                probe.exit_code,
+                probe.duration_ms,
+                probe.risk,
+                if probe.warnings.is_empty() {
+                    "none".to_string()
+                } else {
+                    probe.warnings.join("; ")
+                }
+            ));
+        }
+    }
+
+    lines.extend([
+        String::new(),
+        "## Agent Instruction Files".to_string(),
+        String::new(),
+    ]);
+    push_string_list(
+        &mut lines,
+        &facts.agent_instruction_files,
+        "No agent instruction files were detected.",
+    );
+
+    lines.extend([
+        String::new(),
+        "## Detected Scripts".to_string(),
+        String::new(),
+    ]);
+    if facts.detected_scripts.is_empty() {
+        lines.push("- No package scripts were detected.".to_string());
+    } else {
+        for script in &facts.detected_scripts {
+            lines.push(format!(
+                "- `{}`: {} ({})",
+                script.name,
+                single_line(&script.command),
+                script.approval
+            ));
+        }
+    }
+
+    lines.extend([
+        String::new(),
+        "## Validation Candidates".to_string(),
+        String::new(),
+    ]);
+    if facts.validation_candidates.is_empty() {
+        lines.push("- No validation candidates were detected.".to_string());
+    } else {
+        for candidate in &facts.validation_candidates {
+            lines.push(format!(
+                "- `{}`: {} ({})",
+                candidate.command,
+                single_line(&candidate.source),
+                candidate.approval
+            ));
+        }
+    }
+
+    lines.extend([
+        String::new(),
+        "## Commands Not Run".to_string(),
+        String::new(),
+        "- Patchbay did not run tests, lint, build, install, project-defined scripts, or commands inferred from issue text.".to_string(),
+        "- Run validation only after checking agent-policy.json and getting user approval when required.".to_string(),
+        String::new(),
+        "## Warnings".to_string(),
+        String::new(),
+    ]);
+    push_string_list(
+        &mut lines,
+        &handoff.probe_pack.warnings,
+        "No probe warnings were recorded.",
+    );
+
+    lines.join("\n")
+}
+
 fn render_safety_md(handoff: &Handoff) -> String {
     [
         "# Safety".to_string(),
         String::new(),
         "- Patchbay prepares local workspaces and handoff artifacts only.".to_string(),
         "- Patchbay does not install dependencies, commit, push, or create PRs.".to_string(),
+        "- Agent policy manifest: ../agent-policy.json".to_string(),
+        "- Probe pack: ../probe.json".to_string(),
         "- Do not treat Patchbay-generated files under the inbox as target repository source files.".to_string(),
         format!("- Target workspace: {}", handoff.workspace.path),
         format!("- Target branch: {}", handoff.workspace.branch),
@@ -520,11 +660,12 @@ fn render_skill_md() -> String {
         String::new(),
         "1. Read context/entry.md and context/safety.md first.".to_string(),
         "2. Do not read every context file at once.".to_string(),
-        "3. Read context/value.md only when assessing why the issue is worth doing or explaining priority.".to_string(),
-        "4. Read context/issue.md when you need the original issue body and issue metadata.".to_string(),
-        "5. Read context/repo.md before planning code changes.".to_string(),
-        "6. Read context/validation.md before running validation.".to_string(),
-        "7. Keep Patchbay and coding-agent responsibilities separate: Patchbay prepares evidence and local handoff files; the coding agent performs user-directed code work in the target workspace.".to_string(),
+        "3. Read context/probe.md before deciding which commands to run.".to_string(),
+        "4. Read context/value.md only when assessing why the issue is worth doing or explaining priority.".to_string(),
+        "5. Read context/issue.md when you need the original issue body and issue metadata.".to_string(),
+        "6. Read context/repo.md before planning code changes.".to_string(),
+        "7. Read context/validation.md before running validation.".to_string(),
+        "8. Keep Patchbay and coding-agent responsibilities separate: Patchbay prepares evidence and local handoff files; the coding agent performs user-directed code work in the target workspace.".to_string(),
         String::new(),
         "Patchbay-generated inbox files are context, not target repository source files.".to_string(),
     ]
@@ -539,6 +680,7 @@ fn skill_refs(handoff: &Handoff) -> SkillRefs {
         default_load: vec![
             "context/entry.md".to_string(),
             "context/safety.md".to_string(),
+            "context/probe.md".to_string(),
         ],
         deferred: vec![
             DeferredRef {

@@ -34,6 +34,20 @@ pub struct PreparedReportItem {
     pub handoff_md_path: String,
     #[serde(default)]
     pub codex_md_path: String,
+    #[serde(default)]
+    pub agent_policy_path: String,
+    #[serde(default)]
+    pub probe_json_path: String,
+    #[serde(default)]
+    pub prepare_events_path: String,
+    #[serde(default)]
+    pub readiness_score: i32,
+    #[serde(default)]
+    pub readiness_band: String,
+    #[serde(default)]
+    pub probe_status: String,
+    #[serde(default)]
+    pub probe_warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,7 +100,7 @@ impl DailyReport {
         } else {
             for item in &self.prepared {
                 lines.push(format!(
-                    "- [{}] {}#{} | rank {} | attention {} | execution {} | fit {} | risk {} | category {} | tags: {} | risk detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {}",
+                    "- [{}] {}#{} | rank {} | attention {} | execution {} | fit {} | risk {} | readiness {} ({}) | probe {} | probe warnings: {} | category {} | tags: {} | risk detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {} | Policy: {} | Probe: {} | Events: {}",
                     item.id,
                     item.repo_full_name,
                     item.issue_number,
@@ -95,6 +109,22 @@ impl DailyReport {
                     item.execution_score,
                     item.profile_fit_score,
                     item.risk_penalty,
+                    item.readiness_score,
+                    if item.readiness_band.is_empty() {
+                        "unknown"
+                    } else {
+                        &item.readiness_band
+                    },
+                    if item.probe_status.is_empty() {
+                        "unknown"
+                    } else {
+                        &item.probe_status
+                    },
+                    if item.probe_warnings.is_empty() {
+                        "none".to_string()
+                    } else {
+                        item.probe_warnings.join("; ")
+                    },
                     item.recommendation_category,
                     if item.risk_tags.is_empty() {
                         "none".to_string()
@@ -109,7 +139,10 @@ impl DailyReport {
                     },
                     item.handoff_json_path,
                     item.handoff_md_path,
-                    item.codex_md_path
+                    item.codex_md_path,
+                    item.agent_policy_path,
+                    item.probe_json_path,
+                    item.prepare_events_path
                 ));
             }
         }
@@ -151,12 +184,18 @@ fn push_category_group(
     } else {
         for item in matched {
             lines.push(format!(
-                "- {}#{} | rank {} | attention {} | execution {} | risk {} | {}",
+                "- {}#{} | rank {} | attention {} | execution {} | readiness {} ({}) | risk {} | {}",
                 item.repo_full_name,
                 item.issue_number,
                 item.final_rank_score,
                 item.attention_score,
                 item.execution_score,
+                item.readiness_score,
+                if item.readiness_band.is_empty() {
+                    "unknown"
+                } else {
+                    &item.readiness_band
+                },
                 item.risk_penalty,
                 item.why_it_is_worth_doing
             ));
@@ -221,6 +260,13 @@ mod tests {
                 handoff_json_path: "/tmp/handoff.json".to_string(),
                 handoff_md_path: "/tmp/handoff.md".to_string(),
                 codex_md_path: "/tmp/codex.md".to_string(),
+                agent_policy_path: "/tmp/agent-policy.json".to_string(),
+                probe_json_path: "/tmp/probe.json".to_string(),
+                prepare_events_path: "/tmp/prepare-events.jsonl".to_string(),
+                readiness_score: 82,
+                readiness_band: "high".to_string(),
+                probe_status: "completed".to_string(),
+                probe_warnings: Vec::new(),
             }],
             failed: Vec::new(),
         };

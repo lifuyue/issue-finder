@@ -6,6 +6,8 @@ Patchbay CLI is a Rust rewrite inspired by the current OpenMeta project, but it 
 
 The command name is `patchbay`. The repository and package name should be `patchbay-cli`.
 
+Current implementation note: the original handoff model described here has been extended by the agent-safe preparation runtime. See [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md) for the current artifact structure, policy manifest, safe probes, and readiness output.
+
 ## Product Positioning
 
 Patchbay is a local context and handoff layer for open-source contribution work. Its job is to find suitable `good first issue` tasks, prepare local repository context, create a structured handoff payload, store that payload in a local inbox, and produce a daily task report.
@@ -16,12 +18,12 @@ The first version optimizes for a deterministic local workflow:
 Discover good first issues
   -> Rank with local heuristics
   -> Prepare repository workspace
-  -> Generate handoff.json and handoff.md
+  -> Generate handoff, policy, probe, event, and context artifacts
   -> Store the task in the local inbox
   -> Generate a daily report.md
 ```
 
-`handoff.json` is the canonical output. `handoff.md` is a lightweight human-readable summary.
+`handoff.json` is the canonical output. `handoff.md` is a lightweight human-readable summary. Newer prepared items also include `codex.md`, `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, generated context files, and a local `patchbay-cli` skill.
 
 ## Goals
 
@@ -224,6 +226,12 @@ Patchbay stores local state under `~/.patchbay`.
       workspace.json
       handoff.json
       handoff.md
+      codex.md
+      agent-policy.json
+      probe.json
+      prepare-events.jsonl
+      context/
+      .agents/
   reports/
     2026-06-02.md
 ```
@@ -363,6 +371,8 @@ Patchbay only suggests these commands in the handoff. It does not run them in th
 ## Handoff Payload
 
 `handoff.json` is the canonical payload.
+
+Current prepared items add `context_pack`, `agent_policy`, `probe_pack`, `readiness`, `value_assessment`, and `evidence_pack` to the first-version payload. The additive fields are documented in [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md).
 
 Example shape:
 

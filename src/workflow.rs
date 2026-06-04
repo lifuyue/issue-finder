@@ -1,16 +1,21 @@
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result};
+use serde_json::Value;
 
 use crate::config::Config;
 use crate::evidence_pack::{build_evidence_pack, EvidencePack};
 use crate::github::{GitHubClient, GitHubIssue, IssueRef};
 use crate::github_enrichment::GitHubEnrichmentClient;
-use crate::handoff::{write_handoff, Handoff};
+use crate::handoff::{handoff_id, write_handoff_with_events, Handoff, WrittenHandoff};
 use crate::inbox;
 use crate::llm;
 use crate::llm_review;
 use crate::paths::PatchbayPaths;
+use crate::prepare_events::PrepareEventLog;
+use crate::probe::SafeProbeRunner;
+use crate::readiness::assess_readiness;
 use crate::report::{self, DailyReport, FailedReportItem, PreparedReportItem};
 use crate::scoring::rank_issues;
 use crate::value_scoring::{
@@ -84,15 +89,47 @@ pub async fn prepare_value_issue(
     explicit_prepare: bool,
 ) -> Result<PrepareOutcome> {
     let issue = ranked.issue.clone();
+    let event_path = paths
+        .inbox_item_dir(&handoff_id(&issue))
+        .join("prepare-events.jsonl");
+    let (events, event_warning) = match PrepareEventLog::create(&event_path) {
+        Ok(events) => {
+            let _ = events.append_prepare_started(&issue);
+            (Some(events), None)
+        }
+        Err(error) => (
+            None,
+            Some(format!("Unable to initialize prepare event log: {error}")),
+        ),
+    };
+
     match workspace::prepare_workspace(paths, &issue) {
         Ok(workspace) => {
             let mut workspace = workspace;
+            if let Some(warning) = event_warning {
+                workspace.warnings.push(warning);
+            }
+            if let Some(events) = &events {
+                let _ = events.append(
+                    "workspace_prepared",
+                    &[
+                        ("path", Value::String(workspace.info.path.clone())),
+                        ("branch", Value::String(workspace.info.branch.clone())),
+                    ],
+                );
+            }
             if explicit_prepare && ranked.value_assessment.execution_score < 40 {
                 workspace.warnings.push(format!(
                     "Explicit prepare bypassed low execution score {}",
                     ranked.value_assessment.execution_score
                 ));
             }
+            let probe_pack = SafeProbeRunner::default().run(
+                Path::new(&workspace.info.path),
+                &workspace.scan,
+                events.as_ref(),
+            );
+            let readiness = assess_readiness(&issue, &workspace, &probe_pack);
             let evidence_pack = build_evidence_pack(
                 &ranked.value_assessment,
                 &ranked.enriched_issue,
@@ -112,20 +149,38 @@ pub async fn prepare_value_issue(
                 evidence_pack.clone(),
                 llm_review,
             );
+            handoff.probe_pack = probe_pack;
+            handoff.readiness = readiness;
             llm::enhance_handoff(config, &mut handoff).await;
-            let written = write_handoff(paths, &handoff, &issue)?;
+            let written = match write_handoff_with_events(paths, &handoff, &issue, events.as_ref())
+            {
+                Ok(written) => written,
+                Err(error) => {
+                    if let Some(events) = &events {
+                        let _ = events.append(
+                            "prepare_failed",
+                            &[("reason", Value::String(error.to_string()))],
+                        );
+                    }
+                    return Err(error);
+                }
+            };
             inbox::upsert_ready(paths, &issue, ranked.score, &written)?;
             Ok(PrepareOutcome::Prepared(Box::new(prepared_report_item(
                 &ranked,
                 &evidence_pack,
-                written.id,
-                written.handoff_json_path,
-                written.handoff_md_path,
-                written.codex_md_path,
+                &handoff,
+                &written,
             ))))
         }
         Err(error) => {
             let reason = error.to_string();
+            if let Some(events) = &events {
+                let _ = events.append(
+                    "prepare_failed",
+                    &[("reason", Value::String(reason.clone()))],
+                );
+            }
             inbox::upsert_prepare_failed(paths, &issue, ranked.score, reason.clone())?;
             Ok(PrepareOutcome::Failed(FailedReportItem {
                 repo_full_name: issue.repo_full_name,
@@ -377,13 +432,11 @@ fn sort_by_value(ranked: &mut [RankedValueIssue]) {
 fn prepared_report_item(
     ranked: &RankedValueIssue,
     evidence_pack: &EvidencePack,
-    id: String,
-    handoff_json_path: String,
-    handoff_md_path: String,
-    codex_md_path: String,
+    handoff: &Handoff,
+    written: &WrittenHandoff,
 ) -> PreparedReportItem {
     PreparedReportItem {
-        id,
+        id: written.id.clone(),
         repo_full_name: ranked.issue.repo_full_name.clone(),
         issue_number: ranked.issue.number,
         title: ranked.issue.title.clone(),
@@ -411,8 +464,15 @@ fn prepared_report_item(
             .map(|item| item.summary.clone())
             .unwrap_or_else(|| "none".to_string()),
         missing_evidence: evidence_pack.missing_evidence.clone(),
-        handoff_json_path,
-        handoff_md_path,
-        codex_md_path,
+        handoff_json_path: written.handoff_json_path.clone(),
+        handoff_md_path: written.handoff_md_path.clone(),
+        codex_md_path: written.codex_md_path.clone(),
+        agent_policy_path: written.agent_policy_path.clone(),
+        probe_json_path: written.probe_json_path.clone(),
+        prepare_events_path: written.prepare_events_path.clone(),
+        readiness_score: handoff.readiness.score,
+        readiness_band: handoff.readiness.band.clone(),
+        probe_status: handoff.probe_pack.status.clone(),
+        probe_warnings: handoff.probe_pack.warnings.clone(),
     }
 }

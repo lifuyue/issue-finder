@@ -206,6 +206,91 @@ async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
 }
 
 #[tokio::test]
+async fn prepare_writes_agent_safe_runtime_artifacts_without_running_scripts() {
+    if !git_available() {
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let remote = create_remote_repo_with_package_script(dir.path());
+    clone_into_workspace(&remote, &paths, "owner/runtime");
+
+    let config = Config::default();
+    let ranked = ranked_value(issue("owner/runtime", 9), 82, 72);
+    let outcome = prepare_value_issue(&paths, &config, ranked, true)
+        .await
+        .unwrap();
+    let workflow::PrepareOutcome::Prepared(item) = outcome else {
+        panic!("expected prepared outcome");
+    };
+
+    assert!(PathBuf::from(&item.agent_policy_path).exists());
+    assert!(PathBuf::from(&item.probe_json_path).exists());
+    assert!(PathBuf::from(&item.prepare_events_path).exists());
+    assert!(item.readiness_score > 0);
+    assert!(!paths
+        .workspace_path_for("owner/runtime")
+        .join("script-ran")
+        .exists());
+
+    let handoff = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(&item.handoff_json_path).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(handoff["agent_policy"]["kind"], "patchbay_agent_policy");
+    assert_eq!(handoff["probe_pack"]["kind"], "patchbay_probe_pack");
+    assert_eq!(handoff["readiness"]["kind"], "patchbay_execution_readiness");
+
+    let probe = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(&item.probe_json_path).unwrap(),
+    )
+    .unwrap();
+    assert!(probe["facts"]["detected_scripts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|script| script["name"] == "test"));
+    assert!(probe["facts"]["validation_candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|candidate| candidate["approval"] == "requires_user_approval"));
+
+    let policy = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(&item.agent_policy_path).unwrap(),
+    )
+    .unwrap();
+    assert!(policy["commands"]["requires_user_approval"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|command| command["command"] == "npm test"));
+    assert!(policy["commands"]["forbidden"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|command| command["pattern"] == "project-defined scripts"));
+
+    let probe_context = fs::read_to_string(
+        PathBuf::from(&item.handoff_md_path)
+            .parent()
+            .unwrap()
+            .join("context/probe.md"),
+    )
+    .unwrap();
+    assert!(probe_context.contains("Patchbay did not run tests, lint, build, install"));
+
+    let events = fs::read_to_string(&item.prepare_events_path).unwrap();
+    assert!(events.contains("\"type\":\"prepare_started\""));
+    assert!(events.contains("\"type\":\"workspace_prepared\""));
+    assert!(events.contains("\"type\":\"probe_started\""));
+    assert!(events.contains("\"type\":\"agent_policy_written\""));
+    assert!(events.contains("\"type\":\"handoff_written\""));
+}
+
+#[tokio::test]
 async fn prepare_preserves_llm_summary_enhancement() {
     if !git_available() {
         return;
@@ -331,6 +416,63 @@ fn create_remote_repo(root: &Path) -> PathBuf {
         "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     )
     .unwrap();
+    fs::write(
+        source.join("src/lib.rs"),
+        "pub fn parse() -> bool { true }\n",
+    )
+    .unwrap();
+
+    run_git(root, &["init", "--bare", remote.to_str().unwrap()]);
+    run_git(&source, &["init"]);
+    run_git(&source, &["checkout", "-b", "main"]);
+    run_git(&source, &["add", "."]);
+    run_git(
+        &source,
+        &[
+            "-c",
+            "user.name=Patchbay",
+            "-c",
+            "user.email=patchbay@example.invalid",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+    run_git(
+        &source,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run_git(&source, &["push", "-u", "origin", "main"]);
+    run_git(
+        root,
+        &[
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ],
+    );
+
+    remote
+}
+
+fn create_remote_repo_with_package_script(root: &Path) -> PathBuf {
+    let source = root.join("source-runtime");
+    let remote = root.join("remote-runtime.git");
+    fs::create_dir_all(source.join("src")).unwrap();
+    fs::write(
+        source.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        source.join("package.json"),
+        r#"{"scripts":{"test":"node -e \"require('fs').writeFileSync('script-ran','yes')\"","lint":"eslint ."}}
+"#,
+    )
+    .unwrap();
+    fs::write(source.join("AGENTS.md"), "# Agent instructions\n").unwrap();
     fs::write(
         source.join("src/lib.rs"),
         "pub fn parse() -> bool { true }\n",

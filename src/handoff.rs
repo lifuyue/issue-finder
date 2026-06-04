@@ -1,12 +1,19 @@
+use std::path::Path;
+
 use anyhow::Result;
 use chrono::{Local, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
+use crate::agent_policy::{build_agent_policy, AgentPolicyManifest};
 use crate::context_pack::{default_context_pack, write_context_pack, ContextPack};
 use crate::evidence_pack::EvidencePack;
 use crate::github::GitHubIssue;
 use crate::llm_review::LlmReview;
 use crate::paths::{atomic_write, sanitize_repo_name, PatchbayPaths};
+use crate::prepare_events::PrepareEventLog;
+use crate::probe::ProbePack;
+use crate::readiness::{assess_readiness, ExecutionReadiness};
 use crate::repo_scan::{CandidateFile, ValidationCommand};
 use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
 use crate::workspace::PreparedWorkspace;
@@ -22,6 +29,12 @@ pub struct Handoff {
     pub context: HandoffContext,
     #[serde(default = "default_context_pack")]
     pub context_pack: ContextPack,
+    #[serde(default)]
+    pub agent_policy: AgentPolicyManifest,
+    #[serde(default)]
+    pub probe_pack: ProbePack,
+    #[serde(default)]
+    pub readiness: ExecutionReadiness,
     pub value_assessment: ValueAssessment,
     pub evidence_pack: EvidencePack,
     pub instructions: HandoffInstructions,
@@ -77,6 +90,9 @@ pub struct WrittenHandoff {
     pub handoff_json_path: String,
     pub handoff_md_path: String,
     pub codex_md_path: String,
+    pub agent_policy_path: String,
+    pub probe_json_path: String,
+    pub prepare_events_path: String,
 }
 
 impl Handoff {
@@ -102,6 +118,15 @@ impl Handoff {
         warnings.extend(workspace.scan.warnings.clone());
         warnings.sort();
         warnings.dedup();
+        let probe_pack = ProbePack::not_run(workspace.info.path.clone());
+        let agent_policy = build_agent_policy(
+            &id,
+            Path::new(&workspace.info.path),
+            None,
+            &workspace.scan.validation_commands,
+            &probe_pack,
+        );
+        let readiness = assess_readiness(issue, workspace, &probe_pack);
 
         Self {
             version: 1,
@@ -129,6 +154,9 @@ impl Handoff {
                 warnings,
             },
             context_pack: default_context_pack(),
+            agent_policy,
+            probe_pack,
+            readiness,
             value_assessment,
             evidence_pack,
             instructions: HandoffInstructions::default(),
@@ -166,10 +194,17 @@ impl Handoff {
             ),
             String::new(),
             "- JSON payload: ./handoff.json".to_string(),
+            "- Agent policy: ./agent-policy.json".to_string(),
+            "- Probe pack: ./probe.json".to_string(),
             format!("- Workspace: {}", self.workspace.path),
             format!("- Branch: {}", self.workspace.branch),
             format!("- Suggested files: {suggested_files}"),
             format!("- Suggested validation: {validation}"),
+            format!(
+                "- Preparation readiness: {} ({})",
+                self.readiness.score, self.readiness.band
+            ),
+            format!("- Probe status: {}", self.probe_pack.status),
             format!(
                 "- Category: {}",
                 self.value_assessment.recommendation_category
@@ -210,6 +245,14 @@ impl Handoff {
             self.instructions.goal.clone(),
             String::new(),
         ];
+
+        if !self.readiness.axes.is_empty() {
+            lines.extend(["## Preparation Readiness".to_string(), String::new()]);
+            for axis in &self.readiness.axes {
+                lines.push(format!("- {}: {} - {}", axis.id, axis.score, axis.reason));
+            }
+            lines.push(String::new());
+        }
 
         if !self.evidence_pack.why_this_has_high_attention.is_empty()
             || !self.evidence_pack.why_this_is_agent_ready.is_empty()
@@ -357,22 +400,79 @@ pub fn write_handoff(
     handoff: &Handoff,
     issue: &GitHubIssue,
 ) -> Result<WrittenHandoff> {
+    write_handoff_with_events(paths, handoff, issue, None)
+}
+
+pub fn write_handoff_with_events(
+    paths: &PatchbayPaths,
+    handoff: &Handoff,
+    issue: &GitHubIssue,
+    events: Option<&PrepareEventLog>,
+) -> Result<WrittenHandoff> {
     let dir = paths.inbox_item_dir(&handoff.id);
     std::fs::create_dir_all(&dir)?;
+    let handoff = handoff.finalized_for_dir(&dir);
 
     let issue_path = dir.join("issue.json");
     let workspace_path = dir.join("workspace.json");
     let handoff_json_path = dir.join("handoff.json");
     let handoff_md_path = dir.join("handoff.md");
+    let agent_policy_path = dir.join("agent-policy.json");
+    let probe_json_path = dir.join("probe.json");
+    let prepare_events_path = dir.join("prepare-events.jsonl");
+    let owned_events = if events.is_none() {
+        Some(PrepareEventLog::create(&prepare_events_path)?)
+    } else {
+        None
+    };
+    let events = events.or(owned_events.as_ref());
+    if let Some(events) = owned_events.as_ref() {
+        events.append_prepare_started(issue)?;
+    }
 
     atomic_write(&issue_path, serde_json::to_vec_pretty(issue)?)?;
     atomic_write(
         &workspace_path,
         serde_json::to_vec_pretty(&handoff.workspace)?,
     )?;
-    atomic_write(&handoff_json_path, serde_json::to_vec_pretty(handoff)?)?;
+    atomic_write(
+        &agent_policy_path,
+        serde_json::to_vec_pretty(&handoff.agent_policy)?,
+    )?;
+    if let Some(events) = events {
+        events.append(
+            "agent_policy_written",
+            &[(
+                "path",
+                Value::String(agent_policy_path.to_string_lossy().to_string()),
+            )],
+        )?;
+    }
+    atomic_write(
+        &probe_json_path,
+        serde_json::to_vec_pretty(&handoff.probe_pack)?,
+    )?;
+    if let Some(events) = events {
+        events.append(
+            "probe_written",
+            &[(
+                "path",
+                Value::String(probe_json_path.to_string_lossy().to_string()),
+            )],
+        )?;
+    }
+    atomic_write(&handoff_json_path, serde_json::to_vec_pretty(&handoff)?)?;
     atomic_write(&handoff_md_path, handoff.render_markdown())?;
-    let written_pack = write_context_pack(&dir, handoff, issue)?;
+    let written_pack = write_context_pack(&dir, &handoff, issue)?;
+    if let Some(events) = events {
+        events.append(
+            "handoff_written",
+            &[(
+                "path",
+                Value::String(handoff_json_path.to_string_lossy().to_string()),
+            )],
+        )?;
+    }
 
     Ok(WrittenHandoff {
         id: handoff.id.clone(),
@@ -380,7 +480,24 @@ pub fn write_handoff(
         handoff_json_path: handoff_json_path.to_string_lossy().to_string(),
         handoff_md_path: handoff_md_path.to_string_lossy().to_string(),
         codex_md_path: written_pack.codex_md_path,
+        agent_policy_path: agent_policy_path.to_string_lossy().to_string(),
+        probe_json_path: probe_json_path.to_string_lossy().to_string(),
+        prepare_events_path: prepare_events_path.to_string_lossy().to_string(),
     })
+}
+
+impl Handoff {
+    fn finalized_for_dir(&self, dir: &Path) -> Self {
+        let mut handoff = self.clone();
+        handoff.agent_policy = build_agent_policy(
+            &handoff.id,
+            Path::new(&handoff.workspace.path),
+            Some(dir),
+            &handoff.context.validation_commands,
+            &handoff.probe_pack,
+        );
+        handoff
+    }
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+pub mod agent_policy;
 pub mod cli;
 pub mod config;
 pub mod context_pack;
@@ -11,6 +12,9 @@ pub mod inbox;
 pub mod llm;
 pub mod llm_review;
 pub mod paths;
+pub mod prepare_events;
+pub mod probe;
+pub mod readiness;
 pub mod repo_scan;
 pub mod report;
 pub mod scoring;

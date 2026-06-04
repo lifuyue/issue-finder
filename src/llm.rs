@@ -116,6 +116,7 @@ async fn request_summary(config: &Config, handoff: &Handoff) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::enhance_handoff;
+    use crate::agent_policy::AgentPolicyManifest;
     use crate::config::Config;
     use crate::context_pack::default_context_pack;
     use crate::evidence_pack::EvidencePack;
@@ -124,6 +125,8 @@ mod tests {
         LlmEnhancement,
     };
     use crate::llm_review::LlmReview;
+    use crate::probe::ProbePack;
+    use crate::readiness::ExecutionReadiness;
     use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
 
     #[tokio::test]
@@ -155,6 +158,9 @@ mod tests {
                 warnings: vec![],
             },
             context_pack: default_context_pack(),
+            agent_policy: AgentPolicyManifest::default(),
+            probe_pack: ProbePack::default(),
+            readiness: ExecutionReadiness::default(),
             value_assessment: ValueAssessment {
                 final_rank_score: 0,
                 attention_score: 0,
