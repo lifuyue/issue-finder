@@ -538,7 +538,7 @@ Phase 1: 新增 value model、gate、score 结构和 fixture tests。
 Phase 2: 新增 competition timeline fetching、parser 和 cache。  
 Phase 3: 替换 category policy 和 ranking policy。  
 Phase 4: 更新 CLI、report、handoff、context pack 输出。  
-Phase 5: 用真实 GitHub 样本重新跑 OpenMeta 对比和 Issue Finder live scout。
+Phase 5: 用真实 GitHub 样本重新跑历史样本对比和 Issue Finder live scout。
 Phase 6: 删除或收缩旧 `value_signals` 中不再需要的线性风险逻辑。
 
 ## 验收标准

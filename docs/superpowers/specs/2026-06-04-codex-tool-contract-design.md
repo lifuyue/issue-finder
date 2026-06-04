@@ -164,7 +164,7 @@ pub struct IssueFinderToolOutput {
     pub tool_name: String,
     pub success: bool,
     pub status: String,
-    pub content_items: Vec<Issue FinderContentItem>,
+    pub content_items: Vec<IssueFinderContentItem>,
     pub structured_content: serde_json::Value,
 }
 ```
@@ -172,7 +172,7 @@ pub struct IssueFinderToolOutput {
 content item v1：
 
 ```rust
-pub enum Issue FinderContentItem {
+pub enum IssueFinderContentItem {
     InputText { text: String },
 }
 ```
