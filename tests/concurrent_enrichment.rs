@@ -1,5 +1,9 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,11 +15,10 @@ use tempfile::tempdir;
 
 const SLOW_TOP_DELAY: Duration = Duration::from_millis(800);
 const OTHER_DETAIL_DELAY: Duration = Duration::from_millis(350);
-const SERIAL_DETAIL_DELAY: Duration = Duration::from_millis(1_850);
 
 #[tokio::test]
 async fn scout_enriches_candidates_concurrently_and_keeps_feed_order() {
-    let (base_url, handle) = start_concurrent_mock_github();
+    let (base_url, server) = start_concurrent_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
     let _env_guard = EnvGuard;
 
@@ -29,16 +32,14 @@ async fn scout_enriches_candidates_concurrently_and_keeps_feed_order() {
         reports_dir: dir.path().join("reports"),
     };
 
-    let started = Instant::now();
     let ranked = workflow::scout(&paths, &Config::default(), 10, true)
         .await
         .unwrap();
-    let elapsed = started.elapsed();
-    handle.join().unwrap();
+    server.handle.join().unwrap();
 
     assert!(
-        elapsed < Duration::from_millis(1_400),
-        "scout took {elapsed:?}; serial detail delay alone is {SERIAL_DETAIL_DELAY:?}"
+        server.max_detail_concurrency.load(Ordering::SeqCst) >= 2,
+        "issue detail requests were not enriched concurrently"
     );
     assert!(
         ranked.len() >= 2,
@@ -58,11 +59,20 @@ impl Drop for EnvGuard {
     }
 }
 
-fn start_concurrent_mock_github() -> (String, thread::JoinHandle<()>) {
+struct MockGithubServer {
+    handle: thread::JoinHandle<()>,
+    max_detail_concurrency: Arc<AtomicUsize>,
+}
+
+fn start_concurrent_mock_github() -> (String, MockGithubServer) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let base_url_for_thread = base_url.clone();
+    let active_detail_requests = Arc::new(AtomicUsize::new(0));
+    let max_detail_concurrency = Arc::new(AtomicUsize::new(0));
+    let active_detail_requests_for_thread = Arc::clone(&active_detail_requests);
+    let max_detail_concurrency_for_thread = Arc::clone(&max_detail_concurrency);
 
     let handle = thread::spawn(move || {
         let started = Instant::now();
@@ -79,13 +89,23 @@ fn start_concurrent_mock_github() -> (String, thread::JoinHandle<()>) {
                     last_request_at = Instant::now();
                     served += 1;
                     let base_url = base_url_for_thread.clone();
+                    let active_detail_requests = Arc::clone(&active_detail_requests_for_thread);
+                    let max_detail_concurrency = Arc::clone(&max_detail_concurrency_for_thread);
                     thread::spawn(move || {
                         let mut buffer = [0u8; 4096];
                         let bytes_read = stream.read(&mut buffer).unwrap_or(0);
                         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
                         let response = response_for(&request, &base_url);
+                        if response.tracks_detail_concurrency {
+                            let in_flight =
+                                active_detail_requests.fetch_add(1, Ordering::SeqCst) + 1;
+                            max_detail_concurrency.fetch_max(in_flight, Ordering::SeqCst);
+                        }
                         if response.delay > Duration::ZERO {
                             thread::sleep(response.delay);
+                        }
+                        if response.tracks_detail_concurrency {
+                            active_detail_requests.fetch_sub(1, Ordering::SeqCst);
                         }
                         write_response(&mut stream, response.status, &response.body);
                     });
@@ -98,13 +118,20 @@ fn start_concurrent_mock_github() -> (String, thread::JoinHandle<()>) {
         }
     });
 
-    (base_url, handle)
+    (
+        base_url,
+        MockGithubServer {
+            handle,
+            max_detail_concurrency,
+        },
+    )
 }
 
 struct MockResponse {
     status: u16,
     delay: Duration,
     body: String,
+    tracks_detail_concurrency: bool,
 }
 
 fn response_for(request: &str, base_url: &str) -> MockResponse {
@@ -126,6 +153,7 @@ fn response_for(request: &str, base_url: &str) -> MockResponse {
                     status: 500,
                     delay: OTHER_DETAIL_DELAY,
                     body: r#"{"message":"temporary failure"}"#.to_string(),
+                    tracks_detail_concurrency: true,
                 };
             }
             return MockResponse {
@@ -136,6 +164,7 @@ fn response_for(request: &str, base_url: &str) -> MockResponse {
                     OTHER_DETAIL_DELAY
                 },
                 body: issue_details_body(),
+                tracks_detail_concurrency: true,
             };
         }
         if request.starts_with(&format!("GET /repos/owner/{repo}/stargazers")) {
@@ -153,6 +182,7 @@ fn response_for(request: &str, base_url: &str) -> MockResponse {
         status: 404,
         delay: Duration::ZERO,
         body: r#"{"message":"not found"}"#.to_string(),
+        tracks_detail_concurrency: false,
     }
 }
 
@@ -161,6 +191,7 @@ fn ok(body: String) -> MockResponse {
         status: 200,
         delay: Duration::ZERO,
         body,
+        tracks_detail_concurrency: false,
     }
 }
 
