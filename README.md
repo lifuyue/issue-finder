@@ -1,6 +1,10 @@
 # Issue Finder
 
 <p align="center">
+  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <strong>Issue Finder</strong> finds GitHub issues worth handing to coding agents, prepares local context, and stops before code changes.
 </p>
 
