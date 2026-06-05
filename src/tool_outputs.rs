@@ -5,6 +5,7 @@ use crate::github::GitHubIssue;
 use crate::prepare_gate::{
     allowed_prepare_categories, default_prepare_allowed, prepare_gate_reasons, PrepareGateDecision,
 };
+use crate::recommendation::RecommendationAssessment;
 use crate::report::{FailedReportItem, PreparedReportItem};
 use crate::value_scoring::{GateVerdict, RankedValueIssue, ValueAssessment};
 
@@ -25,6 +26,7 @@ pub struct CandidateOutput {
     pub issue: IssueOutput,
     pub category: String,
     pub rank_score: i32,
+    pub recommendation: RecommendationOutput,
     pub scores: ScoresOutput,
     pub gates: GatesOutput,
     pub risk_tags: Vec<String>,
@@ -36,6 +38,7 @@ pub struct CandidateOutput {
 pub struct AssessmentOutput {
     pub category: String,
     pub rank_score: i32,
+    pub recommendation: RecommendationOutput,
     pub gates: GatesOutput,
     pub scores: ScoresOutput,
     pub risk_tags: Vec<String>,
@@ -67,6 +70,19 @@ pub struct ScoresOutput {
     pub maintainer_signal: i32,
     pub freshness: i32,
     pub risk: i32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationOutput {
+    pub base_category: String,
+    pub base_rank_score: i32,
+    pub freshness_boost: i32,
+    pub feedback_penalty: i32,
+    pub reactivation_boost: i32,
+    pub final_feed_score: i32,
+    pub visibility: String,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -231,6 +247,7 @@ pub fn candidate_output(candidate: &RankedValueIssue) -> CandidateOutput {
             .recommendation_category
             .to_string(),
         rank_score: candidate.value_assessment.final_rank_score,
+        recommendation: recommendation_output(&candidate.recommendation),
         scores: scores_output(&candidate.value_assessment),
         gates: gates_output(&candidate.value_assessment),
         risk_tags: risk_tags_output(&candidate.value_assessment),
@@ -246,6 +263,7 @@ pub fn assessment_output(candidate: &RankedValueIssue) -> AssessmentOutput {
             .recommendation_category
             .to_string(),
         rank_score: candidate.value_assessment.final_rank_score,
+        recommendation: recommendation_output(&candidate.recommendation),
         gates: gates_output(&candidate.value_assessment),
         scores: scores_output(&candidate.value_assessment),
         risk_tags: risk_tags_output(&candidate.value_assessment),
@@ -457,6 +475,19 @@ fn scores_output(assessment: &ValueAssessment) -> ScoresOutput {
         maintainer_signal: assessment.scores.maintainer_signal_score,
         freshness: assessment.scores.freshness_score,
         risk: assessment.scores.risk_score,
+    }
+}
+
+fn recommendation_output(assessment: &RecommendationAssessment) -> RecommendationOutput {
+    RecommendationOutput {
+        base_category: assessment.base_category.to_string(),
+        base_rank_score: assessment.base_rank_score,
+        freshness_boost: assessment.freshness_boost,
+        feedback_penalty: assessment.feedback_penalty,
+        reactivation_boost: assessment.reactivation_boost,
+        final_feed_score: assessment.final_feed_score,
+        visibility: assessment.visibility.to_string(),
+        reasons: assessment.reasons.clone(),
     }
 }
 

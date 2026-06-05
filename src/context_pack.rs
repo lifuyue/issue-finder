@@ -156,6 +156,14 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
             handoff.value_assessment.execution_score,
             handoff.value_assessment.risk_penalty
         ),
+        format!(
+            "- Feed score: {} | freshness +{} | feedback -{} | reactivation +{} | visibility {}",
+            handoff.recommendation.final_feed_score,
+            handoff.recommendation.freshness_boost,
+            handoff.recommendation.feedback_penalty,
+            handoff.recommendation.reactivation_boost,
+            handoff.recommendation.visibility
+        ),
         format!("- Handoff pack: {dir}"),
         format!("- Handoff JSON: {handoff_json_path}"),
         format!("- Handoff Markdown: {handoff_md_path}"),
@@ -212,6 +220,7 @@ fn render_entry_md(handoff: &Handoff) -> String {
         ),
         format!("- Risk penalty: {}", handoff.value_assessment.risk_penalty),
     ];
+    push_recommendation_summary(&mut lines, handoff);
 
     if let Some(summary) = first_nonempty(&handoff.value_assessment.explanation) {
         lines.push(format!("- Summary: {}", single_line(summary)));
@@ -281,9 +290,37 @@ fn render_value_md(handoff: &Handoff) -> String {
         ),
         format!("- Risk penalty: {}", handoff.value_assessment.risk_penalty),
         String::new(),
-        "## Explanation".to_string(),
+        "## Feed Recommendation".to_string(),
+        String::new(),
+        format!("- Feed score: {}", handoff.recommendation.final_feed_score),
+        format!(
+            "- Freshness boost: +{}",
+            handoff.recommendation.freshness_boost
+        ),
+        format!(
+            "- Feedback penalty: -{}",
+            handoff.recommendation.feedback_penalty
+        ),
+        format!(
+            "- Reactivation boost: +{}",
+            handoff.recommendation.reactivation_boost
+        ),
+        format!("- Visibility: {}", handoff.recommendation.visibility),
+        String::new(),
+        "## Feed Reasons".to_string(),
         String::new(),
     ];
+    push_string_list(
+        &mut lines,
+        &handoff.recommendation.reasons,
+        "No feed recommendation reasons were recorded.",
+    );
+
+    lines.extend([
+        String::new(),
+        "## Value Explanation".to_string(),
+        String::new(),
+    ]);
     push_string_list(
         &mut lines,
         &handoff.value_assessment.explanation,
@@ -722,6 +759,25 @@ fn push_candidate_files(lines: &mut Vec<String>, handoff: &Handoff, limit: usize
             handoff.context.candidate_files.len() - limit
         ));
     }
+}
+
+fn push_recommendation_summary(lines: &mut Vec<String>, handoff: &Handoff) {
+    lines.extend([
+        format!("- Feed score: {}", handoff.recommendation.final_feed_score),
+        format!(
+            "- Feed freshness: +{}",
+            handoff.recommendation.freshness_boost
+        ),
+        format!(
+            "- Feed feedback penalty: -{}",
+            handoff.recommendation.feedback_penalty
+        ),
+        format!(
+            "- Feed reactivation: +{}",
+            handoff.recommendation.reactivation_boost
+        ),
+        format!("- Feed visibility: {}", handoff.recommendation.visibility),
+    ]);
 }
 
 fn push_string_list(lines: &mut Vec<String>, values: &[String], fallback: &str) {

@@ -13,6 +13,7 @@ use issue_finder::github_enrichment::EnrichedIssue;
 use issue_finder::handoff::handoff_id;
 use issue_finder::inbox::{load_index, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
+use issue_finder::recommendation::RecommendationAssessment;
 use issue_finder::value_scoring::{
     RankedValueIssue, RecommendationCategory, ScoreBand, ValueAssessment,
 };
@@ -191,6 +192,7 @@ async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
         PrepareOptions {
             explicit_prepare: true,
             gate_bypass_reason: None,
+            recommendation_source: None,
         },
     )
     .await
@@ -234,6 +236,7 @@ async fn prepare_writes_agent_safe_runtime_artifacts_without_running_scripts() {
         PrepareOptions {
             explicit_prepare: true,
             gate_bypass_reason: None,
+            recommendation_source: None,
         },
     )
     .await
@@ -335,6 +338,7 @@ async fn prepare_preserves_llm_summary_enhancement() {
         PrepareOptions {
             explicit_prepare: true,
             gate_bypass_reason: None,
+            recommendation_source: None,
         },
     )
     .await
@@ -394,43 +398,46 @@ fn ranked_value(
     } else {
         RecommendationCategory::NeedsTriage
     };
+    let value_assessment = ValueAssessment {
+        final_rank_score,
+        category: recommendation_category,
+        attention_score,
+        execution_score,
+        profile_fit_score: 40,
+        risk_penalty: if recommendation_category == RecommendationCategory::NeedsTriage {
+            50
+        } else {
+            5
+        },
+        recommendation_category,
+        attention_band: if attention_score >= 70 {
+            ScoreBand::High
+        } else if attention_score >= 40 {
+            ScoreBand::Medium
+        } else {
+            ScoreBand::Low
+        },
+        execution_band: if execution_score >= 70 {
+            ScoreBand::High
+        } else if execution_score >= 40 {
+            ScoreBand::Medium
+        } else {
+            ScoreBand::Low
+        },
+        signals: Vec::new(),
+        risk_tags: Vec::new(),
+        missing_evidence: Vec::new(),
+        explanation: vec!["test recommendation evidence".to_string()],
+        ..ValueAssessment::default()
+    };
+    let recommendation = RecommendationAssessment::from_value_assessment(&value_assessment);
     RankedValueIssue {
         issue,
         score: final_rank_score,
-        value_assessment: ValueAssessment {
-            final_rank_score,
-            category: recommendation_category,
-            attention_score,
-            execution_score,
-            profile_fit_score: 40,
-            risk_penalty: if recommendation_category == RecommendationCategory::NeedsTriage {
-                50
-            } else {
-                5
-            },
-            recommendation_category,
-            attention_band: if attention_score >= 70 {
-                ScoreBand::High
-            } else if attention_score >= 40 {
-                ScoreBand::Medium
-            } else {
-                ScoreBand::Low
-            },
-            execution_band: if execution_score >= 70 {
-                ScoreBand::High
-            } else if execution_score >= 40 {
-                ScoreBand::Medium
-            } else {
-                ScoreBand::Low
-            },
-            signals: Vec::new(),
-            risk_tags: Vec::new(),
-            missing_evidence: Vec::new(),
-            explanation: vec!["test recommendation evidence".to_string()],
-            ..ValueAssessment::default()
-        },
+        value_assessment,
         enriched_issue,
         explanation: vec!["test recommendation evidence".to_string()],
+        recommendation,
     }
 }
 

@@ -14,6 +14,7 @@ use crate::paths::{atomic_write, sanitize_repo_name, IssueFinderPaths};
 use crate::prepare_events::PrepareEventLog;
 use crate::probe::ProbePack;
 use crate::readiness::{assess_readiness, ExecutionReadiness};
+use crate::recommendation::RecommendationAssessment;
 use crate::repo_scan::{CandidateFile, ValidationCommand};
 use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment, ValueGates};
 use crate::workspace::PreparedWorkspace;
@@ -36,6 +37,8 @@ pub struct Handoff {
     #[serde(default)]
     pub readiness: ExecutionReadiness,
     pub value_assessment: ValueAssessment,
+    #[serde(default)]
+    pub recommendation: RecommendationAssessment,
     pub evidence_pack: EvidencePack,
     pub instructions: HandoffInstructions,
     pub llm_enhancement: LlmEnhancement,
@@ -113,6 +116,25 @@ impl Handoff {
         evidence_pack: EvidencePack,
         llm_review: LlmReview,
     ) -> Self {
+        let recommendation = RecommendationAssessment::from_value_assessment(&value_assessment);
+        Self::build_with_recommendation(
+            issue,
+            workspace,
+            value_assessment,
+            recommendation,
+            evidence_pack,
+            llm_review,
+        )
+    }
+
+    pub fn build_with_recommendation(
+        issue: &GitHubIssue,
+        workspace: &PreparedWorkspace,
+        value_assessment: ValueAssessment,
+        recommendation: RecommendationAssessment,
+        evidence_pack: EvidencePack,
+        llm_review: LlmReview,
+    ) -> Self {
         let id = handoff_id(issue);
         let mut warnings = workspace.warnings.clone();
         warnings.extend(workspace.scan.warnings.clone());
@@ -158,6 +180,7 @@ impl Handoff {
             probe_pack,
             readiness,
             value_assessment,
+            recommendation,
             evidence_pack,
             instructions: HandoffInstructions::default(),
             llm_enhancement: LlmEnhancement::disabled(),
@@ -212,6 +235,17 @@ impl Handoff {
             format!(
                 "- Final rank score: {}",
                 self.value_assessment.final_rank_score
+            ),
+            format!(
+                "- Feed score: {}",
+                self.recommendation.final_feed_score
+            ),
+            format!(
+                "- Feed freshness: +{} | feedback penalty: -{} | reactivation: +{} | visibility: {}",
+                self.recommendation.freshness_boost,
+                self.recommendation.feedback_penalty,
+                self.recommendation.reactivation_boost,
+                self.recommendation.visibility
             ),
             format!(
                 "- Attention score: {} ({})",

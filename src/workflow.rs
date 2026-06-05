@@ -7,7 +7,6 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::evidence_pack::{build_evidence_pack, EvidencePack};
 use crate::github::{GitHubClient, GitHubIssue, IssueRef};
-use crate::github_enrichment::GitHubEnrichmentClient;
 use crate::handoff::{handoff_id, write_handoff_with_events, Handoff, WrittenHandoff};
 use crate::inbox;
 use crate::llm;
@@ -17,13 +16,16 @@ use crate::prepare_events::PrepareEventLog;
 use crate::prepare_gate::default_prepare_allowed;
 use crate::probe::SafeProbeRunner;
 use crate::readiness::assess_readiness;
+use crate::recommendation::{
+    load_state_map, recent_events_for_issue, record_event_for_issue, record_event_for_key,
+    IssueKey, RecommendationEngine, RecommendationEventSource, RecommendationEventType,
+    ScoutOptions, ScoutResult,
+};
 use crate::report::{self, DailyReport, FailedReportItem, PreparedReportItem};
-use crate::scoring::rank_issues;
-use crate::value_scoring::{assess_issue, RankedValueIssue, ValueAssessment};
+use crate::value_scoring::RankedValueIssue;
 use crate::workspace;
 
 const ENRICHED_SCOUT_CANDIDATE_LIMIT: usize = 40;
-const COMPETITION_TIMELINE_CANDIDATE_LIMIT: usize = 20;
 
 #[derive(Debug, Clone)]
 pub enum PrepareOutcome {
@@ -35,6 +37,7 @@ pub enum PrepareOutcome {
 pub struct PrepareOptions {
     pub explicit_prepare: bool,
     pub gate_bypass_reason: Option<String>,
+    pub recommendation_source: Option<RecommendationEventSource>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,16 +83,23 @@ pub async fn scout(
     limit: usize,
     refresh: bool,
 ) -> Result<Vec<RankedValueIssue>> {
-    paths.ensure_layout()?;
-    let github = GitHubClient::new(config)?;
-    let enrichment = GitHubEnrichmentClient::new(config)?;
-    let issues = github.discover_issues(paths, refresh).await?;
-    let mut ranked = rank_issues(issues, &config.profile);
-    ranked.truncate(limit.clamp(25, ENRICHED_SCOUT_CANDIDATE_LIMIT));
-    let mut ranked = enrich_ranked_issues(paths, config, &enrichment, ranked, refresh).await;
-    sort_by_value(&mut ranked);
-    ranked.truncate(limit);
-    Ok(ranked)
+    Ok(
+        scout_with_options(paths, config, limit, refresh, ScoutOptions::cli())
+            .await?
+            .ranked,
+    )
+}
+
+pub async fn scout_with_options(
+    paths: &IssueFinderPaths,
+    config: &Config,
+    limit: usize,
+    refresh: bool,
+    options: ScoutOptions,
+) -> Result<ScoutResult> {
+    RecommendationEngine::new(paths, config)
+        .scout(limit, refresh, options)
+        .await
 }
 
 pub async fn assess_issue_selection(
@@ -98,12 +108,32 @@ pub async fn assess_issue_selection(
     selector: IssueSelector,
     refresh: bool,
 ) -> Result<RankedValueIssue> {
+    assess_issue_selection_with_options(
+        paths,
+        config,
+        selector,
+        refresh,
+        true,
+        RecommendationEventSource::CliAssess,
+    )
+    .await
+}
+
+pub async fn assess_issue_selection_with_options(
+    paths: &IssueFinderPaths,
+    config: &Config,
+    selector: IssueSelector,
+    refresh: bool,
+    record_read: bool,
+    source: RecommendationEventSource,
+) -> Result<RankedValueIssue> {
     paths.ensure_layout()?;
     let reference = selector.issue_ref()?;
     let github = GitHubClient::new(config)?;
     let issue = github.fetch_issue(&reference).await?;
-    let enrichment = GitHubEnrichmentClient::new(config)?;
-    Ok(enrich_issue_for_value(paths, config, &enrichment, issue, refresh).await)
+    RecommendationEngine::new(paths, config)
+        .assess_issue(issue, refresh, record_read, source)
+        .await
 }
 
 pub async fn prepare_from_input(
@@ -112,8 +142,15 @@ pub async fn prepare_from_input(
     issue: Option<String>,
     url: Option<String>,
 ) -> Result<PrepareOutcome> {
-    let ranked =
-        assess_issue_selection(paths, config, IssueSelector::new(issue, url), false).await?;
+    let ranked = assess_issue_selection_with_options(
+        paths,
+        config,
+        IssueSelector::new(issue, url),
+        false,
+        true,
+        RecommendationEventSource::CliPrepare,
+    )
+    .await?;
     prepare_value_issue_with_options(
         paths,
         config,
@@ -121,6 +158,7 @@ pub async fn prepare_from_input(
         PrepareOptions {
             explicit_prepare: true,
             gate_bypass_reason: None,
+            recommendation_source: Some(RecommendationEventSource::CliPrepare),
         },
     )
     .await
@@ -131,8 +169,9 @@ pub async fn prepare_issue(
     config: &Config,
     issue: GitHubIssue,
 ) -> Result<PrepareOutcome> {
-    let enrichment = GitHubEnrichmentClient::new(config)?;
-    let ranked = enrich_issue_for_value(paths, config, &enrichment, issue, false).await;
+    let ranked = RecommendationEngine::new(paths, config)
+        .assess_issue(issue, false, true, RecommendationEventSource::CliPrepare)
+        .await?;
     prepare_value_issue_with_options(
         paths,
         config,
@@ -140,6 +179,7 @@ pub async fn prepare_issue(
         PrepareOptions {
             explicit_prepare: true,
             gate_bypass_reason: None,
+            recommendation_source: Some(RecommendationEventSource::CliPrepare),
         },
     )
     .await
@@ -222,10 +262,11 @@ pub async fn prepare_value_issue_with_options(
                 &evidence_pack,
             )
             .await;
-            let mut handoff = Handoff::build_with_value(
+            let mut handoff = Handoff::build_with_recommendation(
                 &issue,
                 &workspace,
                 ranked.value_assessment.clone(),
+                ranked.recommendation.clone(),
                 evidence_pack.clone(),
                 llm_review,
             );
@@ -245,6 +286,21 @@ pub async fn prepare_value_issue_with_options(
                     return Err(error);
                 }
             };
+            let source = options
+                .recommendation_source
+                .unwrap_or(if options.explicit_prepare {
+                    RecommendationEventSource::CliPrepare
+                } else {
+                    RecommendationEventSource::Daily
+                });
+            let _ = record_event_for_issue(
+                paths,
+                &issue,
+                Some(&ranked.enriched_issue),
+                RecommendationEventType::Prepared,
+                source,
+                serde_json::json!({ "handoffId": written.id }),
+            );
             inbox::upsert_ready(paths, &issue, ranked.score, &written)?;
             Ok(PrepareOutcome::Prepared(Box::new(prepared_report_item(
                 &ranked,
@@ -281,25 +337,11 @@ pub async fn daily(
 ) -> Result<(DailyReport, String)> {
     paths.ensure_layout()?;
     let top_n = top.unwrap_or(config.daily.top_n).max(1);
-    let github = GitHubClient::new(config)?;
-    let enrichment = GitHubEnrichmentClient::new(config)?;
-    let issues = github.discover_issues(paths, refresh).await?;
-    let discovery_count = issues.len();
-    let ranked = rank_issues(issues, &config.profile);
-    let mut ranked = enrich_ranked_issues(
-        paths,
-        config,
-        &enrichment,
-        ranked
-            .into_iter()
-            .take(ENRICHED_SCOUT_CANDIDATE_LIMIT)
-            .collect(),
-        refresh,
-    )
-    .await;
-    sort_by_value(&mut ranked);
+    let result = RecommendationEngine::new(paths, config)
+        .daily_candidates(refresh, ENRICHED_SCOUT_CANDIDATE_LIMIT)
+        .await?;
 
-    daily_from_ranked(paths, config, ranked, discovery_count, top_n).await
+    daily_from_ranked(paths, config, result.ranked, result.discovery_count, top_n).await
 }
 
 pub async fn daily_from_ranked(
@@ -316,6 +358,9 @@ pub async fn daily_from_ranked(
         if attempts >= top_n {
             break;
         }
+        if !ranked_issue.recommendation.displayable(false) {
+            continue;
+        }
         if inbox::contains_issue(
             paths,
             &ranked_issue.issue.repo_full_name,
@@ -329,6 +374,14 @@ pub async fn daily_from_ranked(
 
         attempts += 1;
         let issue = ranked_issue.issue.clone();
+        let _ = record_event_for_issue(
+            paths,
+            &issue,
+            Some(&ranked_issue.enriched_issue),
+            RecommendationEventType::Shown,
+            RecommendationEventSource::Daily,
+            serde_json::json!({ "reason": "daily_prepare_attempt" }),
+        );
         match prepare_value_issue_with_options(
             paths,
             config,
@@ -336,6 +389,7 @@ pub async fn daily_from_ranked(
             PrepareOptions {
                 explicit_prepare: false,
                 gate_bypass_reason: None,
+                recommendation_source: Some(RecommendationEventSource::Daily),
             },
         )
         .await
@@ -363,6 +417,12 @@ pub async fn daily_from_ranked(
 
 pub fn read_handoff(paths: &IssueFinderPaths, id: &str, json: bool) -> Result<String> {
     let item = inbox::find_item(paths, id)?;
+    let _ = record_event_for_key(
+        paths,
+        IssueKey::new(item.repo_full_name.clone(), item.issue_number),
+        RecommendationEventType::Read,
+        RecommendationEventSource::CliHandoff,
+    );
     let path = if json {
         item.handoff_json_path
     } else {
@@ -379,6 +439,78 @@ pub fn read_report(paths: &IssueFinderPaths, date: Option<String>) -> Result<Str
     let date = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let path = paths.report_path(&date);
     fs::read_to_string(&path).with_context(|| format!("unable to read {}", path.display()))
+}
+
+pub fn record_feedback(
+    paths: &IssueFinderPaths,
+    issue: &str,
+    event_type: RecommendationEventType,
+) -> Result<String> {
+    paths.ensure_layout()?;
+    let reference = IssueRef::parse(issue)?;
+    let issue_key = IssueKey::from_issue_ref(&reference);
+    record_event_for_key(
+        paths,
+        issue_key.clone(),
+        event_type,
+        RecommendationEventSource::FeedbackCommand,
+    )?;
+    Ok(format!(
+        "Recorded {event_type:?} feedback for {}",
+        issue_key.label()
+    ))
+}
+
+pub fn render_feedback_state(paths: &IssueFinderPaths, issue: &str) -> Result<String> {
+    paths.ensure_layout()?;
+    let reference = IssueRef::parse(issue)?;
+    let issue_key = IssueKey::from_issue_ref(&reference);
+    let states = load_state_map(paths)?;
+    let state = states.get(&issue_key).cloned().unwrap_or_else(|| {
+        crate::recommendation::RecommendationIssueState {
+            issue_key: issue_key.clone(),
+            ..Default::default()
+        }
+    });
+    let events = recent_events_for_issue(paths, &issue_key, 10)?;
+    let mut lines = vec![
+        format!("Feedback state for {}", issue_key.label()),
+        format!("- shown: {}", state.shown_count),
+        format!("- read: {}", state.read_count),
+        format!("- prepared: {}", state.prepared_count),
+        format!("- done: {}", state.done),
+        format!("- dismissed: {}", state.dismissed),
+        format!(
+            "- last feedback: {}",
+            state.last_feedback_at.as_deref().unwrap_or("none")
+        ),
+        format!(
+            "- last seen issue updated: {}",
+            state
+                .last_seen_issue_updated_at
+                .as_deref()
+                .unwrap_or("none")
+        ),
+        format!(
+            "- last seen comments: {}",
+            state
+                .last_seen_comments_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        "Recent events:".to_string(),
+    ];
+    if events.is_empty() {
+        lines.push("- none".to_string());
+    } else {
+        lines.extend(events.into_iter().map(|event| {
+            format!(
+                "- {} | {:?} | {:?}",
+                event.timestamp, event.event_type, event.source
+            )
+        }));
+    }
+    Ok(lines.join("\n"))
 }
 
 pub fn render_ranked(ranked: &[RankedValueIssue]) -> String {
@@ -402,9 +534,14 @@ pub fn render_ranked(ranked: &[RankedValueIssue]) -> String {
                     .join(", ")
             };
             let detail = format!(
-                "{} | rank {} | repo {}:{} | competition {}:{} | profile {}:{} | execution {} ({}) | fit {} | risk {} | evidence: {} | risks: {}",
+                "{} | rank {} | feed {} | freshness +{} | feedback -{} | reactivation +{} | visibility {} | repo {}:{} | competition {}:{} | profile {}:{} | execution {} ({}) | fit {} | risk {} | evidence: {} | risks: {}",
                 issue.value_assessment.recommendation_category,
                 issue.value_assessment.final_rank_score,
+                issue.recommendation.final_feed_score,
+                issue.recommendation.freshness_boost,
+                issue.recommendation.feedback_penalty,
+                issue.recommendation.reactivation_boost,
+                issue.recommendation.visibility,
                 issue.value_assessment.gates.repo_influence.status,
                 issue.value_assessment.gates.repo_influence.band,
                 issue.value_assessment.gates.competition.status,
@@ -419,10 +556,11 @@ pub fn render_ranked(ranked: &[RankedValueIssue]) -> String {
                 risk_tags
             );
             format!(
-                "{}. {}#{} | rank {} | {}\n   {}\n   {}",
+                "{}. {}#{} | feed {} | rank {} | {}\n   {}\n   {}",
                 index + 1,
                 issue.issue.repo_full_name,
                 issue.issue.number,
+                issue.recommendation.final_feed_score,
                 issue.value_assessment.final_rank_score,
                 issue.issue.title,
                 issue.issue.url,
@@ -461,126 +599,6 @@ pub fn render_daily(report: &DailyReport, path: &str) -> String {
     )
 }
 
-async fn enrich_ranked_issues(
-    paths: &IssueFinderPaths,
-    config: &Config,
-    enrichment: &GitHubEnrichmentClient,
-    ranked: Vec<crate::scoring::RankedIssue>,
-    refresh: bool,
-) -> Vec<RankedValueIssue> {
-    let mut values = Vec::new();
-    for (index, rough) in ranked.into_iter().enumerate() {
-        values.push(
-            enrich_issue_for_value_with_competition(
-                paths,
-                config,
-                enrichment,
-                rough.issue,
-                refresh,
-                index < COMPETITION_TIMELINE_CANDIDATE_LIMIT,
-            )
-            .await,
-        );
-    }
-    values
-}
-
-async fn enrich_issue_for_value(
-    paths: &IssueFinderPaths,
-    config: &Config,
-    enrichment: &GitHubEnrichmentClient,
-    issue: GitHubIssue,
-    refresh: bool,
-) -> RankedValueIssue {
-    enrich_issue_for_value_with_competition(paths, config, enrichment, issue, refresh, true).await
-}
-
-async fn enrich_issue_for_value_with_competition(
-    paths: &IssueFinderPaths,
-    config: &Config,
-    enrichment: &GitHubEnrichmentClient,
-    issue: GitHubIssue,
-    refresh: bool,
-    include_competition_timeline: bool,
-) -> RankedValueIssue {
-    let enriched = enrichment
-        .enrich_issue_with_options(paths, &issue, refresh, include_competition_timeline)
-        .await;
-    let value_assessment = assess_issue(&enriched, &config.profile);
-    ranked_value_issue(issue, value_assessment, enriched)
-}
-
-fn ranked_value_issue(
-    issue: GitHubIssue,
-    value_assessment: ValueAssessment,
-    enriched_issue: crate::github_enrichment::EnrichedIssue,
-) -> RankedValueIssue {
-    let score = value_assessment.final_rank_score;
-    let explanation = value_assessment.explanation.clone();
-    RankedValueIssue {
-        issue,
-        score,
-        value_assessment,
-        enriched_issue,
-        explanation,
-    }
-}
-
-fn sort_by_value(ranked: &mut [RankedValueIssue]) {
-    ranked.sort_by(|left, right| {
-        left.value_assessment
-            .recommendation_category
-            .sort_rank()
-            .cmp(&right.value_assessment.recommendation_category.sort_rank())
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .final_rank_score
-                    .cmp(&left.value_assessment.final_rank_score)
-            })
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .execution_score
-                    .cmp(&left.value_assessment.execution_score)
-            })
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .profile_fit_score
-                    .cmp(&left.value_assessment.profile_fit_score)
-            })
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .attention_score
-                    .cmp(&left.value_assessment.attention_score)
-            })
-    });
-}
-
-#[allow(dead_code)]
-fn legacy_sort_by_score(ranked: &mut [RankedValueIssue]) {
-    ranked.sort_by(|left, right| {
-        right
-            .value_assessment
-            .final_rank_score
-            .cmp(&left.value_assessment.final_rank_score)
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .attention_score
-                    .cmp(&left.value_assessment.attention_score)
-            })
-            .then_with(|| {
-                right
-                    .value_assessment
-                    .execution_score
-                    .cmp(&left.value_assessment.execution_score)
-            })
-    });
-}
-
 fn prepared_report_item(
     ranked: &RankedValueIssue,
     evidence_pack: &EvidencePack,
@@ -594,6 +612,12 @@ fn prepared_report_item(
         title: ranked.issue.title.clone(),
         score: ranked.score,
         final_rank_score: ranked.value_assessment.final_rank_score,
+        feed_score: ranked.recommendation.final_feed_score,
+        freshness_boost: ranked.recommendation.freshness_boost,
+        feedback_penalty: ranked.recommendation.feedback_penalty,
+        reactivation_boost: ranked.recommendation.reactivation_boost,
+        recommendation_visibility: ranked.recommendation.visibility.to_string(),
+        recommendation_reasons: ranked.recommendation.reasons.clone(),
         attention_score: ranked.value_assessment.attention_score,
         execution_score: ranked.value_assessment.execution_score,
         profile_fit_score: ranked.value_assessment.profile_fit_score,

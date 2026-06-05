@@ -15,12 +15,16 @@ pub enum Command {
     Init(InitArgs),
     /// Discover and rank good-first-issue tasks.
     Scout(ScoutArgs),
+    /// Assess one issue without preparing workspace or handoff state.
+    Assess(AssessArgs),
     /// Prepare one issue and write a handoff into the inbox.
     Prepare(PrepareArgs),
     /// Display or print an existing handoff.
     Handoff(HandoffArgs),
     /// List or lightly update local inbox status.
     Inbox(InboxArgs),
+    /// Record or inspect recommendation feedback for any issue.
+    Feedback(FeedbackArgs),
     /// Run scout, prepare Top N, and write today's report.
     Daily(DailyArgs),
     /// Display local daily reports.
@@ -46,7 +50,28 @@ pub struct ScoutArgs {
     /// Ignore the GitHub discovery cache.
     #[arg(long)]
     pub refresh: bool,
+    /// Do not record returned candidates as shown.
+    #[arg(long)]
+    pub dry_run: bool,
     /// Print ranked candidates as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AssessArgs {
+    /// Issue reference in owner/repo#123 form.
+    pub issue: Option<String>,
+    /// GitHub issue URL.
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Ignore the GitHub enrichment cache.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Do not record the issue as read.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Print assessment as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -87,6 +112,24 @@ pub enum InboxCommand {
     Archive { inbox_id: String },
     /// Mark an inbox item done.
     Done { inbox_id: String },
+}
+
+#[derive(Debug, Args)]
+pub struct FeedbackArgs {
+    #[command(subcommand)]
+    pub command: FeedbackCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FeedbackCommand {
+    /// Mark an issue as read.
+    Read { issue: String },
+    /// Hide an issue from future recommendation feed results.
+    Dismiss { issue: String },
+    /// Restore a done or dismissed issue to the recommendation feed.
+    Restore { issue: String },
+    /// Show derived recommendation feedback state for an issue.
+    Show { issue: String },
 }
 
 #[derive(Debug, Args)]

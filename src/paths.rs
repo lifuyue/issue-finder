@@ -38,6 +38,7 @@ impl IssueFinderPaths {
         fs::create_dir_all(&self.workspaces_dir)?;
         fs::create_dir_all(&self.inbox_dir)?;
         fs::create_dir_all(&self.reports_dir)?;
+        fs::create_dir_all(self.recommendation_dir())?;
         Ok(())
     }
 
@@ -59,6 +60,14 @@ impl IssueFinderPaths {
 
     pub fn inbox_index_path(&self) -> PathBuf {
         self.inbox_dir.join("index.json")
+    }
+
+    pub fn recommendation_dir(&self) -> PathBuf {
+        self.home.join("recommendation")
+    }
+
+    pub fn recommendation_events_path(&self) -> PathBuf {
+        self.recommendation_dir().join("events.jsonl")
     }
 
     pub fn workspace_path_for(&self, repo_full_name: &str) -> PathBuf {

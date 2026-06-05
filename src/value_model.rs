@@ -3,6 +3,7 @@ use std::fmt;
 
 use crate::github::GitHubIssue;
 use crate::github_enrichment::EnrichedIssue;
+use crate::recommendation::RecommendationAssessment;
 use crate::value_signals::ValueSignal;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -12,6 +13,8 @@ pub struct RankedValueIssue {
     pub value_assessment: ValueAssessment,
     pub enriched_issue: EnrichedIssue,
     pub explanation: Vec<String>,
+    #[serde(default)]
+    pub recommendation: RecommendationAssessment,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -177,6 +177,7 @@ mod tests {
                 explanation: vec![],
                 ..ValueAssessment::default()
             },
+            recommendation: Default::default(),
             evidence_pack: EvidencePack::empty(),
             instructions: HandoffInstructions::default(),
             llm_enhancement: LlmEnhancement::success("old"),

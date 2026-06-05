@@ -17,6 +17,7 @@ pub mod prepare_events;
 pub mod prepare_gate;
 pub mod probe;
 pub mod readiness;
+pub mod recommendation;
 pub mod repo_scan;
 pub mod report;
 pub mod scoring;

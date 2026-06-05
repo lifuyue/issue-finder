@@ -1,10 +1,14 @@
 use anyhow::Result;
 use clap::Parser;
-use issue_finder::cli::{Cli, Command, InboxCommand, ToolsCommand};
+use issue_finder::cli::{Cli, Command, FeedbackCommand, InboxCommand, ToolsCommand};
 use issue_finder::config::{initialize_interactive, Config};
 use issue_finder::doctor;
 use issue_finder::inbox::{self, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
+use issue_finder::recommendation::{
+    record_event_for_key, IssueKey, RecommendationEventSource, RecommendationEventType,
+    ScoutOptions,
+};
 use issue_finder::tool_runtime::{
     default_call_id, list_tool_specs, IssueFinderToolInvocation, IssueFinderToolOutput,
     IssueFinderToolRuntime,
@@ -35,11 +39,40 @@ async fn main() -> Result<()> {
         }
         Command::Scout(args) => {
             let config = Config::load(&paths)?;
-            let ranked = workflow::scout(&paths, &config, args.limit, args.refresh).await?;
+            let ranked = workflow::scout_with_options(
+                &paths,
+                &config,
+                args.limit,
+                args.refresh,
+                ScoutOptions {
+                    include_filtered: false,
+                    record_exposure: !args.dry_run,
+                    source: RecommendationEventSource::CliScout,
+                },
+            )
+            .await?
+            .ranked;
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&ranked)?);
             } else {
                 println!("{}", workflow::render_ranked(&ranked));
+            }
+        }
+        Command::Assess(args) => {
+            let config = Config::load(&paths)?;
+            let ranked = workflow::assess_issue_selection_with_options(
+                &paths,
+                &config,
+                workflow::IssueSelector::new(args.issue, args.url),
+                args.refresh,
+                !args.dry_run,
+                RecommendationEventSource::CliAssess,
+            )
+            .await?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&ranked)?);
+            } else {
+                println!("{}", workflow::render_ranked(&[ranked]));
             }
         }
         Command::Prepare(args) => {
@@ -56,10 +89,26 @@ async fn main() -> Result<()> {
         Command::Inbox(args) => match args.command {
             Some(InboxCommand::Archive { inbox_id }) => {
                 let index = inbox::update_status(&paths, &inbox_id, InboxStatus::Archived)?;
+                if let Some(item) = index.items.iter().find(|item| item.id == inbox_id) {
+                    let _ = record_event_for_key(
+                        &paths,
+                        IssueKey::new(item.repo_full_name.clone(), item.issue_number),
+                        RecommendationEventType::Dismissed,
+                        RecommendationEventSource::InboxArchive,
+                    );
+                }
                 println!("{}", inbox::render_index(&index));
             }
             Some(InboxCommand::Done { inbox_id }) => {
                 let index = inbox::update_status(&paths, &inbox_id, InboxStatus::Done)?;
+                if let Some(item) = index.items.iter().find(|item| item.id == inbox_id) {
+                    let _ = record_event_for_key(
+                        &paths,
+                        IssueKey::new(item.repo_full_name.clone(), item.issue_number),
+                        RecommendationEventType::Done,
+                        RecommendationEventSource::InboxDone,
+                    );
+                }
                 println!("{}", inbox::render_index(&index));
             }
             None => {
@@ -69,6 +118,29 @@ async fn main() -> Result<()> {
                 } else {
                     println!("{}", inbox::render_index(&index));
                 }
+            }
+        },
+        Command::Feedback(args) => match args.command {
+            FeedbackCommand::Read { issue } => {
+                println!(
+                    "{}",
+                    workflow::record_feedback(&paths, &issue, RecommendationEventType::Read)?
+                );
+            }
+            FeedbackCommand::Dismiss { issue } => {
+                println!(
+                    "{}",
+                    workflow::record_feedback(&paths, &issue, RecommendationEventType::Dismissed)?
+                );
+            }
+            FeedbackCommand::Restore { issue } => {
+                println!(
+                    "{}",
+                    workflow::record_feedback(&paths, &issue, RecommendationEventType::Restored)?
+                );
+            }
+            FeedbackCommand::Show { issue } => {
+                println!("{}", workflow::render_feedback_state(&paths, &issue)?);
             }
         },
         Command::Daily(args) => {

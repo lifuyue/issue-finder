@@ -21,6 +21,18 @@ pub struct PreparedReportItem {
     pub title: String,
     pub score: i32,
     pub final_rank_score: i32,
+    #[serde(default)]
+    pub feed_score: i32,
+    #[serde(default)]
+    pub freshness_boost: i32,
+    #[serde(default)]
+    pub feedback_penalty: i32,
+    #[serde(default)]
+    pub reactivation_boost: i32,
+    #[serde(default)]
+    pub recommendation_visibility: String,
+    #[serde(default)]
+    pub recommendation_reasons: Vec<String>,
     pub attention_score: i32,
     pub execution_score: i32,
     pub profile_fit_score: i32,
@@ -101,11 +113,15 @@ impl DailyReport {
         } else {
             for item in &self.prepared {
                 lines.push(format!(
-                    "- [{}] {}#{} | rank {} | attention {} | execution {} | fit {} | risk {} | readiness {} ({}) | probe {} | probe warnings: {} | category {} | tags: {} | risk detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {} | Policy: {} | Probe: {} | Events: {}",
+                    "- [{}] {}#{} | feed {} | rank {} | freshness +{} | feedback -{} | reactivation +{} | attention {} | execution {} | fit {} | risk {} | readiness {} ({}) | probe {} | probe warnings: {} | category {} | visibility {} | tags: {} | risk detail: {} | recommendation detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {} | Policy: {} | Probe: {} | Events: {}",
                     item.id,
                     item.repo_full_name,
                     item.issue_number,
+                    item.feed_score,
                     item.final_rank_score,
+                    item.freshness_boost,
+                    item.feedback_penalty,
+                    item.reactivation_boost,
                     item.attention_score,
                     item.execution_score,
                     item.profile_fit_score,
@@ -127,12 +143,22 @@ impl DailyReport {
                         item.probe_warnings.join("; ")
                     },
                     item.recommendation_category,
+                    if item.recommendation_visibility.is_empty() {
+                        "unknown"
+                    } else {
+                        &item.recommendation_visibility
+                    },
                     if item.risk_tags.is_empty() {
                         "none".to_string()
                     } else {
                         item.risk_tags.join(", ")
                     },
                     item.biggest_risk,
+                    if item.recommendation_reasons.is_empty() {
+                        "none".to_string()
+                    } else {
+                        item.recommendation_reasons.join("; ")
+                    },
                     if item.missing_evidence.is_empty() {
                         "none".to_string()
                     } else {
@@ -185,9 +211,10 @@ fn push_category_group(
     } else {
         for item in matched {
             lines.push(format!(
-                "- {}#{} | rank {} | attention {} | execution {} | readiness {} ({}) | risk {} | {}",
+                "- {}#{} | feed {} | rank {} | attention {} | execution {} | readiness {} ({}) | risk {} | {}",
                 item.repo_full_name,
                 item.issue_number,
+                item.feed_score,
                 item.final_rank_score,
                 item.attention_score,
                 item.execution_score,
@@ -250,6 +277,12 @@ mod tests {
                 title: "Issue".to_string(),
                 score: 90,
                 final_rank_score: 90,
+                feed_score: 590,
+                freshness_boost: 10,
+                feedback_penalty: 0,
+                reactivation_boost: 0,
+                recommendation_visibility: "visible".to_string(),
+                recommendation_reasons: Vec::new(),
                 attention_score: 80,
                 execution_score: 85,
                 profile_fit_score: 50,

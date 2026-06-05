@@ -5,6 +5,7 @@ use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff};
 use issue_finder::inbox::{load_index, upsert_ready, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
+use issue_finder::recommendation::{load_state_map, IssueKey, RecommendationEventType};
 use issue_finder::repo_scan::{CandidateFile, RepoScan, ValidationCommand};
 use issue_finder::report::{write_daily_report, DailyReport, PreparedReportItem};
 use issue_finder::workflow;
@@ -155,6 +156,12 @@ fn writes_handoff_inbox_and_report_under_issue_finder_home() {
             title: issue.title,
             score: 88,
             final_rank_score: 88,
+            feed_score: 588,
+            freshness_boost: 0,
+            feedback_penalty: 0,
+            reactivation_boost: 0,
+            recommendation_visibility: "visible".to_string(),
+            recommendation_reasons: Vec::new(),
             attention_score: 80,
             execution_score: 70,
             profile_fit_score: 40,
@@ -181,4 +188,32 @@ fn writes_handoff_inbox_and_report_under_issue_finder_home() {
     assert!(std::fs::read_to_string(report_path)
         .unwrap()
         .contains("Codex: "));
+}
+
+#[test]
+fn feedback_events_derive_state_for_non_inbox_issue() {
+    let dir = tempdir().unwrap();
+    let paths = IssueFinderPaths {
+        home: dir.path().to_path_buf(),
+        config: dir.path().join("config.toml"),
+        cache_dir: dir.path().join("cache"),
+        workspaces_dir: dir.path().join("workspaces"),
+        inbox_dir: dir.path().join("inbox"),
+        reports_dir: dir.path().join("reports"),
+    };
+    paths.ensure_layout().unwrap();
+
+    workflow::record_feedback(&paths, "owner/repo#77", RecommendationEventType::Read).unwrap();
+    workflow::record_feedback(&paths, "owner/repo#77", RecommendationEventType::Dismissed).unwrap();
+    let state = load_state_map(&paths)
+        .unwrap()
+        .remove(&IssueKey::new("owner/repo", 77))
+        .unwrap();
+    assert_eq!(state.read_count, 1);
+    assert!(state.dismissed);
+
+    workflow::record_feedback(&paths, "owner/repo#77", RecommendationEventType::Restored).unwrap();
+    let rendered = workflow::render_feedback_state(&paths, "owner/repo#77").unwrap();
+    assert!(rendered.contains("shown: 0"));
+    assert!(rendered.contains("dismissed: false"));
 }

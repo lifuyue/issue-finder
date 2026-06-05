@@ -17,6 +17,9 @@ use issue_finder::paths::IssueFinderPaths;
 use issue_finder::prepare_gate::{
     default_prepare_allowed, prepare_gate_decision, PrepareGateDecision,
 };
+use issue_finder::recommendation::{
+    load_events, RecommendationEventSource, RecommendationEventType,
+};
 use issue_finder::tool_runtime::{
     list_tool_specs, IssueFinderToolInvocation, IssueFinderToolRuntime,
 };
@@ -138,6 +141,33 @@ async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
         .all(|candidate| candidate["category"] != "filtered_low_depth"));
     assert_eq!(scout.structured_content["filteredCount"], 1);
     assert!(scout_candidates[0]["gates"]["repoInfluence"]["status"].is_string());
+    assert!(scout_candidates[0]["recommendation"]["finalFeedScore"].is_number());
+    let events = load_events(&paths).unwrap();
+    assert!(events.iter().any(|event| {
+        event.event_type == RecommendationEventType::Shown
+            && event.source == RecommendationEventSource::ToolScout
+    }));
+
+    let shown_count = events
+        .iter()
+        .filter(|event| event.event_type == RecommendationEventType::Shown)
+        .count();
+    let scout_no_record = runtime
+        .execute(invocation(
+            "issue-finder.scout",
+            r#"{"limit":5,"refresh":false,"includeFiltered":false,"recordExposure":false}"#,
+            "scout_no_record_call",
+        ))
+        .await;
+    assert!(scout_no_record.success, "{scout_no_record:?}");
+    let events_after_no_record = load_events(&paths).unwrap();
+    assert_eq!(
+        shown_count,
+        events_after_no_record
+            .iter()
+            .filter(|event| event.event_type == RecommendationEventType::Shown)
+            .count()
+    );
 
     let assess = runtime
         .execute(invocation(
@@ -159,6 +189,11 @@ async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
     assert!(load_index(&paths).unwrap().items.is_empty());
     assert!(!paths.workspace_path_for("owner/niche").exists());
     assert!(fs::read_dir(&paths.inbox_dir).unwrap().next().is_none());
+    assert!(load_events(&paths).unwrap().iter().any(|event| {
+        event.event_type == RecommendationEventType::Read
+            && event.source == RecommendationEventSource::ToolAssess
+            && event.issue_key.repo_full_name == "owner/niche"
+    }));
 
     let blocked = runtime
         .execute(invocation(

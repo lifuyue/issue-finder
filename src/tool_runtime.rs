@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::github::GitHubIssue;
 use crate::paths::IssueFinderPaths;
 use crate::prepare_gate::{prepare_gate_decision, PrepareGateDecision};
+use crate::recommendation::{RecommendationEventSource, ScoutOptions};
 use crate::tool_context::{read_context_section, ReadContextError, ReadContextToolArgs};
 use crate::tool_outputs::{
     assess_structured_output, assessment_output, candidate_output, failure_output,
@@ -16,7 +17,7 @@ use crate::tool_outputs::{
     readiness_output, scout_structured_output, to_value, AssessmentOutput, GateBypassOutput,
     IssueOutput, PrepareGateOutput,
 };
-use crate::value_scoring::{RankedValueIssue, RecommendationCategory};
+use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
 
 const TOOL_SCOUT: &str = "issue-finder.scout";
@@ -241,23 +242,22 @@ impl IssueFinderToolRuntime {
         let args: ScoutToolArgs = parse_arguments(&invocation.arguments)?;
         let limit = args.limit.unwrap_or(10).max(1);
         let _reserved_min_category = args.min_category;
-        let ranked = workflow::scout(&self.paths, &self.config, limit.max(25), args.refresh)
-            .await
-            .map_err(RuntimeFailure::System)?;
-        let filtered_count = ranked
+        let result = workflow::scout_with_options(
+            &self.paths,
+            &self.config,
+            limit,
+            args.refresh,
+            ScoutOptions {
+                include_filtered: args.include_filtered,
+                record_exposure: args.record_exposure.unwrap_or(true),
+                source: RecommendationEventSource::ToolScout,
+            },
+        )
+        .await
+        .map_err(RuntimeFailure::System)?;
+        let candidates = result
+            .ranked
             .iter()
-            .filter(|candidate| {
-                candidate.value_assessment.recommendation_category
-                    == RecommendationCategory::FilteredLowDepth
-            })
-            .count();
-        let candidates = ranked
-            .iter()
-            .filter(|candidate| {
-                args.include_filtered
-                    || candidate.value_assessment.recommendation_category
-                        != RecommendationCategory::FilteredLowDepth
-            })
             .take(limit)
             .map(candidate_output)
             .collect::<Vec<_>>();
@@ -265,8 +265,11 @@ impl IssueFinderToolRuntime {
         Ok(IssueFinderToolOutput::success(
             invocation,
             "ok",
-            format!("Found {candidate_count} candidates ({filtered_count} filtered)."),
-            scout_structured_output(TOOL_SCOUT, candidates, filtered_count),
+            format!(
+                "Found {candidate_count} candidates ({} filtered).",
+                result.filtered_count
+            ),
+            scout_structured_output(TOOL_SCOUT, candidates, result.filtered_count),
         ))
     }
 
@@ -276,7 +279,14 @@ impl IssueFinderToolRuntime {
     ) -> RuntimeResult<IssueFinderToolOutput> {
         let args: AssessToolArgs = parse_arguments(&invocation.arguments)?;
         let selector = issue_selector(args.issue, args.url)?;
-        let ranked = self.assess_selection(selector, args.refresh).await?;
+        let ranked = self
+            .assess_selection(
+                selector,
+                args.refresh,
+                args.record_read.unwrap_or(true),
+                RecommendationEventSource::ToolAssess,
+            )
+            .await?;
         let issue_label = issue_label(&ranked.issue);
         let issue = issue_output(&ranked.issue);
         let assessment = assessment_output(&ranked);
@@ -305,7 +315,14 @@ impl IssueFinderToolRuntime {
         }
 
         let selector = issue_selector(args.issue, args.url)?;
-        let ranked = self.assess_selection(selector, args.refresh).await?;
+        let ranked = self
+            .assess_selection(
+                selector,
+                args.refresh,
+                true,
+                RecommendationEventSource::ToolPrepare,
+            )
+            .await?;
         let issue = issue_output(&ranked.issue);
         let assessment = assessment_output(&ranked);
         let prepare_gate = prepare_gate_output(&ranked.value_assessment);
@@ -345,6 +362,7 @@ impl IssueFinderToolRuntime {
             PrepareOptions {
                 explicit_prepare: true,
                 gate_bypass_reason: bypass_reason_for_prepare(&decision),
+                recommendation_source: Some(RecommendationEventSource::ToolPrepare),
             },
         )
         .await
@@ -377,10 +395,19 @@ impl IssueFinderToolRuntime {
         &self,
         selector: IssueSelector,
         refresh: bool,
+        record_read: bool,
+        source: RecommendationEventSource,
     ) -> RuntimeResult<RankedValueIssue> {
-        workflow::assess_issue_selection(&self.paths, &self.config, selector, refresh)
-            .await
-            .map_err(RuntimeFailure::System)
+        workflow::assess_issue_selection_with_options(
+            &self.paths,
+            &self.config,
+            selector,
+            refresh,
+            record_read,
+            source,
+        )
+        .await
+        .map_err(RuntimeFailure::System)
     }
 }
 
@@ -534,6 +561,7 @@ fn scout_schema() -> Value {
             "limit": { "type": "integer", "minimum": 1, "default": 10 },
             "refresh": { "type": "boolean", "default": false },
             "includeFiltered": { "type": "boolean", "default": false },
+            "recordExposure": { "type": "boolean", "default": true },
             "minCategory": { "type": ["string", "null"], "default": null }
         },
         "additionalProperties": false
@@ -546,7 +574,8 @@ fn assess_schema() -> Value {
         "properties": {
             "issue": { "type": ["string", "null"] },
             "url": { "type": ["string", "null"] },
-            "refresh": { "type": "boolean", "default": false }
+            "refresh": { "type": "boolean", "default": false },
+            "recordRead": { "type": "boolean", "default": true }
         },
         "additionalProperties": false
     })
@@ -607,6 +636,8 @@ struct ScoutToolArgs {
     #[serde(default)]
     include_filtered: bool,
     #[serde(default)]
+    record_exposure: Option<bool>,
+    #[serde(default)]
     min_category: Option<String>,
 }
 
@@ -619,6 +650,8 @@ struct AssessToolArgs {
     url: Option<String>,
     #[serde(default)]
     refresh: bool,
+    #[serde(default)]
+    record_read: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
