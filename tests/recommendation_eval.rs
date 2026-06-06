@@ -1,0 +1,202 @@
+mod support;
+
+use std::collections::BTreeSet;
+use std::path::Path;
+
+use support::recommendation_eval::{evaluate_named_datasets, profile_coverage, EvaluationReport};
+
+const CORE_QUALITY: &str = include_str!("fixtures/recommendation_eval/datasets/core_quality.json");
+const PROFILE_FRONTEND: &str =
+    include_str!("fixtures/recommendation_eval/datasets/profile_frontend.json");
+const PROFILE_BACKEND_RUST_GO: &str =
+    include_str!("fixtures/recommendation_eval/datasets/profile_backend_rust_go.json");
+const PROFILE_PYTHON_DATA_CLI: &str =
+    include_str!("fixtures/recommendation_eval/datasets/profile_python_data_cli.json");
+const PROFILE_AI_AGENT_TOOLS: &str =
+    include_str!("fixtures/recommendation_eval/datasets/profile_ai_agent_tools.json");
+const PROFILE_DEVOPS_INFRA: &str =
+    include_str!("fixtures/recommendation_eval/datasets/profile_devops_infra.json");
+const SOURCE_TRUST: &str = include_str!("fixtures/recommendation_eval/datasets/source_trust.json");
+const FEEDBACK_REPLAY: &str =
+    include_str!("fixtures/recommendation_eval/datasets/feedback_replay.json");
+const SCHEMA: &str = include_str!("fixtures/recommendation_eval/schema.json");
+
+#[test]
+fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
+    serde_json::from_str::<serde_json::Value>(SCHEMA).expect("schema should be valid json");
+    let report = evaluate_named_datasets(datasets());
+
+    assert_eq!(report.datasets.len(), 8);
+    assert_eq!(report.overall.samples, 48);
+    assert!(report.overall.visible <= report.overall.samples);
+    assert!((0.0..=1.0).contains(&report.overall.precision_at5));
+    assert!((0.0..=1.0).contains(&report.overall.precision_at10));
+
+    let dataset_names = report
+        .datasets
+        .iter()
+        .map(|dataset| dataset.dataset.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        dataset_names,
+        BTreeSet::from([
+            "core_quality",
+            "feedback_replay",
+            "profile_ai_agent_tools",
+            "profile_backend_rust_go",
+            "profile_devops_infra",
+            "profile_frontend",
+            "profile_python_data_cli",
+            "source_trust",
+        ])
+    );
+
+    let profiles = report
+        .datasets
+        .iter()
+        .map(|dataset| dataset.profile.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(profiles.contains("default_cli_devtools"));
+    assert!(profiles.contains("typescript_frontend"));
+    assert!(profiles.contains("rust_backend_systems"));
+    assert!(profiles.contains("python_data_cli"));
+    assert!(profiles.contains("ai_agent_tools"));
+    assert!(profiles.contains("devops_infra"));
+
+    let coverage = profile_coverage(&report);
+    assert!(coverage.values().all(|samples| *samples > 0));
+
+    for dataset in &report.datasets {
+        assert_eq!(dataset.metrics.samples, dataset.ranked.len());
+        assert!(
+            !dataset.ranked.is_empty(),
+            "{} should include ranked samples",
+            dataset.dataset
+        );
+        assert!(
+            dataset
+                .ranked
+                .iter()
+                .enumerate()
+                .all(|(index, item)| item.rank == index + 1),
+            "{} rank values should be stable and contiguous",
+            dataset.dataset
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&report).expect("report should serialize");
+    assert!(json.contains("precisionAt5"));
+    assert!(json.contains("rankingInversions"));
+
+    if let Some(output_dir) = std::env::var_os("ISSUE_FINDER_RECOMMENDATION_EVAL_REPORT_DIR") {
+        write_report_snapshot(&report, Path::new(&output_dir));
+    }
+}
+
+fn datasets() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("core_quality", CORE_QUALITY),
+        ("profile_frontend", PROFILE_FRONTEND),
+        ("profile_backend_rust_go", PROFILE_BACKEND_RUST_GO),
+        ("profile_python_data_cli", PROFILE_PYTHON_DATA_CLI),
+        ("profile_ai_agent_tools", PROFILE_AI_AGENT_TOOLS),
+        ("profile_devops_infra", PROFILE_DEVOPS_INFRA),
+        ("source_trust", SOURCE_TRUST),
+        ("feedback_replay", FEEDBACK_REPLAY),
+    ]
+}
+
+fn write_report_snapshot(report: &EvaluationReport, output_dir: &Path) {
+    std::fs::create_dir_all(output_dir).expect("report directory should be created");
+    std::fs::write(
+        output_dir.join("metrics.json"),
+        serde_json::to_string_pretty(report).expect("report json should serialize"),
+    )
+    .expect("metrics report should be written");
+    std::fs::write(output_dir.join("report.md"), markdown_report(report))
+        .expect("markdown report should be written");
+    std::fs::write(output_dir.join("visible.jsonl"), visible_jsonl(report))
+        .expect("visible jsonl should be written");
+}
+
+fn markdown_report(report: &EvaluationReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Recommendation Evaluation Baseline\n\n");
+    output.push_str("This report is generated by `tests/recommendation_eval.rs` from deterministic offline fixtures. It records the current ranking pipeline behavior; it is not a pass/fail quality claim.\n\n");
+    output.push_str("## Overall Metrics\n\n");
+    output.push_str(&format!(
+        "- samples: {}\n- visible: {}\n- precision@5: {:.2}\n- precision@10: {:.2}\n- visible fill rate: {:.2}\n- reject leakage: {}\n- profile mismatch leakage: {}\n- stale high-rank leakage: {}\n- competition leakage: {}\n- dashboard noise leakage: {}\n- ranking inversions: {}\n- feedback cooldown: {}/{}\n- fallback fill rate: {:.2}\n\n",
+        report.overall.samples,
+        report.overall.visible,
+        report.overall.precision_at5,
+        report.overall.precision_at10,
+        report.overall.visible_fill_rate,
+        report.overall.reject_leakage,
+        report.overall.profile_mismatch_leakage,
+        report.overall.stale_high_rank_leakage,
+        report.overall.competition_leakage,
+        report.overall.dashboard_noise_leakage,
+        report.overall.ranking_inversions,
+        report.overall.feedback_cooldown_passes,
+        report.overall.feedback_cooldown_total,
+        report.overall.fallback_fill_rate
+    ));
+    output.push_str("## Dataset Metrics\n\n");
+    output.push_str(
+        "| dataset | profile | samples | visible | p@5 | p@10 | inversions | failures |\n",
+    );
+    output.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+    for dataset in &report.datasets {
+        output.push_str(&format!(
+            "| {} | {} | {} | {} | {:.2} | {:.2} | {} | {} |\n",
+            dataset.dataset,
+            dataset.profile,
+            dataset.metrics.samples,
+            dataset.metrics.visible,
+            dataset.metrics.precision_at5,
+            dataset.metrics.precision_at10,
+            dataset.metrics.ranking_inversions,
+            dataset.failures.len()
+        ));
+    }
+    output.push_str("\n## Known Failure Signals\n\n");
+    for dataset in &report.datasets {
+        if dataset.failures.is_empty() {
+            continue;
+        }
+        output.push_str(&format!("### {}\n\n", dataset.dataset));
+        for failure in &dataset.failures {
+            output.push_str(&format!("- `{}`: {}\n", failure.sample_id, failure.reason));
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn visible_jsonl(report: &EvaluationReport) -> String {
+    let mut output = String::new();
+    for dataset in &report.datasets {
+        for item in dataset
+            .ranked
+            .iter()
+            .filter(|item| item.visibility == "visible")
+        {
+            let row = serde_json::json!({
+                "dataset": dataset.dataset,
+                "profile": dataset.profile,
+                "rank": item.rank,
+                "sampleId": item.sample_id,
+                "key": item.key,
+                "title": item.title,
+                "expectedQuality": item.expected_quality,
+                "expectedBehavior": item.expected_behavior,
+                "finalFeedScore": item.final_feed_score,
+                "profileFit": item.profile_fit,
+                "sourceTier": item.source_tier,
+            });
+            output.push_str(&serde_json::to_string(&row).expect("visible row should serialize"));
+            output.push('\n');
+        }
+    }
+    output
+}

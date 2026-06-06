@@ -1,0 +1,821 @@
+{
+  "datasets": [
+    {
+      "dataset": "core_quality",
+      "profile": "default_cli_devtools",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 2,
+        "precisionAt5": 0.5,
+        "precisionAt10": 0.5,
+        "visibleFillRate": 0.13333333333333333,
+        "targetVisibleFillRate": 0.13333333333333333,
+        "rejectLeakage": 1,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 1,
+        "rankingInversions": 0,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [
+        {
+          "sampleId": "core_toy_yaml_converter_should_hide",
+          "reason": "reject sample is visible"
+        }
+      ],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "core_overlay_jco_small_repo_should_survive",
+          "key": "bytecodealliance/jco#1596",
+          "title": "[preview2-shim] Runtime values are exported only as types",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 599,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "overlay_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "core_toy_yaml_converter_should_hide",
+          "key": "shabeeltt/devtools-hub#78",
+          "title": "Add YAML to JSON Converter",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 291,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 3,
+          "sampleId": "core_claimed_amplify_should_hide",
+          "key": "aws-amplify/amplify-cli#13241",
+          "title": "Inconsistencies in Amplify init framework selection flow",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 409,
+          "profileFit": 75,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "core_old_stale_styleguidist_should_lower",
+          "key": "styleguidist/react-styleguidist#1661",
+          "title": "Para components should use theme.fontSize.base or theme.fontSize.text",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 262,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "core_dependency_dashboard_should_hide",
+          "key": "Far-Beyond-Pulsar/Pulsar-Native#151",
+          "title": "Dependency Dashboard",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 204,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 6,
+          "sampleId": "core_cdk_open_pr_should_hide",
+          "key": "aws/aws-cdk#37783",
+          "title": "TableV2MultiAccountReplica missing top-level SSESpecification",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 77,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        }
+      ]
+    },
+    {
+      "dataset": "profile_frontend",
+      "profile": "typescript_frontend",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 2,
+        "precisionAt5": 1.0,
+        "precisionAt10": 1.0,
+        "visibleFillRate": 0.13333333333333333,
+        "targetVisibleFillRate": 0.13333333333333333,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 1,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 0,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [
+        {
+          "sampleId": "frontend_rjsf_empty_key_excellent",
+          "reason": "profile fit 30 below expected minimum"
+        }
+      ],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "frontend_rjsf_list_perf_good",
+          "key": "rjsf-team/react-jsonschema-form#3183",
+          "title": "Bad performance for list render",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 593,
+          "profileFit": 52,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "frontend_apify_monitor_good",
+          "key": "apify/apify-js#2680",
+          "title": "Monitor mode should show actor run status without refreshing",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 591,
+          "profileFit": 74,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "frontend_rjsf_empty_key_excellent",
+          "key": "rjsf-team/react-jsonschema-form#5097",
+          "title": "additionalProperties: renaming a key to an empty string is silently a no-op",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 279,
+          "profileFit": 30,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "frontend_cdk_glue_weak_profile",
+          "key": "aws/aws-cdk#26935",
+          "title": "(aws-glue-alpha): struct schema produces unsupported inputStrings",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 276,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "frontend_react_slick_old_weak",
+          "key": "akiran/react-slick#1432",
+          "title": "Auto Play - Clicked Dots Remains active",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 265,
+          "profileFit": 30,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 6,
+          "sampleId": "frontend_copy_profile_noise",
+          "key": "PRODHOSH/ossfolio#62",
+          "title": "[GOOD FIRST ISSUE] Add a Copy profile link button on the profile page",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 255,
+          "profileFit": 46,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        }
+      ]
+    },
+    {
+      "dataset": "profile_backend_rust_go",
+      "profile": "rust_backend_systems",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 2,
+        "precisionAt5": 0.5,
+        "precisionAt10": 0.5,
+        "visibleFillRate": 0.13333333333333333,
+        "targetVisibleFillRate": 0.13333333333333333,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 1,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 0,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [
+        {
+          "sampleId": "backend_clippy_toctou_excellent",
+          "reason": "profile fit 30 below expected minimum"
+        }
+      ],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "backend_go_docker_good",
+          "key": "golang-cafe/job-board#45",
+          "title": "[DX] dockerize Go app into Dockerfile for testing and production",
+          "expectedQuality": "good",
+          "expectedBehavior": "fallback_candidate",
+          "finalFeedScore": 350,
+          "profileFit": 74,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 2,
+          "sampleId": "backend_bastion_low_depth",
+          "key": "bastion-rs/bastion#189",
+          "title": "Backend traits for Persistence layer",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 321,
+          "profileFit": 52,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "backend_lingdojo_fact_reject",
+          "key": "lingdojo/kana-dojo#19724",
+          "title": "[Good First Issue] Add new Japan Fact 237 - Beginner-Friendly Open-source Contribution",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": -220,
+          "profileFit": 0,
+          "visibility": "hidden_filtered",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 4,
+          "sampleId": "backend_tokio_backpressure_good",
+          "key": "tokio-rs/tokio#7350",
+          "title": "Document and test backpressure behavior for bounded mpsc receiver lag",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 286,
+          "profileFit": 30,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "backend_clippy_toctou_excellent",
+          "key": "rust-lang/rust-clippy#17158",
+          "title": "TOCTOU: call Path::metadata after Path::exists",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 276,
+          "profileFit": 30,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 6,
+          "sampleId": "backend_compiler_explorer_weak_profile",
+          "key": "mattgodbolt/compiler-explorer#4689",
+          "title": "Try and reduce deduplication in asm-parser-ewavr",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 257,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        }
+      ]
+    },
+    {
+      "dataset": "profile_python_data_cli",
+      "profile": "python_data_cli",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 4,
+        "precisionAt5": 0.5,
+        "precisionAt10": 0.5,
+        "visibleFillRate": 0.26666666666666666,
+        "targetVisibleFillRate": 0.26666666666666666,
+        "rejectLeakage": 1,
+        "profileMismatchLeakage": 1,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 1,
+        "rankingInversions": 1,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [
+        {
+          "sampleId": "python_currency_converter_reject",
+          "reason": "reject sample is visible"
+        },
+        {
+          "sampleId": "python_pytorch_profiler_excellent",
+          "reason": "profile fit 24 below expected minimum"
+        }
+      ],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "python_uv_parent_package_good",
+          "key": "astral-sh/uv#7040",
+          "title": "[feat] Log parent package when erroring during dependency install",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 593,
+          "profileFit": 91,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "python_bitwarden_import_weak_profile",
+          "key": "bitwarden/clients#20694",
+          "title": "1password import does not archive state archived entries",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 590,
+          "profileFit": 79,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "python_ipython_autocomplete_good",
+          "key": "ipython/ipython#12105",
+          "title": "How can I disable filename abbreviations in tab-autocompletion results",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 584,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "python_currency_converter_reject",
+          "key": "hackdartstorm/Python#1272",
+          "title": "[BEGINNER] Build Currency Converter CLI",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 282,
+          "profileFit": 79,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 5,
+          "sampleId": "python_pytorch_profiler_excellent",
+          "key": "PyTorchLightning/pytorch-lightning#9136",
+          "title": "AdvancedProfiler ValueError stopping action that was never started",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 273,
+          "profileFit": 24,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 6,
+          "sampleId": "python_cdk_weak_profile",
+          "key": "aws/aws-cdk#26935",
+          "title": "(aws-glue-alpha): struct schema produces unsupported inputStrings",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 268,
+          "profileFit": 0,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        }
+      ]
+    },
+    {
+      "dataset": "profile_ai_agent_tools",
+      "profile": "ai_agent_tools",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 2,
+        "precisionAt5": 1.0,
+        "precisionAt10": 1.0,
+        "visibleFillRate": 0.13333333333333333,
+        "targetVisibleFillRate": 0.13333333333333333,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 0,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "ai_agenta_eval_breadcrumbs_excellent",
+          "key": "agenta-ai/agenta#4549",
+          "title": "Fix SDK eval breadcrumbs showing Auto Evals",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 639,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "ai_agent_context_builder_good",
+          "key": "ambicuity/terraform-aws-eks-ray#37",
+          "title": "agent_context_builder.py should respect MEMORY_DIR environment variable",
+          "expectedQuality": "good",
+          "expectedBehavior": "fallback_candidate",
+          "finalFeedScore": 465,
+          "profileFit": 80,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 3,
+          "sampleId": "ai_pytorch_profiler_good",
+          "key": "PyTorchLightning/pytorch-lightning#9136",
+          "title": "AdvancedProfiler ValueError stopping action that was never started",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 266,
+          "profileFit": 24,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "ai_skaffold_weak_profile",
+          "key": "GoogleContainerTools/skaffold#5387",
+          "title": "add the post-render option to the helm deploy",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 262,
+          "profileFit": 0,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "ai_generative_inpainting_unclear",
+          "key": "JiahuiYu/generative_inpainting#12",
+          "title": "How to run multiple images with multiple masks respectively",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 250,
+          "profileFit": 24,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 6,
+          "sampleId": "ai_learning_resource_reject",
+          "key": "adph25/learning-resource#27",
+          "title": "10 bộ hướng dẫn về AI Agents cho người mới",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 197,
+          "profileFit": 34,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        }
+      ]
+    },
+    {
+      "dataset": "profile_devops_infra",
+      "profile": "devops_infra",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 3,
+        "precisionAt5": 1.0,
+        "precisionAt10": 1.0,
+        "visibleFillRate": 0.2,
+        "targetVisibleFillRate": 0.2,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 1,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "devops_kubernetes_ci_good",
+          "key": "argoproj/argo-cd#25684",
+          "title": "CI should fail when Kubernetes manifest fixture drifts from generated output",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 624,
+          "profileFit": 74,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "devops_skaffold_sync_excellent",
+          "key": "GoogleContainerTools/skaffold#4898",
+          "title": "[sync] dockerfile infer sync mode not working as expected",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 577,
+          "profileFit": 74,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "devops_go_docker_good",
+          "key": "golang-cafe/job-board#45",
+          "title": "[DX] dockerize Go app into Dockerfile for testing and production",
+          "expectedQuality": "good",
+          "expectedBehavior": "fallback_candidate",
+          "finalFeedScore": 351,
+          "profileFit": 80,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 4,
+          "sampleId": "devops_bitwarden_locale_reject",
+          "key": "bitwarden/clients#19069",
+          "title": "Browser extension will not show TOTP autofill on Web Vault with non-English locale",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 268,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "devops_onchain_payout_reject",
+          "key": "iiitl/decentralized-uptime-monitoring#3",
+          "title": "Verify On-Chain Transaction Before Marking Payout as Completed",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 230,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 6,
+          "sampleId": "devops_genai_drawio_weak_profile",
+          "key": "tuoxie2046/GenAI-DrawIO-Creator#3",
+          "title": "[Good First Issue] Add Azure OpenAI provider support",
+          "expectedQuality": "weak",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 200,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        }
+      ]
+    },
+    {
+      "dataset": "source_trust",
+      "profile": "default_cli_devtools",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 4,
+        "precisionAt5": 1.0,
+        "precisionAt10": 1.0,
+        "visibleFillRate": 0.26666666666666666,
+        "targetVisibleFillRate": 0.26666666666666666,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 1,
+        "feedbackCooldownPasses": 0,
+        "feedbackCooldownTotal": 0,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "source_global_strong_profile_good",
+          "key": "modelcontextprotocol/python-sdk#1205",
+          "title": "Controlling Context in Client for Sampling Requests",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 632,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 2,
+          "sampleId": "source_overlay_httpie_good",
+          "key": "httpie/cli#912",
+          "title": "Windows packaging should preserve CLI config directory",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 627,
+          "profileFit": 100,
+          "visibility": "visible",
+          "sourceTier": "overlay_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "source_gfi_json2ts_good",
+          "key": "bcherny/json-schema-to-typescript#360",
+          "title": "Providing glob pattern to input flag does not produce TS d.ts files",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 577,
+          "profileFit": 100,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "source_overlay_jco_good",
+          "key": "bytecodealliance/jco#402",
+          "title": "Transpile bindings for u32 map to number in d.ts",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible",
+          "finalFeedScore": 577,
+          "profileFit": 100,
+          "visibility": "visible",
+          "sourceTier": "overlay_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "source_global_toy_reject",
+          "key": "mynextproject-portfolio/recipe-explorer-lite#1",
+          "title": "Add dark mode toggle to recipe explorer",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 195,
+          "profileFit": 0,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        },
+        {
+          "rank": 6,
+          "sampleId": "source_global_weak_profile_reject",
+          "key": "SecureBananaLabs/bug-bounty#2845",
+          "title": "Add bounty issue template for new contributors",
+          "expectedQuality": "reject",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 120,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "global"
+        }
+      ]
+    },
+    {
+      "dataset": "feedback_replay",
+      "profile": "default_cli_devtools",
+      "limit": 15,
+      "metrics": {
+        "samples": 6,
+        "visible": 3,
+        "precisionAt5": 1.0,
+        "precisionAt10": 1.0,
+        "visibleFillRate": 0.2,
+        "targetVisibleFillRate": 0.2,
+        "rejectLeakage": 0,
+        "profileMismatchLeakage": 0,
+        "staleHighRankLeakage": 0,
+        "competitionLeakage": 0,
+        "dashboardNoiseLeakage": 0,
+        "rankingInversions": 2,
+        "feedbackCooldownPasses": 5,
+        "feedbackCooldownTotal": 5,
+        "fallbackFillRate": 1.0
+      },
+      "failures": [],
+      "ranked": [
+        {
+          "rank": 1,
+          "sampleId": "feedback_unseen_cli_good",
+          "key": "bcherny/json-schema-to-typescript#360",
+          "title": "Providing glob pattern to input flag does not produce TS d.ts files",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible_top",
+          "finalFeedScore": 575,
+          "profileFit": 100,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 2,
+          "sampleId": "feedback_read_should_leave_first_screen",
+          "key": "astral-sh/uv#7040",
+          "title": "Log parent package when erroring during dependency install",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 550,
+          "profileFit": 97,
+          "visibility": "visible",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 3,
+          "sampleId": "feedback_prepared_should_cool",
+          "key": "bytecodealliance/jco#1596",
+          "title": "[preview2-shim] Runtime values are exported only as types",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 510,
+          "profileFit": 75,
+          "visibility": "visible",
+          "sourceTier": "overlay_trusted"
+        },
+        {
+          "rank": 4,
+          "sampleId": "feedback_shown_should_cool",
+          "key": "apache/incubator-superset#40407",
+          "title": "TableSelector silently truncates table list when DB has more tables than API page limit",
+          "expectedQuality": "good",
+          "expectedBehavior": "visible_lower",
+          "finalFeedScore": 269,
+          "profileFit": 12,
+          "visibility": "hidden_quality",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 5,
+          "sampleId": "feedback_done_hidden",
+          "key": "rust-lang/rust-clippy#17158",
+          "title": "TOCTOU: call Path::metadata after Path::exists",
+          "expectedQuality": "excellent",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 596,
+          "profileFit": 69,
+          "visibility": "hidden_done",
+          "sourceTier": "gfi_trusted"
+        },
+        {
+          "rank": 6,
+          "sampleId": "feedback_dismissed_hidden",
+          "key": "modelcontextprotocol/python-sdk#1205",
+          "title": "Controlling Context in Client for Sampling Requests",
+          "expectedQuality": "good",
+          "expectedBehavior": "hidden",
+          "finalFeedScore": 403,
+          "profileFit": 97,
+          "visibility": "hidden_dismissed",
+          "sourceTier": "global"
+        }
+      ]
+    }
+  ],
+  "overall": {
+    "samples": 48,
+    "visible": 22,
+    "precisionAt5": 0.8125,
+    "precisionAt10": 0.8125,
+    "visibleFillRate": 0.18333333333333332,
+    "targetVisibleFillRate": 0.18333333333333332,
+    "rejectLeakage": 2,
+    "profileMismatchLeakage": 1,
+    "staleHighRankLeakage": 2,
+    "competitionLeakage": 0,
+    "dashboardNoiseLeakage": 2,
+    "rankingInversions": 5,
+    "feedbackCooldownPasses": 5,
+    "feedbackCooldownTotal": 5,
+    "fallbackFillRate": 1.0
+  }
+}

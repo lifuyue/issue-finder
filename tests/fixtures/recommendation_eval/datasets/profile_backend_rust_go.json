@@ -1,0 +1,180 @@
+{
+  "name": "profile_backend_rust_go",
+  "profile": "rust_backend_systems",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "backend_clippy_toctou_excellent",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 17158,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "What it does: detect when calling Path::exists followed by Path::metadata, causing a second syscall. Example code is provided. Expected behavior: lint suggests if let Ok(md) = path.metadata(). Suggested fix: implement the lint and add UI tests for the diagnostic.",
+        "labels": ["good first issue", "A-lint"],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": ["rust", "compiler", "cargo"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minProfileFit": 70,
+        "reasons": ["Fresh Rust/compiler issue with clear implementation and validation."]
+      }
+    },
+    {
+      "id": "backend_tokio_backpressure_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "tokio-rs/tokio",
+        "number": 7350,
+        "title": "Document and test backpressure behavior for bounded mpsc receiver lag",
+        "body": "The bounded mpsc channel docs do not explain receiver lag behavior under load. Steps to reproduce: spawn producers faster than a receiver and observe send wait time. Expected behavior: docs and tests explain backpressure. Suggested fix: add a small concurrency test and update docs.",
+        "labels": ["good first issue", "docs", "testing"],
+        "createdAgeDays": 20,
+        "updatedAgeDays": 5
+      },
+      "repository": {
+        "description": "Asynchronous runtime for Rust backend systems",
+        "language": "Rust",
+        "stars": 26000,
+        "forks": 2400,
+        "watchers": 300,
+        "openIssues": 320,
+        "topics": ["rust", "async", "backend"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Rust backend/concurrency issue with validation path."]
+      }
+    },
+    {
+      "id": "backend_go_docker_good",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "golang-cafe/job-board",
+        "number": 45,
+        "title": "[DX] dockerize Go app into Dockerfile for testing and production",
+        "body": "Create Dockerfile.local and production Dockerfile for a Go backend app. Expected behavior: developers can run the API in Docker and CI can build the production image. Suggested fix: add multi-stage Dockerfile and document docker compose validation.",
+        "labels": ["good first issue", "docker", "backend"],
+        "createdAgeDays": 15,
+        "updatedAgeDays": 10
+      },
+      "repository": {
+        "description": "Go backend job board service",
+        "language": "Go",
+        "stars": 430,
+        "forks": 60,
+        "watchers": 12,
+        "openIssues": 40,
+        "topics": ["go", "backend", "docker"],
+        "pushedAgeDays": 4
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "fallback_candidate",
+        "reasons": ["Strong backend fallback candidate when trusted Rust/Go results are sparse."]
+      }
+    },
+    {
+      "id": "backend_compiler_explorer_weak_profile",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "mattgodbolt/compiler-explorer",
+        "number": 4689,
+        "title": "Try and reduce deduplication in asm-parser-ewavr",
+        "body": "It is a copy paste of another parser with subtle changes. It would be useful to see whether anything beneficial can be deduplicated. No concrete test path is provided.",
+        "labels": ["help wanted", "good first issue", "request"],
+        "createdAgeDays": 1200,
+        "updatedAgeDays": 500
+      },
+      "repository": {
+        "description": "Compiler Explorer frontend and parser tooling",
+        "language": "TypeScript",
+        "stars": 18813,
+        "forks": 2000,
+        "watchers": 250,
+        "openIssues": 799,
+        "topics": ["compiler", "typescript"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["profile_mismatch", "stale"],
+        "reasons": ["Compiler-related but not Rust/Go backend and weakly scoped."]
+      }
+    },
+    {
+      "id": "backend_lingdojo_fact_reject",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "lingdojo/kana-dojo",
+        "number": 19724,
+        "title": "[Good First Issue] Add new Japan Fact 237 - Beginner-Friendly Open-source Contribution",
+        "body": "No prerequisites needed. No code required. Add one new Japan fact from the browser in under 60 seconds.",
+        "labels": ["good first issue", "beginner"],
+        "createdAgeDays": 1,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Japanese learning web app",
+        "language": "TypeScript",
+        "stars": 2500,
+        "forks": 2100,
+        "watchers": 80,
+        "openIssues": 1200,
+        "topics": ["education"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["toy_no_code", "profile_mismatch"],
+        "reasons": ["No-code education microtask is not backend work."]
+      }
+    },
+    {
+      "id": "backend_bastion_low_depth",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "bastion-rs/bastion",
+        "number": 189,
+        "title": "Backend traits for Persistence layer",
+        "body": "Add backend traits for the persistence layer. More details should be discussed in the implementation.",
+        "labels": ["good first issue", "enhancement"],
+        "createdAgeDays": 1800,
+        "updatedAgeDays": 700
+      },
+      "repository": {
+        "description": "Rust actor system backend",
+        "language": "Rust",
+        "stars": 760,
+        "forks": 70,
+        "watchers": 20,
+        "openIssues": 80,
+        "topics": ["rust", "backend"],
+        "pushedAgeDays": 600
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["stale"],
+        "reasons": ["Profile relevant but old and underspecified."]
+      }
+    }
+  ]
+}
+

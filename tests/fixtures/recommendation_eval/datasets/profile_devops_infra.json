@@ -1,0 +1,180 @@
+{
+  "name": "profile_devops_infra",
+  "profile": "devops_infra",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "devops_skaffold_sync_excellent",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "GoogleContainerTools/skaffold",
+        "number": 4898,
+        "title": "[sync] dockerfile infer sync mode not working as expected",
+        "body": "Skaffold sync cannot infer sync mode from Dockerfile in a Kubernetes workflow. Steps to reproduce: run skaffold dev with the provided Dockerfile and edit a synced file. Expected behavior: inferred sync mode updates the container. Suggested fix: update Dockerfile sync inference and add integration tests.",
+        "labels": ["good first issue", "docker", "kubernetes"],
+        "createdAgeDays": 1000,
+        "updatedAgeDays": 300
+      },
+      "repository": {
+        "description": "Kubernetes and Docker developer workflow tool",
+        "language": "Go",
+        "stars": 15000,
+        "forks": 2200,
+        "watchers": 220,
+        "openIssues": 600,
+        "topics": ["kubernetes", "docker", "ci", "devops"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minProfileFit": 70,
+        "reasons": ["Direct Docker/Kubernetes issue with concrete validation path."]
+      }
+    },
+    {
+      "id": "devops_go_docker_good",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "golang-cafe/job-board",
+        "number": 45,
+        "title": "[DX] dockerize Go app into Dockerfile for testing and production",
+        "body": "Create Dockerfile.local and production Dockerfile for a Go backend app. Expected behavior: developers can run the API in Docker and CI can build the production image. Suggested fix: add multi-stage Dockerfile and document validation.",
+        "labels": ["good first issue", "docker", "ci"],
+        "createdAgeDays": 15,
+        "updatedAgeDays": 10
+      },
+      "repository": {
+        "description": "Go backend job board service",
+        "language": "Go",
+        "stars": 430,
+        "forks": 60,
+        "watchers": 12,
+        "openIssues": 40,
+        "topics": ["go", "docker", "ci"],
+        "pushedAgeDays": 4
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "fallback_candidate",
+        "reasons": ["Strong DevOps fallback candidate from global search."]
+      }
+    },
+    {
+      "id": "devops_kubernetes_ci_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "argoproj/argo-cd",
+        "number": 25684,
+        "title": "CI should fail when Kubernetes manifest fixture drifts from generated output",
+        "body": "Generated Kubernetes manifest fixtures can drift without CI catching it. Steps to reproduce: change generator output and run tests. Expected behavior: CI fails with a fixture diff. Suggested fix: add manifest snapshot validation in the CI job.",
+        "labels": ["good first issue", "ci", "kubernetes"],
+        "createdAgeDays": 30,
+        "updatedAgeDays": 3
+      },
+      "repository": {
+        "description": "GitOps continuous delivery for Kubernetes",
+        "language": "Go",
+        "stars": 19000,
+        "forks": 6000,
+        "watchers": 300,
+        "openIssues": 1200,
+        "topics": ["kubernetes", "gitops", "ci"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Strong Kubernetes/CI profile issue."]
+      }
+    },
+    {
+      "id": "devops_genai_drawio_weak_profile",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "tuoxie2046/GenAI-DrawIO-Creator",
+        "number": 3,
+        "title": "[Good First Issue] Add Azure OpenAI provider support",
+        "body": "Add Azure OpenAI provider support to a drawing generator. Expected behavior: users can configure Azure endpoint and key.",
+        "labels": ["good first issue", "ai"],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "AI diagram generator",
+        "language": "TypeScript",
+        "stars": 6,
+        "forks": 1,
+        "watchers": 0,
+        "openIssues": 4,
+        "topics": ["ai", "drawio"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["profile_mismatch"],
+        "reasons": ["Not DevOps/infra despite Azure keyword."]
+      }
+    },
+    {
+      "id": "devops_onchain_payout_reject",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "iiitl/decentralized-uptime-monitoring",
+        "number": 3,
+        "title": "Verify On-Chain Transaction Before Marking Payout as Completed",
+        "body": "Verify on-chain transaction status before marking a payout as completed. The repository is an experimental uptime monitor and the validation path is unclear.",
+        "labels": ["good first issue"],
+        "createdAgeDays": 8,
+        "updatedAgeDays": 8
+      },
+      "repository": {
+        "description": "Decentralized uptime monitoring prototype",
+        "language": "TypeScript",
+        "stars": 6,
+        "forks": 2,
+        "watchers": 0,
+        "openIssues": 10,
+        "topics": ["blockchain"],
+        "pushedAgeDays": 5
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["profile_mismatch"],
+        "reasons": ["Blockchain prototype issue is outside DevOps/infra profile."]
+      }
+    },
+    {
+      "id": "devops_bitwarden_locale_reject",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "bitwarden/clients",
+        "number": 19069,
+        "title": "Browser extension will not show TOTP autofill on Web Vault with non-English locale",
+        "body": "Bitwarden browser extension TOTP autofill is missing for non-English Web Vault locale. Steps to reproduce: switch locale and open Web Vault. Expected behavior: autofill still appears.",
+        "labels": ["bug", "good first issue", "browser"],
+        "createdAgeDays": 100,
+        "updatedAgeDays": 50
+      },
+      "repository": {
+        "description": "Password manager web, desktop, browser and CLI clients",
+        "language": "TypeScript",
+        "stars": 12977,
+        "forks": 1500,
+        "watchers": 200,
+        "openIssues": 1134,
+        "topics": ["typescript", "browser"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["profile_mismatch"],
+        "reasons": ["Browser localization issue should not fill DevOps/infra ranking."]
+      }
+    }
+  ]
+}
+

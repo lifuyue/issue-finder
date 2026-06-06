@@ -1,0 +1,181 @@
+{
+  "name": "profile_frontend",
+  "profile": "typescript_frontend",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "frontend_rjsf_empty_key_excellent",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rjsf-team/react-jsonschema-form",
+        "number": 5097,
+        "title": "additionalProperties: renaming a key to an empty string is silently a no-op",
+        "body": "Description: in handleKeyRename for additionalProperties, renaming a key to an empty string silently no-ops because the code uses actualNewKey || oldKey. Expected behavior: empty string should be validated or rejected with visible feedback. Suggested fix: replace the fallback check and add form tests for empty key rename.",
+        "labels": ["bug", "help wanted"],
+        "createdAgeDays": 5,
+        "updatedAgeDays": 5
+      },
+      "repository": {
+        "description": "React JSON schema form components",
+        "language": "TypeScript",
+        "stars": 15797,
+        "forks": 2500,
+        "watchers": 250,
+        "openIssues": 179,
+        "topics": ["react", "forms", "json-schema", "frontend"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minProfileFit": 70,
+        "reasons": ["Clear recent React/UI bug with concrete implementation path."]
+      }
+    },
+    {
+      "id": "frontend_rjsf_list_perf_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rjsf-team/react-jsonschema-form",
+        "number": 3183,
+        "title": "Bad performance for list render",
+        "body": "Rendering large array fields causes slow list updates in the React form playground. Steps to reproduce: load the linked schema with many array items and edit an element. Expected behavior: only the changed row re-renders. Suggested fix: inspect ArrayField item keys and add a performance regression test.",
+        "labels": ["bug", "performance", "help wanted"],
+        "createdAgeDays": 1200,
+        "updatedAgeDays": 3
+      },
+      "repository": {
+        "description": "React JSON schema form components",
+        "language": "TypeScript",
+        "stars": 15797,
+        "forks": 2500,
+        "watchers": 250,
+        "openIssues": 179,
+        "topics": ["react", "forms", "json-schema", "frontend"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "rejectReasons": ["stale"],
+        "reasons": ["Relevant frontend issue, but age means it should not outrank fresh excellent issues."]
+      }
+    },
+    {
+      "id": "frontend_apify_monitor_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "apify/apify-js",
+        "number": 2680,
+        "title": "Monitor mode should show actor run status without refreshing",
+        "body": "Monitor mode does not update actor run status in the browser UI. Steps to reproduce: start monitor mode, trigger a run, and watch the status remain stale. Expected behavior: status updates when the run changes. Suggested fix: subscribe to run status polling and add browser integration coverage.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 40,
+        "updatedAgeDays": 20
+      },
+      "repository": {
+        "description": "JavaScript SDK and browser tooling for actors",
+        "language": "TypeScript",
+        "stars": 5200,
+        "forks": 640,
+        "watchers": 90,
+        "openIssues": 220,
+        "topics": ["typescript", "browser", "developer-tools"],
+        "pushedAgeDays": 8
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Frontend/browser issue with actionable reproduction."]
+      }
+    },
+    {
+      "id": "frontend_cdk_glue_weak_profile",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "aws/aws-cdk",
+        "number": 26935,
+        "title": "(aws-glue-alpha): struct schema produces unsupported inputStrings",
+        "body": "Schema.struct generates invalid inputString for nested structs. Steps to reproduce: build a nested Glue schema and query with Athena. Expected behavior: generated inputString is accepted. Suggested fix: update schema string rendering and add unit tests.",
+        "labels": ["bug", "good first issue", "effort/medium"],
+        "createdAgeDays": 1010,
+        "updatedAgeDays": 12
+      },
+      "repository": {
+        "description": "Cloud development kit for infrastructure as code",
+        "language": "TypeScript",
+        "stars": 12794,
+        "forks": 4200,
+        "watchers": 200,
+        "openIssues": 2700,
+        "topics": ["typescript", "cloud", "infrastructure"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["profile_mismatch", "stale"],
+        "reasons": ["TypeScript but not frontend; should not outrank React/UI issues."]
+      }
+    },
+    {
+      "id": "frontend_react_slick_old_weak",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "akiran/react-slick",
+        "number": 1432,
+        "title": "Auto Play - Clicked Dots Remains active",
+        "body": "In the Auto Play demo page, clicking a dot leaves two dots visually active. Expected behavior: only the current slide dot appears active. Suggested fix: adjust focus/active dot CSS and verify the demo page.",
+        "labels": ["good first issue"],
+        "createdAgeDays": 2400,
+        "updatedAgeDays": 800
+      },
+      "repository": {
+        "description": "React carousel component",
+        "language": "JavaScript",
+        "stars": 11925,
+        "forks": 2100,
+        "watchers": 200,
+        "openIssues": 491,
+        "topics": ["react", "frontend", "carousel"],
+        "pushedAgeDays": 300
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["stale"],
+        "reasons": ["Frontend-relevant but very old and weak validation."]
+      }
+    },
+    {
+      "id": "frontend_copy_profile_noise",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "PRODHOSH/ossfolio",
+        "number": 62,
+        "title": "[GOOD FIRST ISSUE] Add a Copy profile link button on the profile page",
+        "body": "Add a Copy profile link button on the profile page. Keep it visually consistent with the design.",
+        "labels": ["good first issue", "frontend"],
+        "createdAgeDays": 1,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Small open source portfolio app",
+        "language": "TypeScript",
+        "stars": 6,
+        "forks": 2,
+        "watchers": 0,
+        "openIssues": 35,
+        "topics": ["frontend"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["toy_no_code"],
+        "reasons": ["Trivial global UI copy task should not fill frontend ranking."]
+      }
+    }
+  ]
+}
+

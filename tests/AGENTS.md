@@ -22,6 +22,12 @@ Tool contract 测试应覆盖 runtime 入口和 CLI adapter 入口。`tools call
 
 针对高价值 issue 本地算法，优先编写聚焦的评分场景测试，并使用明确的 fixture。时间相关数据使用稳定的相对时间；断言重点放在 `attention_score`、`execution_score`、`recommendation_category`、signals 和 risk tags 行为上。除非测试目标就是阈值边界，否则避免断言脆弱的精确总分。
 
+## Recommendation Evaluation Fixtures
+
+`tests/fixtures/recommendation_eval/` 是推荐算法离线回归集。fixture 必须使用最小结构，不复制完整 GitHub API payload。每个 sample 必须包含 `expected.quality`、`expected.behavior` 和人工 `expected.reasons`，让后续贡献者能理解为什么该 issue 应该上榜、降权或隐藏。
+
+新增或修改 ranking、quality policy、freshness、feedback、source trust 或 fallback 规则时，应增加能失败旧算法、通过新算法的样本。离线 recommendation eval 测试必须使用 fixture、mock 或临时状态，不得访问真实 GitHub。
+
 ## Workspace 测试
 
 Workspace 测试应使用临时目录和本地 git 仓库。依赖 git 的测试需要用 `git_available()` 做保护。测试不得修改真实目标仓库，不得在其中安装依赖、提交、推送或创建 PR。

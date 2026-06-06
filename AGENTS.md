@@ -30,6 +30,14 @@
 
 测试使用 Rust 内置测试框架，异步工作流使用 `tokio::test`。面向用户可见工作流、本地状态布局、GitHub 接口行为、工作区准备逻辑和 JSON tool contract 行为，应在 `tests/` 中增加集成测试覆盖。优先使用 `tempfile` 和类似 `ISSUE_FINDER_HOME` 的隔离方式；GitHub 和 tool contract 验证必须使用 mock 或临时状态，不依赖真实网络。测试名称应描述行为，例如 `scout_uses_mocked_github_search_responses`。
 
+## 推荐算法评测与迭代
+
+修改 discovery、fallback、feed ranking、quality policy、freshness 或 feedback cooldown 时，必须同步维护 `tests/fixtures/recommendation_eval/` 中的离线评测数据，或在同次变更中说明为什么无需新增样本。自动测试必须使用 fixture、mock 或临时状态，不得依赖真实 GitHub 网络。
+
+每个重要推荐算法版本完成后，必须运行离线 recommendation eval、`cargo test` 和 `cargo clippy --all-targets -- -D warnings`。重要版本还必须使用隔离的 `ISSUE_FINDER_HOME` 跑固定 6 组真实 profile，并由执行者直接读取 top candidates 的 issue 正文和评论评估价值。真实运行结果不作为 CI 强制测试，但应沉淀到 `docs/recommendation-evals/`，并将代表性失败样本补回离线 fixtures。
+
+不要提交 GitHub token、临时 `ISSUE_FINDER_HOME`、真实运行缓存、生成的用户状态或目标工作区改动。
+
 ## 提交与拉取请求指南
 
 近期历史使用简短的祈使句摘要，有时带常规前缀，例如 `Fix daily failure handling and workspace branch checks` 或 `docs: add Issue Finder Rust design`。保持提交聚焦；有帮助时在摘要中提到受影响的工作流。拉取请求应包含简洁描述、已运行的测试、关联议题；只有当生成的 Markdown 或报告相关时才需要截图。

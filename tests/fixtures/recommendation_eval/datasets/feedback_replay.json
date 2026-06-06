@@ -1,0 +1,181 @@
+{
+  "name": "feedback_replay",
+  "profile": "default_cli_devtools",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "feedback_unseen_cli_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "bcherny/json-schema-to-typescript",
+        "number": 360,
+        "title": "Providing glob pattern to input flag does not produce TS d.ts files",
+        "body": "How to reproduce: run json2ts -i src/**/*.schema.json. Expected output: generated d.ts files in corresponding directories. Suggested fix: implement directory output and add CLI tests.",
+        "labels": ["enhancement", "help wanted", "good first issue"],
+        "createdAgeDays": 2000,
+        "updatedAgeDays": 400
+      },
+      "repository": {
+        "description": "CLI that compiles JSON Schema to TypeScript definitions",
+        "language": "TypeScript",
+        "stars": 3300,
+        "forks": 250,
+        "watchers": 80,
+        "openIssues": 189,
+        "topics": ["typescript", "cli", "developer-tools"],
+        "pushedAgeDays": 250
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_top",
+        "reasons": ["Unseen good candidate should remain visible."]
+      }
+    },
+    {
+      "id": "feedback_shown_should_cool",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "apache/incubator-superset",
+        "number": 40407,
+        "title": "TableSelector silently truncates table list when DB has more tables than API page limit",
+        "body": "The useTables hook returns hasMore when backend has more tables than returned page, but TableSelector never consumes it. Steps to reproduce: connect schema with 100+ tables. Expected behavior: helper message warns user to refine search. Suggested fix: consume hasMore in TableSelector and add UI test.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 14,
+        "updatedAgeDays": 5
+      },
+      "repository": {
+        "description": "Data exploration and SQL Lab frontend",
+        "language": "TypeScript",
+        "stars": 73183,
+        "forks": 17523,
+        "watchers": 1534,
+        "openIssues": 1256,
+        "topics": ["typescript", "frontend", "sql"],
+        "pushedAgeDays": 1
+      },
+      "feedback": { "shownCount": 1, "feedbackAgeDays": 0 },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": ["Shown candidate should be cooled below unseen comparable candidates."]
+      }
+    },
+    {
+      "id": "feedback_read_should_leave_first_screen",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "astral-sh/uv",
+        "number": 7040,
+        "title": "Log parent package when erroring during dependency install",
+        "body": "When uv fails during dependency install, the CLI error omits the parent package. Expected behavior: error output includes parent package chain. Suggested fix: add resolver error context and CLI snapshot test.",
+        "labels": ["help wanted", "cli"],
+        "createdAgeDays": 640,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Fast Python package manager and CLI",
+        "language": "Rust",
+        "stars": 30000,
+        "forks": 1000,
+        "watchers": 300,
+        "openIssues": 650,
+        "topics": ["python", "cli", "developer-tools"],
+        "pushedAgeDays": 1
+      },
+      "feedback": { "shownCount": 1, "readCount": 1, "feedbackAgeDays": 0 },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": ["Read candidate should be strongly cooled in future ranking versions."]
+      }
+    },
+    {
+      "id": "feedback_prepared_should_cool",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "bytecodealliance/jco",
+        "number": 1596,
+        "title": "[preview2-shim] Runtime values are exported only as types",
+        "body": "Runtime values such as streams are exported only as types. Expected behavior: generated declarations expose runtime values. Suggested fix: adjust generated exports and add regression tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "JavaScript tooling for WebAssembly components and TypeScript bindings",
+        "language": "Rust",
+        "stars": 952,
+        "forks": 120,
+        "watchers": 40,
+        "openIssues": 46,
+        "topics": ["rust", "typescript", "cli"],
+        "pushedAgeDays": 1
+      },
+      "feedback": { "preparedCount": 1, "feedbackAgeDays": 0 },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_lower",
+        "reasons": ["Prepared candidate should be cooled unless new activity appears."]
+      }
+    },
+    {
+      "id": "feedback_done_hidden",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 17158,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": ["good first issue", "A-lint"],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": ["rust", "compiler", "cargo"],
+        "pushedAgeDays": 1
+      },
+      "feedback": { "done": true, "feedbackAgeDays": 0 },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "hidden",
+        "reasons": ["Done feedback should hide the issue."]
+      }
+    },
+    {
+      "id": "feedback_dismissed_hidden",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "modelcontextprotocol/python-sdk",
+        "number": 1205,
+        "title": "Controlling Context in Client for Sampling Requests",
+        "body": "The Python SDK client does not expose enough control over sampling request context. Suggested fix: add client option and tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 14,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Python SDK for model context protocol developer tools",
+        "language": "Python",
+        "stars": 5000,
+        "forks": 600,
+        "watchers": 100,
+        "openIssues": 180,
+        "topics": ["python", "developer-tools", "llm"],
+        "pushedAgeDays": 1
+      },
+      "feedback": { "dismissed": true, "feedbackAgeDays": 0 },
+      "expected": {
+        "quality": "good",
+        "behavior": "hidden",
+        "reasons": ["Dismissed feedback should hide the issue."]
+      }
+    }
+  ]
+}
+

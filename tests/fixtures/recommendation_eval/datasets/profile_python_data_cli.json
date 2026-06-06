@@ -1,0 +1,180 @@
+{
+  "name": "profile_python_data_cli",
+  "profile": "python_data_cli",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "python_pytorch_profiler_excellent",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "PyTorchLightning/pytorch-lightning",
+        "number": 9136,
+        "title": "AdvancedProfiler ValueError stopping action that was never started",
+        "body": "AdvancedProfiler raises ValueError when stopping run_test_evaluation that was never started. Steps to reproduce: run validation with AdvancedProfiler enabled. Expected behavior: profiler handles missing action safely. Suggested fix: guard stop calls and add a regression test.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 1200,
+        "updatedAgeDays": 240
+      },
+      "repository": {
+        "description": "Python machine learning training framework",
+        "language": "Python",
+        "stars": 29000,
+        "forks": 3500,
+        "watchers": 350,
+        "openIssues": 900,
+        "topics": ["python", "testing", "machine-learning"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minProfileFit": 80,
+        "reasons": ["Python testing bug with concrete reproduction and regression path."]
+      }
+    },
+    {
+      "id": "python_ipython_autocomplete_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "ipython/ipython",
+        "number": 12105,
+        "title": "How can I disable filename abbreviations in tab-autocompletion results",
+        "body": "Tab completion abbreviates long filenames in the terminal UI. Steps to reproduce: create long file names and use IPython completion. Expected behavior: configuration can disable abbreviation. Suggested fix: expose a config flag and verify with completion tests.",
+        "labels": ["good first issue", "enhancement"],
+        "createdAgeDays": 1600,
+        "updatedAgeDays": 70
+      },
+      "repository": {
+        "description": "Interactive Python shell and CLI",
+        "language": "Python",
+        "stars": 17000,
+        "forks": 4500,
+        "watchers": 300,
+        "openIssues": 520,
+        "topics": ["python", "cli", "terminal"],
+        "pushedAgeDays": 5
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Python CLI issue with testable behavior."]
+      }
+    },
+    {
+      "id": "python_uv_parent_package_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "astral-sh/uv",
+        "number": 7040,
+        "title": "[feat] Log parent package when erroring during dependency install",
+        "body": "When uv fails during dependency install, the error does not show the parent package that introduced the dependency. Expected behavior: CLI logs the parent package chain. Suggested fix: include parent package context in resolver errors and add CLI snapshot tests.",
+        "labels": ["help wanted", "cli", "error messages"],
+        "createdAgeDays": 640,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Fast Python package manager and CLI",
+        "language": "Rust",
+        "stars": 30000,
+        "forks": 1000,
+        "watchers": 300,
+        "openIssues": 650,
+        "topics": ["python", "cli", "developer-tools"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Rust implementation but strong Python CLI profile fit."]
+      }
+    },
+    {
+      "id": "python_cdk_weak_profile",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "aws/aws-cdk",
+        "number": 26935,
+        "title": "(aws-glue-alpha): struct schema produces unsupported inputStrings",
+        "body": "Schema.struct generates invalid inputStrings for nested Glue structs. Steps to reproduce: build nested struct schema and query with Athena. Suggested fix: update TypeScript schema rendering.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 1010,
+        "updatedAgeDays": 12
+      },
+      "repository": {
+        "description": "Cloud development kit",
+        "language": "TypeScript",
+        "stars": 12794,
+        "forks": 4200,
+        "watchers": 200,
+        "openIssues": 2700,
+        "topics": ["typescript", "cloud", "infrastructure"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["profile_mismatch"],
+        "reasons": ["Not Python/data/CLI despite high repo influence."]
+      }
+    },
+    {
+      "id": "python_currency_converter_reject",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "hackdartstorm/Python",
+        "number": 1272,
+        "title": "[BEGINNER] Build Currency Converter CLI",
+        "body": "Build a beginner currency converter CLI script. Use any public API and print the converted amount.",
+        "labels": ["beginner", "good first issue"],
+        "createdAgeDays": 3,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Collection of beginner Python scripts",
+        "language": "Python",
+        "stars": 20,
+        "forks": 8,
+        "watchers": 0,
+        "openIssues": 500,
+        "topics": ["python", "beginner"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["toy_no_code"],
+        "reasons": ["Toy beginner script should not fill serious Python/data ranking."]
+      }
+    },
+    {
+      "id": "python_bitwarden_import_weak_profile",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "bitwarden/clients",
+        "number": 20694,
+        "title": "1password import does not archive state archived entries",
+        "body": "1Password import skips archived entries. Steps to reproduce: export 1pux with archived items and import. Expected behavior: archived items are archived in Bitwarden. Suggested fix: update importer mapping and add importer tests.",
+        "labels": ["bug", "good first issue", "cli", "web"],
+        "createdAgeDays": 20,
+        "updatedAgeDays": 20
+      },
+      "repository": {
+        "description": "Password manager web, desktop, browser and CLI clients",
+        "language": "TypeScript",
+        "stars": 12977,
+        "forks": 1500,
+        "watchers": 200,
+        "openIssues": 1134,
+        "topics": ["typescript", "cli", "security"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "rejectReasons": ["profile_mismatch"],
+        "reasons": ["CLI-adjacent but not Python/data."]
+      }
+    }
+  ]
+}
+

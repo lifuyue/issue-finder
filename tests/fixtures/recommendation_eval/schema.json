@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Issue Finder Recommendation Evaluation Dataset",
+  "type": "object",
+  "required": ["samples"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string" },
+    "profile": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 1 },
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sample" }
+    }
+  },
+  "$defs": {
+    "sample": {
+      "type": "object",
+      "required": ["id", "issue", "repository", "expected"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "profile": { "type": "string" },
+        "sourceTier": {
+          "type": "string",
+          "enum": ["overlay_trusted", "gfi_trusted", "global"]
+        },
+        "issue": { "$ref": "#/$defs/issue" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "comments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/comment" }
+        },
+        "competition": { "$ref": "#/$defs/competition" },
+        "activity": { "$ref": "#/$defs/activity" },
+        "growth": { "$ref": "#/$defs/growth" },
+        "feedback": { "$ref": "#/$defs/feedback" },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "required": ["repoFullName", "number", "title", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "repoFullName": { "type": "string" },
+        "repoName": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "createdAgeDays": { "type": "integer", "minimum": 0 },
+        "updatedAgeDays": { "type": "integer", "minimum": 0 },
+        "commentsCount": { "type": "integer", "minimum": 0 },
+        "authorAssociation": { "type": "string" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["language", "stars"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "language": { "type": "string" },
+        "stars": { "type": "integer", "minimum": 0 },
+        "forks": { "type": "integer", "minimum": 0 },
+        "watchers": { "type": "integer", "minimum": 0 },
+        "openIssues": { "type": "integer", "minimum": 0 },
+        "topics": { "type": "array", "items": { "type": "string" } },
+        "pushedAt": { "type": "string" },
+        "pushedAgeDays": { "type": "integer", "minimum": 0 },
+        "createdAt": { "type": "string" },
+        "createdAgeDays": { "type": "integer", "minimum": 0 },
+        "archived": { "type": "boolean" }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "required": ["body"],
+      "additionalProperties": false,
+      "properties": {
+        "body": { "type": "string" },
+        "authorAssociation": { "type": "string" },
+        "createdAgeDays": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "competition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timelineMissing": { "type": "boolean" },
+        "openPrRefs": { "type": "integer", "minimum": 0 },
+        "closedPrRefs": { "type": "integer", "minimum": 0 },
+        "attemptComments": { "type": "integer", "minimum": 0 },
+        "claimComments": { "type": "integer", "minimum": 0 },
+        "workingComments": { "type": "integer", "minimum": 0 },
+        "fixSubmittedComments": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maintainerRecentResponse": { "type": "boolean" },
+        "recentIssueActivity": { "type": "boolean" },
+        "recentRepoActivity": { "type": "boolean" }
+      }
+    },
+    "growth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recentStars": { "type": "integer", "minimum": 0 },
+        "recentForks": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shownCount": { "type": "integer", "minimum": 0 },
+        "readCount": { "type": "integer", "minimum": 0 },
+        "preparedCount": { "type": "integer", "minimum": 0 },
+        "dismissed": { "type": "boolean" },
+        "done": { "type": "boolean" },
+        "feedbackAgeDays": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": ["quality", "behavior", "reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "quality": {
+          "type": "string",
+          "enum": ["excellent", "good", "weak", "reject"]
+        },
+        "behavior": {
+          "type": "string",
+          "enum": ["visible_top", "visible", "visible_lower", "hidden", "fallback_candidate"]
+        },
+        "rejectReasons": { "type": "array", "items": { "type": "string" } },
+        "minProfileFit": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "maxRankBucket": { "type": "integer", "minimum": 1 },
+        "mustHaveRiskTags": { "type": "array", "items": { "type": "string" } },
+        "mustNotHaveRiskTags": { "type": "array", "items": { "type": "string" } },
+        "reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  }
+}
+

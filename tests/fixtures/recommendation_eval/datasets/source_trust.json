@@ -1,0 +1,178 @@
+{
+  "name": "source_trust",
+  "profile": "default_cli_devtools",
+  "limit": 15,
+  "samples": [
+    {
+      "id": "source_overlay_httpie_good",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "httpie/cli",
+        "number": 912,
+        "title": "Windows packaging should preserve CLI config directory",
+        "body": "HTTPie on Windows loses the CLI config directory during packaged install. Steps to reproduce: install package, run http --debug, and inspect config path. Expected behavior: config directory is preserved. Suggested fix: update packaging path logic and add Windows packaging test.",
+        "labels": ["bug", "help wanted"],
+        "createdAgeDays": 20,
+        "updatedAgeDays": 5
+      },
+      "repository": {
+        "description": "HTTP command-line API client",
+        "language": "Python",
+        "stars": 35000,
+        "forks": 2500,
+        "watchers": 300,
+        "openIssues": 120,
+        "topics": ["cli", "developer-tools", "python"],
+        "pushedAgeDays": 2
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "reasons": ["Overlay trusted CLI issue should rank strongly."]
+      }
+    },
+    {
+      "id": "source_overlay_jco_good",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "bytecodealliance/jco",
+        "number": 402,
+        "title": "Transpile bindings for u32 map to number in d.ts",
+        "body": "Generated TypeScript bindings map WIT u32 to number, allowing invalid negative values. Steps to reproduce: run jco transpile on the sample WIT and call with negative values. Expected behavior: generated bindings prevent or trap invalid values. Suggested fix: adjust generated type/runtime validation and add tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 800,
+        "updatedAgeDays": 45
+      },
+      "repository": {
+        "description": "JavaScript tooling for WebAssembly components and TypeScript bindings",
+        "language": "Rust",
+        "stars": 952,
+        "forks": 120,
+        "watchers": 40,
+        "openIssues": 46,
+        "topics": ["rust", "typescript", "cli", "webassembly"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Overlay trusted profile match should survive lower repo influence."]
+      }
+    },
+    {
+      "id": "source_global_strong_profile_good",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "modelcontextprotocol/python-sdk",
+        "number": 1205,
+        "title": "Controlling Context in Client for Sampling Requests",
+        "body": "The Python SDK client does not expose enough control over sampling request context. Steps to reproduce: send a sampling request with custom context and inspect the generated request. Expected behavior: caller can control context fields. Suggested fix: add client option and tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 14,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Python SDK for model context protocol developer tools",
+        "language": "Python",
+        "stars": 5000,
+        "forks": 600,
+        "watchers": 100,
+        "openIssues": 180,
+        "topics": ["python", "developer-tools", "llm"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Global candidate may be visible when profile and execution are strong."]
+      }
+    },
+    {
+      "id": "source_global_weak_profile_reject",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "SecureBananaLabs/bug-bounty",
+        "number": 2845,
+        "title": "Add bounty issue template for new contributors",
+        "body": "Add a new issue template and bounty label for contributors. No code changes are required.",
+        "labels": ["good first issue", "bounty", "AI agent friendly"],
+        "createdAgeDays": 1,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Bug bounty marketplace",
+        "language": "TypeScript",
+        "stars": 50,
+        "forks": 400,
+        "watchers": 0,
+        "openIssues": 1000,
+        "topics": ["bounty"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["dashboard_noise", "toy_no_code"],
+        "reasons": ["Global marketplace/bounty noise should be blocked."]
+      }
+    },
+    {
+      "id": "source_gfi_json2ts_good",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "bcherny/json-schema-to-typescript",
+        "number": 360,
+        "title": "Providing glob pattern to input flag does not produce TS d.ts files",
+        "body": "How to reproduce: run json2ts -i src/**/*.schema.json. Expected output: generated d.ts files in corresponding directories. Actual behavior: output prints to stdout. Suggested fix: clarify glob output behavior or implement directory output and add CLI tests.",
+        "labels": ["enhancement", "help wanted", "good first issue"],
+        "createdAgeDays": 2000,
+        "updatedAgeDays": 400
+      },
+      "repository": {
+        "description": "CLI that compiles JSON Schema to TypeScript definitions",
+        "language": "TypeScript",
+        "stars": 3300,
+        "forks": 250,
+        "watchers": 80,
+        "openIssues": 189,
+        "topics": ["typescript", "cli", "developer-tools"],
+        "pushedAgeDays": 250
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": ["Trusted CLI/devtools candidate with strong profile fit despite age."]
+      }
+    },
+    {
+      "id": "source_global_toy_reject",
+      "sourceTier": "global",
+      "issue": {
+        "repoFullName": "mynextproject-portfolio/recipe-explorer-lite",
+        "number": 1,
+        "title": "Add dark mode toggle to recipe explorer",
+        "body": "Add a dark mode toggle button to the recipe explorer lite app.",
+        "labels": ["good first issue"],
+        "createdAgeDays": 1,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Portfolio recipe app",
+        "language": "JavaScript",
+        "stars": 2,
+        "forks": 1,
+        "watchers": 0,
+        "openIssues": 3,
+        "topics": ["portfolio"],
+        "pushedAgeDays": 1
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["toy_no_code", "profile_mismatch"],
+        "reasons": ["Global toy app should not compete with trusted devtools issues."]
+      }
+    }
+  ]
+}
+

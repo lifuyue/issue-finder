@@ -2,7 +2,7 @@
 
 ## Status
 
-已批准设计，待执行。
+已执行 V1：已加入离线 recommendation eval fixture、测试 support、baseline 报告和协作文档。V1 不修改生产 ranking、fallback 或 GitHub discovery 行为。
 
 ## Background
 
