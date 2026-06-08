@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -114,8 +114,8 @@ async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
         return;
     }
 
-    let (base_url, handle) = start_mock_tool_github();
-    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
+    let mock_github = start_mock_tool_github();
+    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
     let _env_guard = EnvGuard;
 
     let dir = tempdir().unwrap();
@@ -286,7 +286,7 @@ async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
         .unwrap()
         .contains("# Entry"));
 
-    handle.join().unwrap();
+    mock_github.stop();
 }
 
 #[tokio::test]
@@ -412,33 +412,57 @@ fn issue(repo_full_name: &str, number: u64) -> GitHubIssue {
     }
 }
 
-fn start_mock_tool_github() -> (String, thread::JoinHandle<()>) {
+struct MockToolGithub {
+    base_url: String,
+    shutdown: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl MockToolGithub {
+    fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    fn stop(mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+impl Drop for MockToolGithub {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+fn start_mock_tool_github() -> MockToolGithub {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let base_url_for_thread = base_url.clone();
     let search_count = Arc::new(AtomicUsize::new(0));
     let search_count_for_thread = Arc::clone(&search_count);
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_for_thread = Arc::clone(&shutdown);
 
     let handle = thread::spawn(move || {
         let started = Instant::now();
-        let mut last_request_at = Instant::now();
-        let mut served = 0usize;
-        while started.elapsed() < Duration::from_secs(10) {
-            if served > 0 && last_request_at.elapsed() > Duration::from_secs(2) {
-                break;
-            }
-
+        while !shutdown_for_thread.load(Ordering::SeqCst)
+            && started.elapsed() < Duration::from_secs(60)
+        {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    last_request_at = Instant::now();
                     let mut buffer = [0u8; 4096];
                     let bytes_read = stream.read(&mut buffer).unwrap_or(0);
                     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
                     let body =
                         response_body(&request, &base_url_for_thread, &search_count_for_thread);
                     write_response(&mut stream, &body);
-                    served += 1;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
@@ -448,7 +472,11 @@ fn start_mock_tool_github() -> (String, thread::JoinHandle<()>) {
         }
     });
 
-    (base_url, handle)
+    MockToolGithub {
+        base_url,
+        shutdown,
+        handle: Some(handle),
+    }
 }
 
 fn response_body(request: &str, base_url: &str, search_count: &AtomicUsize) -> String {
