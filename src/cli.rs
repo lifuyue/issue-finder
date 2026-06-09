@@ -31,6 +31,8 @@ pub enum Command {
     Daily(DailyArgs),
     /// Display local daily reports.
     Report(ReportArgs),
+    /// Bootstrap or inspect the local recommendation profile.
+    Profile(ProfileArgs),
     /// Run recommendation evaluation workflows.
     Eval(EvalArgs),
     /// List and call Issue Finder's JSON tool contract.
@@ -154,6 +156,28 @@ pub struct ReportArgs {
     /// Local date in YYYY-MM-DD form.
     #[arg(long)]
     pub date: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ProfileArgs {
+    #[command(subcommand)]
+    pub command: ProfileCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    /// Scan local Agent indexes and project manifests to draft a user profile.
+    Bootstrap(ProfileBootstrapArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProfileBootstrapArgs {
+    /// Print the profile bootstrap report as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Override the OS home scan root. Intended for tests and isolated debugging.
+    #[arg(long, hide = true)]
+    pub scan_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

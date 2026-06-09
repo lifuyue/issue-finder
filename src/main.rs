@@ -1,10 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
-use issue_finder::cli::{Cli, Command, FeedbackCommand, InboxCommand, ToolsCommand};
+use issue_finder::cli::{
+    Cli, Command, FeedbackCommand, InboxCommand, ProfileCommand, ToolsCommand,
+};
 use issue_finder::config::{initialize_interactive, Config};
 use issue_finder::doctor;
 use issue_finder::inbox::{self, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
+use issue_finder::profile_bootstrap::{bootstrap_profile, render_profile_bootstrap_report};
 use issue_finder::recommendation::{
     record_event_for_key, IssueKey, RecommendationEventSource, RecommendationEventType,
     ScoutOptions,
@@ -152,6 +155,21 @@ async fn main() -> Result<()> {
         Command::Report(args) => {
             println!("{}", workflow::read_report(&paths, args.date)?);
         }
+        Command::Profile(args) => match args.command {
+            ProfileCommand::Bootstrap(args) => {
+                let scan_root = match args.scan_root {
+                    Some(path) => path,
+                    None => dirs::home_dir()
+                        .ok_or_else(|| anyhow::anyhow!("unable to determine home directory"))?,
+                };
+                let report = bootstrap_profile(&scan_root)?;
+                if args.json {
+                    println!("{}", serde_json::to_string(&report)?);
+                } else {
+                    println!("{}", render_profile_bootstrap_report(&report));
+                }
+            }
+        },
         Command::Eval(args) => match args.command {
             issue_finder::cli::EvalCommand::Recommendation(eval_args) => {
                 if !eval_args.offline && !eval_args.live {
