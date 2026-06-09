@@ -18,8 +18,8 @@ use crate::probe::SafeProbeRunner;
 use crate::readiness::assess_readiness;
 use crate::recommendation::{
     load_state_map, recent_events_for_issue, record_event_for_issue, record_event_for_key,
-    IssueKey, RecommendationEngine, RecommendationEventSource, RecommendationEventType,
-    ScoutOptions, ScoutResult,
+    DiscoveryScope, IssueKey, RecommendationEngine, RecommendationEventSource,
+    RecommendationEventType, ScoutOptions, ScoutResult,
 };
 use crate::report::{self, DailyReport, FailedReportItem, PreparedReportItem};
 use crate::value_scoring::RankedValueIssue;
@@ -83,11 +83,16 @@ pub async fn scout(
     limit: usize,
     refresh: bool,
 ) -> Result<Vec<RankedValueIssue>> {
-    Ok(
-        scout_with_options(paths, config, limit, refresh, ScoutOptions::cli())
-            .await?
-            .ranked,
+    Ok(scout_with_options(
+        paths,
+        config,
+        limit,
+        refresh,
+        ScoutOptions::cli(),
+        DiscoveryScope::Global,
     )
+    .await?
+    .ranked)
 }
 
 pub async fn scout_with_options(
@@ -96,9 +101,10 @@ pub async fn scout_with_options(
     limit: usize,
     refresh: bool,
     options: ScoutOptions,
+    scope: DiscoveryScope,
 ) -> Result<ScoutResult> {
     RecommendationEngine::new(paths, config)
-        .scout(limit, refresh, options)
+        .scout(limit, refresh, options, scope)
         .await
 }
 
@@ -334,11 +340,12 @@ pub async fn daily(
     config: &Config,
     top: Option<usize>,
     refresh: bool,
+    scope: DiscoveryScope,
 ) -> Result<(DailyReport, String)> {
     paths.ensure_layout()?;
     let top_n = top.unwrap_or(config.daily.top_n).max(1);
     let result = RecommendationEngine::new(paths, config)
-        .daily_candidates(refresh, ENRICHED_SCOUT_CANDIDATE_LIMIT)
+        .daily_candidates(refresh, ENRICHED_SCOUT_CANDIDATE_LIMIT, scope)
         .await?;
 
     daily_from_ranked(paths, config, result.ranked, result.discovery_count, top_n).await

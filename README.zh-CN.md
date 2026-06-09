@@ -44,6 +44,7 @@ issue-finder doctor
 
 ```bash
 issue-finder scout --limit 10
+issue-finder scout --repo owner/repo --limit 10
 issue-finder prepare owner/repo#123
 issue-finder handoff <inbox-id> --print
 ```
@@ -57,6 +58,7 @@ Issue Finder 也为编码代理暴露 JSON 工具契约：
 ```bash
 issue-finder tools list
 issue-finder tools call issue-finder.scout --arguments '{"limit":10}'
+issue-finder tools call issue-finder.scout --arguments '{"repo":"owner/repo","limit":10}'
 ```
 
 ## 文档

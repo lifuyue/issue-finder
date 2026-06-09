@@ -78,6 +78,7 @@ Discover and rank candidate issues:
 
 ```bash
 issue-finder scout --limit 10
+issue-finder scout --repo owner/repo --limit 10
 issue-finder scout --refresh
 ```
 
@@ -108,6 +109,7 @@ Run the daily preparation flow:
 
 ```bash
 issue-finder daily --top 3
+issue-finder daily --repo owner/repo --top 3
 issue-finder daily --refresh
 issue-finder report
 issue-finder report --date YYYY-MM-DD
@@ -121,6 +123,7 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder profile bootstrap --json` | Scan supported local Agent indexes and project manifests, then print a profile bootstrap report |
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
+| `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
 | `issue-finder scout --json` | Print ranked candidates as JSON |
 | `issue-finder prepare owner/repo#123` | Prepare one issue and write it to the inbox |
@@ -132,6 +135,7 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder inbox archive <id>` | Mark an inbox item as archived |
 | `issue-finder inbox done <id>` | Mark an inbox item as done |
 | `issue-finder daily --top 3` | Scout, prepare Top N issues, and write a daily report |
+| `issue-finder daily --repo owner/repo --top 3` | Prepare Top N issues from one repository without cross-repo fallback |
 | `issue-finder report` | Display today's report |
 | `issue-finder report --date YYYY-MM-DD` | Display a report for a specific date |
 

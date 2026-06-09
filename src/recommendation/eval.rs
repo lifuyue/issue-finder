@@ -405,6 +405,7 @@ pub async fn run_live_eval(
                     record_exposure: false,
                     source: RecommendationEventSource::CliScout,
                 },
+                crate::discovery::DiscoveryScope::Global,
             )
             .await?;
         let candidates = result

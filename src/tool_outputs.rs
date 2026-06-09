@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::discovery::DiscoveryDiagnostics;
 use crate::github::GitHubIssue;
 use crate::prepare_gate::{
     allowed_prepare_categories, default_prepare_allowed, prepare_gate_reasons, PrepareGateDecision,
@@ -162,6 +163,8 @@ pub struct ScoutStructuredOutput {
     pub success: bool,
     pub candidates: Vec<CandidateOutput>,
     pub filtered_count: usize,
+    #[serde(flatten)]
+    pub diagnostics: DiscoveryDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -326,6 +329,7 @@ pub fn scout_structured_output(
     tool: &str,
     candidates: Vec<CandidateOutput>,
     filtered_count: usize,
+    diagnostics: DiscoveryDiagnostics,
 ) -> Value {
     to_value(ScoutStructuredOutput {
         kind: OUTPUT_KIND.to_string(),
@@ -334,6 +338,7 @@ pub fn scout_structured_output(
         success: true,
         candidates,
         filtered_count,
+        diagnostics,
     })
 }
 

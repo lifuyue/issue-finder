@@ -7,7 +7,10 @@ use std::fs;
 
 use crate::config::Config;
 use crate::config::ProfileConfig;
-use crate::discovery::{select_enrichment_candidates, DiscoveryCandidate};
+use crate::discovery::{
+    select_enrichment_candidates, sort_candidates, DiscoveryCandidate, DiscoveryDiagnostics,
+    DiscoveryOutput, DiscoveryScope, RepositoryScope,
+};
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
 use crate::github_enrichment::{competition_timeline_missing, GitHubEnrichmentClient};
@@ -28,6 +31,8 @@ const ENRICHMENT_CONCURRENCY_LIMIT: usize = 2;
 const COMPETITION_COMPLETION_CONCURRENCY_LIMIT: usize = 2;
 const POST_COMPLETION_TRUSTED_REFILL_LIMIT: usize = 32;
 const POST_COMPLETION_GLOBAL_REFILL_LIMIT: usize = 32;
+const REPO_SCOPED_STAGE_ENRICHMENT_LIMIT: usize = 80;
+const REPO_SCOPED_RECENT_WINDOWS: [usize; 3] = [100, 300, 500];
 const PRIMARY_RESULTS_PER_REPO_LIMIT: usize = 2;
 const COMPETITION_COMPLETED_RESULTS_PER_REPO_LIMIT: usize = 4;
 const SCOUT_RESULT_CACHE_TTL_MINUTES: i64 = 360;
@@ -54,6 +59,8 @@ pub struct ScoutResult {
     pub ranked: Vec<RankedValueIssue>,
     pub discovery_count: usize,
     pub filtered_count: usize,
+    #[serde(flatten)]
+    pub diagnostics: DiscoveryDiagnostics,
     pub api_budget: GitHubApiBudgetReport,
 }
 
@@ -63,6 +70,7 @@ struct CachedScoutResult {
     ranked: Vec<RankedValueIssue>,
     discovery_count: usize,
     filtered_count: usize,
+    diagnostics: DiscoveryDiagnostics,
 }
 
 struct AdditionalRankingRequest<'a> {
@@ -74,6 +82,48 @@ struct AdditionalRankingRequest<'a> {
     display_limit: usize,
     max_budget: usize,
     stop_visible_at: Option<usize>,
+    display_mode: DisplayMode,
+}
+
+struct ScoutRun {
+    ranked: Vec<RankedValueIssue>,
+    discovery_count: usize,
+    filtered_count: usize,
+    diagnostics: DiscoveryDiagnostics,
+}
+
+struct RepositoryStageRankingRequest<'a> {
+    enrichment: &'a GitHubEnrichmentClient,
+    output: DiscoveryOutput,
+    diagnostics: &'a mut DiscoveryDiagnostics,
+    ranked: &'a mut Vec<RankedValueIssue>,
+    discovery_by_key: &'a mut HashMap<String, DiscoveryCandidate>,
+    discovered_keys: &'a mut HashSet<String>,
+    discovery_count: &'a mut usize,
+    limit: usize,
+    refresh: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayMode {
+    Global,
+    Repository,
+}
+
+impl DisplayMode {
+    fn primary_per_repo_limit(self, limit: usize) -> usize {
+        match self {
+            Self::Global => PRIMARY_RESULTS_PER_REPO_LIMIT,
+            Self::Repository => limit.max(1),
+        }
+    }
+
+    fn completed_per_repo_limit(self, limit: usize) -> usize {
+        match self {
+            Self::Global => COMPETITION_COMPLETED_RESULTS_PER_REPO_LIMIT,
+            Self::Repository => limit.max(1),
+        }
+    }
 }
 
 pub struct RecommendationEngine<'a> {
@@ -91,11 +141,16 @@ impl<'a> RecommendationEngine<'a> {
         limit: usize,
         refresh: bool,
         options: ScoutOptions,
+        scope: DiscoveryScope,
     ) -> Result<ScoutResult> {
         self.paths.ensure_layout()?;
         let api_budget = GitHubApiBudget::from_env();
-        let scout_cache_key =
-            scout_result_cache_key(&self.config.profile, limit, options.include_filtered);
+        let scout_cache_key = scout_result_cache_key(
+            &scope,
+            &self.config.profile,
+            limit,
+            options.include_filtered,
+        );
         if !refresh && !options.record_exposure {
             if let Some(cached) = load_cached_scout_result(self.paths, &scout_cache_key)? {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
@@ -103,6 +158,7 @@ impl<'a> RecommendationEngine<'a> {
                     ranked: cached.ranked,
                     discovery_count: cached.discovery_count,
                     filtered_count: cached.filtered_count,
+                    diagnostics: cached.diagnostics,
                     api_budget: api_budget.report(),
                 });
             }
@@ -110,18 +166,76 @@ impl<'a> RecommendationEngine<'a> {
 
         let github = GitHubClient::with_budget(self.config, api_budget.clone())?;
         let enrichment = GitHubEnrichmentClient::with_budget(self.config, api_budget.clone())?;
+        let run = match &scope {
+            DiscoveryScope::Global => {
+                self.run_global_scout(
+                    &github,
+                    &enrichment,
+                    limit,
+                    refresh,
+                    options.include_filtered,
+                )
+                .await?
+            }
+            DiscoveryScope::Repository { repository } => {
+                self.run_repository_scout(
+                    &github,
+                    &enrichment,
+                    repository,
+                    limit,
+                    refresh,
+                    options.include_filtered,
+                )
+                .await?
+            }
+        };
+
+        if options.record_exposure {
+            self.record_exposure(&run.ranked, options.source, &scope)?;
+        } else {
+            save_cached_scout_result(
+                self.paths,
+                &scout_cache_key,
+                &CachedScoutResult {
+                    fetched_at: Utc::now(),
+                    ranked: run.ranked.clone(),
+                    discovery_count: run.discovery_count,
+                    filtered_count: run.filtered_count,
+                    diagnostics: run.diagnostics.clone(),
+                },
+            )?;
+        }
+
+        Ok(ScoutResult {
+            ranked: run.ranked,
+            discovery_count: run.discovery_count,
+            filtered_count: run.filtered_count,
+            diagnostics: run.diagnostics,
+            api_budget: api_budget.report(),
+        })
+    }
+
+    async fn run_global_scout(
+        &self,
+        github: &GitHubClient,
+        enrichment: &GitHubEnrichmentClient,
+        limit: usize,
+        refresh: bool,
+        include_filtered: bool,
+    ) -> Result<ScoutRun> {
+        let mut diagnostics = DiscoveryScope::Global.diagnostics();
         let candidates = github
             .discover_candidates(self.paths, refresh, &self.config.profile)
             .await?;
         let discovery_count = candidates.len();
         let (mut ranked, mut discovery_by_key) = self
-            .rank_discovered_candidates(&enrichment, candidates, limit, refresh)
+            .rank_discovered_candidates(enrichment, candidates, limit, refresh, DisplayMode::Global)
             .await;
         let hard_pass = hard_pass_visible_count(limit);
         let fallback_target = fallback_target_visible_count(limit);
         let completion_prefill_target = completion_prefill_visible_count(limit);
 
-        if display_count(&ranked, limit, false) < hard_pass {
+        if display_count(&ranked, limit, false, DisplayMode::Global) < hard_pass {
             let mut fallback_enrichment_budget = FALLBACK_ENRICHMENT_CANDIDATE_LIMIT;
             let trusted_budget =
                 TRUSTED_FALLBACK_ENRICHMENT_CANDIDATE_LIMIT.min(fallback_enrichment_budget);
@@ -130,7 +244,7 @@ impl<'a> RecommendationEngine<'a> {
                 .await?;
             let consumed = self
                 .rank_additional_candidates(AdditionalRankingRequest {
-                    enrichment: &enrichment,
+                    enrichment,
                     ranked: &mut ranked,
                     discovery_by_key: &mut discovery_by_key,
                     candidates: fallback,
@@ -138,16 +252,19 @@ impl<'a> RecommendationEngine<'a> {
                     display_limit: limit,
                     max_budget: trusted_budget,
                     stop_visible_at: Some(fallback_target.max(completion_prefill_target)),
+                    display_mode: DisplayMode::Global,
                 })
                 .await?;
             fallback_enrichment_budget = fallback_enrichment_budget.saturating_sub(consumed);
 
-            if display_count(&ranked, limit, false) < hard_pass && fallback_enrichment_budget > 0 {
+            if display_count(&ranked, limit, false, DisplayMode::Global) < hard_pass
+                && fallback_enrichment_budget > 0
+            {
                 let fallback = github
                     .discover_global_fallback_candidates(self.paths, refresh, &self.config.profile)
                     .await?;
                 self.rank_additional_candidates(AdditionalRankingRequest {
-                    enrichment: &enrichment,
+                    enrichment,
                     ranked: &mut ranked,
                     discovery_by_key: &mut discovery_by_key,
                     candidates: fallback,
@@ -155,24 +272,26 @@ impl<'a> RecommendationEngine<'a> {
                     display_limit: limit,
                     max_budget: fallback_enrichment_budget,
                     stop_visible_at: Some(hard_pass.max(completion_prefill_target)),
+                    display_mode: DisplayMode::Global,
                 })
                 .await?;
             }
         }
 
         let mut completion_statuses = self
-            .complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
+            .complete_competition_evidence(enrichment, &mut ranked, refresh, limit)
             .await;
         self.apply_feed_ranking(&mut ranked);
         append_discovery_reasons(&mut ranked, &discovery_by_key);
         competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
 
-        if competition_limited_display_count(&ranked, limit, false) < hard_pass {
+        if competition_limited_display_count(&ranked, limit, false, DisplayMode::Global) < hard_pass
+        {
             let fallback = github
                 .discover_trusted_fallback_candidates(self.paths, refresh, &self.config.profile)
                 .await?;
             self.rank_additional_candidates(AdditionalRankingRequest {
-                enrichment: &enrichment,
+                enrichment,
                 ranked: &mut ranked,
                 discovery_by_key: &mut discovery_by_key,
                 candidates: fallback,
@@ -180,10 +299,11 @@ impl<'a> RecommendationEngine<'a> {
                 display_limit: limit,
                 max_budget: POST_COMPLETION_TRUSTED_REFILL_LIMIT,
                 stop_visible_at: Some(completion_prefill_target.max(fallback_target)),
+                display_mode: DisplayMode::Global,
             })
             .await?;
             completion_statuses.extend(
-                self.complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
+                self.complete_competition_evidence(enrichment, &mut ranked, refresh, limit)
                     .await,
             );
             self.apply_feed_ranking(&mut ranked);
@@ -193,12 +313,14 @@ impl<'a> RecommendationEngine<'a> {
                 &completion_statuses,
             );
 
-            if competition_limited_display_count(&ranked, limit, false) < hard_pass {
+            if competition_limited_display_count(&ranked, limit, false, DisplayMode::Global)
+                < hard_pass
+            {
                 let fallback = github
                     .discover_global_fallback_candidates(self.paths, refresh, &self.config.profile)
                     .await?;
                 self.rank_additional_candidates(AdditionalRankingRequest {
-                    enrichment: &enrichment,
+                    enrichment,
                     ranked: &mut ranked,
                     discovery_by_key: &mut discovery_by_key,
                     candidates: fallback,
@@ -206,10 +328,11 @@ impl<'a> RecommendationEngine<'a> {
                     display_limit: limit,
                     max_budget: POST_COMPLETION_GLOBAL_REFILL_LIMIT,
                     stop_visible_at: Some(completion_prefill_target.max(hard_pass)),
+                    display_mode: DisplayMode::Global,
                 })
                 .await?;
                 completion_statuses.extend(
-                    self.complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
+                    self.complete_competition_evidence(enrichment, &mut ranked, refresh, limit)
                         .await,
                 );
                 self.apply_feed_ranking(&mut ranked);
@@ -223,42 +346,230 @@ impl<'a> RecommendationEngine<'a> {
 
         let filtered_count = ranked
             .iter()
-            .filter(|item| !displayable(item, options.include_filtered))
+            .filter(|item| !displayable(item, include_filtered))
             .count();
         let visible = competition_completion::select_display_candidates(
             ranked,
             limit,
-            options.include_filtered,
-            COMPETITION_COMPLETED_RESULTS_PER_REPO_LIMIT,
+            include_filtered,
+            DisplayMode::Global.completed_per_repo_limit(limit),
         );
+        annotate_diagnostics(&mut diagnostics, &discovery_by_key, &visible);
 
-        if options.record_exposure {
-            self.record_exposure(&visible, options.source)?;
-        } else {
-            save_cached_scout_result(
-                self.paths,
-                &scout_cache_key,
-                &CachedScoutResult {
-                    fetched_at: Utc::now(),
-                    ranked: visible.clone(),
-                    discovery_count,
-                    filtered_count,
-                },
-            )?;
-        }
-
-        Ok(ScoutResult {
+        Ok(ScoutRun {
             ranked: visible,
             discovery_count,
             filtered_count,
-            api_budget: api_budget.report(),
+            diagnostics,
         })
+    }
+
+    async fn run_repository_scout(
+        &self,
+        github: &GitHubClient,
+        enrichment: &GitHubEnrichmentClient,
+        repository: &RepositoryScope,
+        limit: usize,
+        refresh: bool,
+        include_filtered: bool,
+    ) -> Result<ScoutRun> {
+        let mut diagnostics = DiscoveryScope::repository(repository.clone()).diagnostics();
+        let mut ranked = Vec::new();
+        let mut discovery_by_key = HashMap::new();
+        let mut discovered_keys = HashSet::new();
+        let mut completion_statuses = HashMap::new();
+        let mut discovery_count = 0usize;
+
+        let beginner = github
+            .discover_repository_beginner_candidates(
+                self.paths,
+                refresh,
+                repository,
+                &self.config.profile,
+            )
+            .await?;
+        self.rank_repository_stage(RepositoryStageRankingRequest {
+            enrichment,
+            output: beginner,
+            diagnostics: &mut diagnostics,
+            ranked: &mut ranked,
+            discovery_by_key: &mut discovery_by_key,
+            discovered_keys: &mut discovered_keys,
+            discovery_count: &mut discovery_count,
+            limit,
+            refresh,
+        })
+        .await?;
+        self.complete_repository_competition(
+            enrichment,
+            &mut ranked,
+            &mut completion_statuses,
+            refresh,
+            limit,
+        )
+        .await;
+
+        if display_count(&ranked, limit, false, DisplayMode::Repository) < limit {
+            let signals = github
+                .discover_repository_signal_candidates(
+                    self.paths,
+                    refresh,
+                    repository,
+                    &self.config.profile,
+                )
+                .await;
+            self.rank_repository_stage(RepositoryStageRankingRequest {
+                enrichment,
+                output: signals,
+                diagnostics: &mut diagnostics,
+                ranked: &mut ranked,
+                discovery_by_key: &mut discovery_by_key,
+                discovered_keys: &mut discovered_keys,
+                discovery_count: &mut discovery_count,
+                limit,
+                refresh,
+            })
+            .await?;
+            self.complete_repository_competition(
+                enrichment,
+                &mut ranked,
+                &mut completion_statuses,
+                refresh,
+                limit,
+            )
+            .await;
+        }
+
+        for window in REPO_SCOPED_RECENT_WINDOWS {
+            if display_count(&ranked, limit, false, DisplayMode::Repository) >= limit {
+                break;
+            }
+            match github
+                .discover_repository_recent_candidates(
+                    self.paths,
+                    refresh,
+                    repository,
+                    &self.config.profile,
+                    window,
+                )
+                .await
+            {
+                Ok(recent) => {
+                    self.rank_repository_stage(RepositoryStageRankingRequest {
+                        enrichment,
+                        output: recent,
+                        diagnostics: &mut diagnostics,
+                        ranked: &mut ranked,
+                        discovery_by_key: &mut discovery_by_key,
+                        discovered_keys: &mut discovered_keys,
+                        discovery_count: &mut discovery_count,
+                        limit,
+                        refresh,
+                    })
+                    .await?;
+                    self.complete_repository_competition(
+                        enrichment,
+                        &mut ranked,
+                        &mut completion_statuses,
+                        refresh,
+                        limit,
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    diagnostics
+                        .stage_errors
+                        .push(format!("repo_scoped:recent_open:{window}: {error}"));
+                    break;
+                }
+            }
+        }
+
+        diagnostics.fallback_exhausted =
+            display_count(&ranked, limit, include_filtered, DisplayMode::Repository) < limit;
+        self.apply_feed_ranking(&mut ranked);
+        append_discovery_reasons(&mut ranked, &discovery_by_key);
+        competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
+
+        let filtered_count = ranked
+            .iter()
+            .filter(|item| !displayable(item, include_filtered))
+            .count();
+        let visible = competition_completion::select_display_candidates(
+            ranked,
+            limit,
+            include_filtered,
+            DisplayMode::Repository.completed_per_repo_limit(limit),
+        );
+        annotate_diagnostics(&mut diagnostics, &discovery_by_key, &visible);
+
+        Ok(ScoutRun {
+            ranked: visible,
+            discovery_count,
+            filtered_count,
+            diagnostics,
+        })
+    }
+
+    async fn rank_repository_stage(
+        &self,
+        request: RepositoryStageRankingRequest<'_>,
+    ) -> Result<()> {
+        let RepositoryStageRankingRequest {
+            enrichment,
+            output,
+            diagnostics,
+            ranked,
+            discovery_by_key,
+            discovered_keys,
+            discovery_count,
+            limit,
+            refresh,
+        } = request;
+        diagnostics.merge(output.diagnostics);
+        let candidates = output
+            .candidates
+            .into_iter()
+            .filter(|candidate| discovered_keys.insert(candidate.key()))
+            .collect::<Vec<_>>();
+        *discovery_count += candidates.len();
+
+        self.rank_additional_candidates(AdditionalRankingRequest {
+            enrichment,
+            ranked,
+            discovery_by_key,
+            candidates,
+            refresh,
+            display_limit: limit,
+            max_budget: REPO_SCOPED_STAGE_ENRICHMENT_LIMIT,
+            stop_visible_at: Some(limit),
+            display_mode: DisplayMode::Repository,
+        })
+        .await?;
+        Ok(())
+    }
+
+    async fn complete_repository_competition(
+        &self,
+        enrichment: &GitHubEnrichmentClient,
+        ranked: &mut [RankedValueIssue],
+        completion_statuses: &mut HashMap<String, CompetitionCompletionStatus>,
+        refresh: bool,
+        limit: usize,
+    ) {
+        completion_statuses.extend(
+            self.complete_competition_evidence(enrichment, ranked, refresh, limit)
+                .await,
+        );
+        self.apply_feed_ranking(ranked);
+        competition_completion::append_completion_explanations(ranked, completion_statuses);
     }
 
     pub async fn daily_candidates(
         &self,
         refresh: bool,
         candidate_limit: usize,
+        scope: DiscoveryScope,
     ) -> Result<ScoutResult> {
         self.scout(
             candidate_limit,
@@ -268,6 +579,7 @@ impl<'a> RecommendationEngine<'a> {
                 record_exposure: false,
                 source: RecommendationEventSource::Daily,
             },
+            scope,
         )
         .await
     }
@@ -301,6 +613,7 @@ impl<'a> RecommendationEngine<'a> {
         &self,
         ranked: &[RankedValueIssue],
         source: RecommendationEventSource,
+        scope: &DiscoveryScope,
     ) -> Result<()> {
         for item in ranked {
             record_event_for_issue(
@@ -311,7 +624,9 @@ impl<'a> RecommendationEngine<'a> {
                 source,
                 serde_json::json!({
                     "finalFeedScore": item.recommendation.final_feed_score,
-                    "baseCategory": item.recommendation.base_category.to_string()
+                    "baseCategory": item.recommendation.base_category.to_string(),
+                    "scope": scope.diagnostics().scope,
+                    "repository": scope.diagnostics().repository
                 }),
             )?;
         }
@@ -324,8 +639,13 @@ impl<'a> RecommendationEngine<'a> {
         candidates: Vec<DiscoveryCandidate>,
         limit: usize,
         refresh: bool,
+        display_mode: DisplayMode,
     ) -> (Vec<RankedValueIssue>, HashMap<String, DiscoveryCandidate>) {
-        let selected = select_enrichment_candidates(candidates, ENRICHED_SCOUT_CANDIDATE_LIMIT);
+        let selected = select_enrichment_candidates_for_mode(
+            candidates,
+            ENRICHED_SCOUT_CANDIDATE_LIMIT,
+            display_mode,
+        );
         let discovery_by_key = selected
             .iter()
             .map(|candidate| (candidate_key(&candidate.issue), candidate.clone()))
@@ -355,7 +675,9 @@ impl<'a> RecommendationEngine<'a> {
             self.apply_feed_ranking(&mut ranked);
             append_discovery_reasons(&mut ranked, &discovery_by_key);
 
-            if display_count(&ranked, limit, false) >= completion_prefill_visible_count(limit) {
+            if display_count(&ranked, limit, false, display_mode)
+                >= completion_prefill_visible_count(limit)
+            {
                 break;
             }
         }
@@ -376,6 +698,7 @@ impl<'a> RecommendationEngine<'a> {
             display_limit,
             max_budget,
             stop_visible_at,
+            display_mode,
         } = request;
 
         if candidates.is_empty() || max_budget == 0 {
@@ -390,7 +713,7 @@ impl<'a> RecommendationEngine<'a> {
             .into_iter()
             .filter(|candidate| !existing.contains(&candidate.key()))
             .collect::<Vec<_>>();
-        let selected = select_enrichment_candidates(candidates, max_budget);
+        let selected = select_enrichment_candidates_for_mode(candidates, max_budget, display_mode);
         if selected.is_empty() {
             return Ok(0);
         }
@@ -424,9 +747,9 @@ impl<'a> RecommendationEngine<'a> {
             self.apply_feed_ranking(ranked);
             append_discovery_reasons(ranked, discovery_by_key);
 
-            if stop_visible_at
-                .is_some_and(|target| display_count(ranked, display_limit, false) >= target)
-            {
+            if stop_visible_at.is_some_and(|target| {
+                display_count(ranked, display_limit, false, display_mode) >= target
+            }) {
                 break;
             }
         }
@@ -552,17 +875,58 @@ fn append_discovery_reasons(
     }
 }
 
+fn select_enrichment_candidates_for_mode(
+    mut candidates: Vec<DiscoveryCandidate>,
+    max_budget: usize,
+    display_mode: DisplayMode,
+) -> Vec<DiscoveryCandidate> {
+    if display_mode == DisplayMode::Global {
+        return select_enrichment_candidates(candidates, max_budget);
+    }
+
+    sort_candidates(&mut candidates);
+    candidates.truncate(max_budget);
+    candidates
+}
+
+fn annotate_diagnostics(
+    diagnostics: &mut DiscoveryDiagnostics,
+    discovery_by_key: &HashMap<String, DiscoveryCandidate>,
+    visible: &[RankedValueIssue],
+) {
+    let visible_keys = visible
+        .iter()
+        .map(|item| candidate_key(&item.issue))
+        .collect::<HashSet<_>>();
+    let mut ranked_keys_by_lane = HashMap::<String, HashSet<String>>::new();
+    for (key, candidate) in discovery_by_key {
+        for lane in &candidate.source_lanes {
+            ranked_keys_by_lane
+                .entry(lane.clone())
+                .or_default()
+                .insert(key.clone());
+        }
+    }
+    diagnostics.mark_ranked_and_visible(&ranked_keys_by_lane, &visible_keys);
+}
+
 fn candidate_key(issue: &GitHubIssue) -> String {
     format!("{}#{}", issue.repo_full_name, issue.number)
 }
 
-fn display_count(ranked: &[RankedValueIssue], limit: usize, include_filtered: bool) -> usize {
+fn display_count(
+    ranked: &[RankedValueIssue],
+    limit: usize,
+    include_filtered: bool,
+    display_mode: DisplayMode,
+) -> usize {
     if limit == 0 {
         return 0;
     }
 
     let mut selected = 0;
     let mut repo_counts = HashMap::<&str, usize>::new();
+    let per_repo_limit = display_mode.primary_per_repo_limit(limit);
 
     for item in ranked {
         if !displayable(item, include_filtered) {
@@ -571,7 +935,7 @@ fn display_count(ranked: &[RankedValueIssue], limit: usize, include_filtered: bo
 
         let repo = item.issue.repo_full_name.as_str();
         let count = *repo_counts.get(repo).unwrap_or(&0);
-        if count < PRIMARY_RESULTS_PER_REPO_LIMIT {
+        if count < per_repo_limit {
             repo_counts.insert(repo, count + 1);
             selected += 1;
             if selected == limit {
@@ -606,12 +970,13 @@ fn competition_limited_display_count(
     ranked: &[RankedValueIssue],
     limit: usize,
     include_filtered: bool,
+    display_mode: DisplayMode,
 ) -> usize {
     competition_completion::select_display_candidates(
         ranked.to_vec(),
         limit,
         include_filtered,
-        COMPETITION_COMPLETED_RESULTS_PER_REPO_LIMIT,
+        display_mode.completed_per_repo_limit(limit),
     )
     .len()
 }
@@ -647,9 +1012,15 @@ fn save_cached_scout_result(
     )
 }
 
-fn scout_result_cache_key(profile: &ProfileConfig, limit: usize, include_filtered: bool) -> String {
+fn scout_result_cache_key(
+    scope: &DiscoveryScope,
+    profile: &ProfileConfig,
+    limit: usize,
+    include_filtered: bool,
+) -> String {
     format!(
-        "limit-{limit}__filtered-{include_filtered}__tech-{}__keywords-{}",
+        "{}__limit-{limit}__filtered-{include_filtered}__tech-{}__keywords-{}",
+        scope.cache_fragment(),
         profile.tech_stack.join("+"),
         profile.keywords.join("+")
     )

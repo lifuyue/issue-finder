@@ -56,6 +56,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         ]
     );
     assert!(tools.iter().all(|tool| tool["inputSchema"].is_object()));
+    let scout = tools
+        .iter()
+        .find(|tool| tool["name"] == "scout")
+        .expect("scout tool spec");
+    assert!(scout["inputSchema"]["properties"]["repo"].is_object());
 }
 
 #[test]

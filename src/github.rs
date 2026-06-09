@@ -11,7 +11,8 @@ use url::Url;
 use crate::config::{Config, ProfileConfig};
 use crate::discovery::{
     gfi_repositories, merge_candidates, overlay_repositories, profile_trusted_repositories,
-    DiscoveryCandidate, RepoTrustTier, TrustedRepository,
+    DiscoveryCandidate, DiscoveryOutput, DiscoveryScope, DiscoveryStageStats, RepoTrustTier,
+    RepositoryScope, TrustedRepository,
 };
 use crate::errors::IssueFinderError;
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
@@ -35,6 +36,9 @@ const TRUSTED_LABEL_PER_PAGE: usize = 8;
 const PROFILE_TRUSTED_LABEL_PER_PAGE: usize = 20;
 const GLOBAL_SEARCH_PER_PAGE: usize = 30;
 const DISCOVERY_SEARCH_CONCURRENCY_LIMIT: usize = 1;
+const REPO_SCOPED_LABEL_PER_PAGE: usize = 30;
+const REPO_SCOPED_SEARCH_PER_PAGE: usize = 30;
+const REPO_SCOPED_RECENT_PER_PAGE: usize = 100;
 
 const BEGINNER_LABELS: [&str; 8] = [
     "good first issue",
@@ -48,6 +52,16 @@ const BEGINNER_LABELS: [&str; 8] = [
 ];
 
 const FALLBACK_TRUSTED_LABELS: [&str; 3] = ["good first issue", "good-first-issue", "help wanted"];
+const REPO_SCOPED_BEGINNER_LABELS: [&str; 6] = [
+    "good first issue",
+    "good-first-issue",
+    "beginner",
+    "beginner-friendly",
+    "easy",
+    "starter",
+];
+const REPO_SCOPED_ACTIONABLE_KEYWORDS: [&str; 6] =
+    ["bug", "repro", "expected actual", "panic", "error", "test"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IssueRef {
@@ -365,6 +379,173 @@ impl GitHubClient {
         Ok(candidates)
     }
 
+    pub async fn discover_repository_beginner_candidates(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        repository: &RepositoryScope,
+        profile: &ProfileConfig,
+    ) -> Result<DiscoveryOutput> {
+        let mut diagnostics = DiscoveryScope::repository(repository.clone()).diagnostics();
+        let mut candidates = Vec::new();
+
+        for label in REPO_SCOPED_BEGINNER_LABELS {
+            let lane_id = repo_scoped_label_lane_id("beginner_label", label);
+            let output = self
+                .list_repository_label_lane_cached(RepositoryLabelLaneRequest {
+                    paths,
+                    refresh,
+                    repository,
+                    label,
+                    stage: "beginner_label",
+                    lane_id: &lane_id,
+                    per_page: REPO_SCOPED_LABEL_PER_PAGE,
+                    profile,
+                })
+                .await?;
+            diagnostics.discovery_stages.push(output.stats);
+            candidates.extend(output.candidates);
+        }
+
+        Ok(DiscoveryOutput {
+            candidates: merge_candidates(candidates, profile),
+            diagnostics,
+        })
+    }
+
+    pub async fn discover_repository_signal_candidates(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        repository: &RepositoryScope,
+        profile: &ProfileConfig,
+    ) -> DiscoveryOutput {
+        let mut diagnostics = DiscoveryScope::repository(repository.clone()).diagnostics();
+        let mut candidates = Vec::new();
+
+        let help_wanted_lane = "repo_scoped:help_wanted".to_string();
+        match self
+            .list_repository_label_lane_cached(RepositoryLabelLaneRequest {
+                paths,
+                refresh,
+                repository,
+                label: "help wanted",
+                stage: "help_wanted",
+                lane_id: &help_wanted_lane,
+                per_page: REPO_SCOPED_LABEL_PER_PAGE,
+                profile,
+            })
+            .await
+        {
+            Ok(output) => {
+                diagnostics.discovery_stages.push(output.stats);
+                candidates.extend(output.candidates);
+            }
+            Err(error) => diagnostics
+                .stage_errors
+                .push(format!("{help_wanted_lane}: {error}")),
+        }
+
+        let mut search_rate_limited = false;
+
+        for term in crate::scoring::profile_terms(profile)
+            .into_iter()
+            .filter(|term| term.len() >= 3)
+            .take(6)
+        {
+            if search_rate_limited {
+                break;
+            }
+            let lane_id = format!("repo_scoped:profile_term:{}", lane_fragment(&term));
+            let query = repo_scoped_search_query(repository, &term);
+            match self
+                .search_repository_lane_cached(RepositorySearchLaneRequest {
+                    paths,
+                    refresh,
+                    repository,
+                    query: &query,
+                    stage: "profile_term",
+                    lane_id: &lane_id,
+                    per_page: REPO_SCOPED_SEARCH_PER_PAGE,
+                    profile,
+                })
+                .await
+            {
+                Ok(output) => {
+                    diagnostics.discovery_stages.push(output.stats);
+                    candidates.extend(output.candidates);
+                }
+                Err(error) => {
+                    search_rate_limited = is_rate_limit_error(&error);
+                    diagnostics.stage_errors.push(format!("{lane_id}: {error}"));
+                }
+            }
+        }
+
+        for keyword in REPO_SCOPED_ACTIONABLE_KEYWORDS {
+            if search_rate_limited {
+                break;
+            }
+            let lane_id = format!("repo_scoped:actionable_keyword:{}", lane_fragment(keyword));
+            let query = repo_scoped_search_query(repository, keyword);
+            match self
+                .search_repository_lane_cached(RepositorySearchLaneRequest {
+                    paths,
+                    refresh,
+                    repository,
+                    query: &query,
+                    stage: "actionable_keyword",
+                    lane_id: &lane_id,
+                    per_page: REPO_SCOPED_SEARCH_PER_PAGE,
+                    profile,
+                })
+                .await
+            {
+                Ok(output) => {
+                    diagnostics.discovery_stages.push(output.stats);
+                    candidates.extend(output.candidates);
+                }
+                Err(error) => {
+                    search_rate_limited = is_rate_limit_error(&error);
+                    diagnostics.stage_errors.push(format!("{lane_id}: {error}"));
+                }
+            }
+        }
+
+        DiscoveryOutput {
+            candidates: merge_candidates(candidates, profile),
+            diagnostics,
+        }
+    }
+
+    pub async fn discover_repository_recent_candidates(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        repository: &RepositoryScope,
+        profile: &ProfileConfig,
+        window: usize,
+    ) -> Result<DiscoveryOutput> {
+        let mut diagnostics = DiscoveryScope::repository(repository.clone()).diagnostics();
+        let lane_id = format!("repo_scoped:recent_open:{window}");
+        let output = self
+            .list_repository_recent_open_cached(RepositoryRecentLaneRequest {
+                paths,
+                refresh,
+                repository,
+                window,
+                lane_id: &lane_id,
+                profile,
+            })
+            .await?;
+        diagnostics.discovery_stages.push(output.stats);
+
+        Ok(DiscoveryOutput {
+            candidates: merge_candidates(output.candidates, profile),
+            diagnostics,
+        })
+    }
+
     async fn fetch_lane_candidates_cached(
         &self,
         paths: &IssueFinderPaths,
@@ -469,6 +650,329 @@ impl GitHubClient {
             .await?;
         save_cached_candidates(paths, request_source, lane_id, &candidates)?;
         Ok(candidates)
+    }
+
+    async fn list_repository_label_lane_cached(
+        &self,
+        request: RepositoryLabelLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        if !request.refresh {
+            if let Some(cached) = load_cached_candidates(
+                request.paths,
+                GitHubRequestSource::DiscoveryRepository,
+                request.lane_id,
+                SEARCH_CACHE_TTL_MINUTES,
+            )? {
+                self.budget
+                    .record_cache_hit(GitHubRequestSource::DiscoveryRepository);
+                let stats = DiscoveryStageStats::new(
+                    request.stage,
+                    request.lane_id,
+                    request.per_page,
+                    cached.len(),
+                    cached.len(),
+                );
+                return Ok(RepositoryLaneOutput {
+                    candidates: cached,
+                    stats,
+                });
+            }
+        }
+
+        let output = self.list_repository_label_lane(&request).await?;
+        save_cached_candidates(
+            request.paths,
+            GitHubRequestSource::DiscoveryRepository,
+            request.lane_id,
+            &output.candidates,
+        )?;
+        Ok(output)
+    }
+
+    async fn search_repository_lane_cached(
+        &self,
+        request: RepositorySearchLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        if !request.refresh {
+            if let Some(cached) = load_cached_candidates(
+                request.paths,
+                GitHubRequestSource::DiscoveryRepository,
+                request.lane_id,
+                SEARCH_CACHE_TTL_MINUTES,
+            )? {
+                self.budget
+                    .record_cache_hit(GitHubRequestSource::DiscoveryRepository);
+                let stats = DiscoveryStageStats::new(
+                    request.stage,
+                    request.lane_id,
+                    request.per_page,
+                    cached.len(),
+                    cached.len(),
+                );
+                return Ok(RepositoryLaneOutput {
+                    candidates: cached,
+                    stats,
+                });
+            }
+        }
+
+        let output = self.search_repository_lane(&request).await?;
+        save_cached_candidates(
+            request.paths,
+            GitHubRequestSource::DiscoveryRepository,
+            request.lane_id,
+            &output.candidates,
+        )?;
+        Ok(output)
+    }
+
+    async fn list_repository_recent_open_cached(
+        &self,
+        request: RepositoryRecentLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        if !request.refresh {
+            if let Some(cached) = load_cached_candidates(
+                request.paths,
+                GitHubRequestSource::DiscoveryRepository,
+                request.lane_id,
+                SEARCH_CACHE_TTL_MINUTES,
+            )? {
+                self.budget
+                    .record_cache_hit(GitHubRequestSource::DiscoveryRepository);
+                let stats = DiscoveryStageStats::new(
+                    "recent_open",
+                    request.lane_id,
+                    request.window,
+                    cached.len(),
+                    cached.len(),
+                );
+                return Ok(RepositoryLaneOutput {
+                    candidates: cached,
+                    stats,
+                });
+            }
+        }
+
+        let output = self.list_repository_recent_open(&request).await?;
+        save_cached_candidates(
+            request.paths,
+            GitHubRequestSource::DiscoveryRepository,
+            request.lane_id,
+            &output.candidates,
+        )?;
+        Ok(output)
+    }
+
+    async fn list_repository_label_lane(
+        &self,
+        request: &RepositoryLabelLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        let per_page = request.per_page.to_string();
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues",
+            request.repository.owner, request.repository.repo
+        ));
+        self.record_request(GitHubRequestSource::DiscoveryRepository, request.lane_id)?;
+        let response = self
+            .authorized(self.http.get(url))
+            .query(&[
+                ("state", "open"),
+                ("labels", request.label),
+                ("sort", "updated"),
+                ("direction", "desc"),
+                ("per_page", per_page.as_str()),
+            ])
+            .send()
+            .await?;
+        let response = require_success(response).await?;
+        let issues = response.json::<Vec<IssueResponse>>().await?;
+        let returned = issues.len();
+        let candidates = repository_issue_candidates(
+            request.repository,
+            issues,
+            request.lane_id,
+            request.profile,
+        );
+        let stats = DiscoveryStageStats::new(
+            request.stage,
+            request.lane_id,
+            request.per_page,
+            returned,
+            candidates.len(),
+        );
+        Ok(RepositoryLaneOutput { candidates, stats })
+    }
+
+    async fn search_repository_lane(
+        &self,
+        request: &RepositorySearchLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        let per_page = request.per_page.to_string();
+        let url = self.api_url("/search/issues");
+        self.record_request(GitHubRequestSource::DiscoveryRepository, request.lane_id)?;
+        let response = self
+            .authorized(self.http.get(url))
+            .query(&[
+                ("q", request.query),
+                ("sort", "updated"),
+                ("order", "desc"),
+                ("per_page", per_page.as_str()),
+            ])
+            .send()
+            .await?;
+
+        let response = require_success(response).await?;
+        let payload = response.json::<SearchResponse>().await?;
+        let returned = payload.items.len();
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+
+        for item in payload.items {
+            if !should_include_issue(
+                item.pull_request.is_some(),
+                item.locked,
+                item.assignee.is_some(),
+                item.assignees
+                    .as_ref()
+                    .map(|items| !items.is_empty())
+                    .unwrap_or(false),
+                &item.labels,
+            ) {
+                continue;
+            }
+
+            let Ok((owner, repo)) = parse_repo_api_url(&item.repository_url) else {
+                continue;
+            };
+            if owner != request.repository.owner || repo != request.repository.repo {
+                continue;
+            }
+
+            let key = format!("{}#{}", request.repository.full_name(), item.number);
+            if !seen.insert(key) {
+                continue;
+            }
+
+            let issue = GitHubIssue {
+                id: item.id,
+                number: item.number,
+                title: item.title,
+                body: item.body.unwrap_or_default(),
+                labels: extract_label_names(&item.labels),
+                url: item.html_url,
+                repo_full_name: request.repository.full_name(),
+                repo_name: request.repository.repo.clone(),
+                repo_description: String::new(),
+                repo_stars: 0,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+            };
+            candidates.push(DiscoveryCandidate::new(
+                issue,
+                request.lane_id.to_string(),
+                RepoTrustTier::Global,
+                request.profile,
+            ));
+        }
+
+        let stats = DiscoveryStageStats::new(
+            request.stage,
+            request.lane_id,
+            request.per_page,
+            returned,
+            candidates.len(),
+        );
+        Ok(RepositoryLaneOutput { candidates, stats })
+    }
+
+    async fn list_repository_recent_open(
+        &self,
+        request: &RepositoryRecentLaneRequest<'_>,
+    ) -> Result<RepositoryLaneOutput> {
+        let mut returned = 0usize;
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        let pages = request.window.div_ceil(REPO_SCOPED_RECENT_PER_PAGE);
+
+        for page in 1..=pages {
+            let per_page = REPO_SCOPED_RECENT_PER_PAGE.to_string();
+            let page_text = page.to_string();
+            let url = self.api_url(&format!(
+                "/repos/{}/{}/issues",
+                request.repository.owner, request.repository.repo
+            ));
+            self.record_request(
+                GitHubRequestSource::DiscoveryRepository,
+                format!("{}:page-{page}", request.lane_id),
+            )?;
+            let response = self
+                .authorized(self.http.get(url))
+                .query(&[
+                    ("state", "open"),
+                    ("sort", "updated"),
+                    ("direction", "desc"),
+                    ("per_page", per_page.as_str()),
+                    ("page", page_text.as_str()),
+                ])
+                .send()
+                .await?;
+            let response = require_success(response).await?;
+            let issues = response.json::<Vec<IssueResponse>>().await?;
+            let issue_count = issues.len();
+            returned += issue_count;
+
+            for item in issues {
+                if !should_include_issue(
+                    item.pull_request.is_some(),
+                    item.locked,
+                    item.assignee.is_some(),
+                    item.assignees
+                        .as_ref()
+                        .map(|items| !items.is_empty())
+                        .unwrap_or(false),
+                    &item.labels,
+                ) {
+                    continue;
+                }
+                let key = format!("{}#{}", request.repository.full_name(), item.number);
+                if !seen.insert(key) {
+                    continue;
+                }
+                let issue = GitHubIssue {
+                    id: item.id,
+                    number: item.number,
+                    title: item.title,
+                    body: item.body.unwrap_or_default(),
+                    labels: extract_label_names(&item.labels),
+                    url: item.html_url,
+                    repo_full_name: request.repository.full_name(),
+                    repo_name: request.repository.repo.clone(),
+                    repo_description: String::new(),
+                    repo_stars: 0,
+                    created_at: item.created_at,
+                    updated_at: item.updated_at,
+                };
+                candidates.push(DiscoveryCandidate::new(
+                    issue,
+                    request.lane_id.to_string(),
+                    RepoTrustTier::Global,
+                    request.profile,
+                ));
+            }
+
+            if issue_count < REPO_SCOPED_RECENT_PER_PAGE {
+                break;
+            }
+        }
+
+        let stats = DiscoveryStageStats::new(
+            "recent_open",
+            request.lane_id,
+            request.window,
+            returned,
+            candidates.len(),
+        );
+        Ok(RepositoryLaneOutput { candidates, stats })
     }
 
     async fn fetch_lane_candidates(
@@ -1018,6 +1522,42 @@ struct SearchLaneCacheRequest<'a> {
     profile: &'a ProfileConfig,
 }
 
+struct RepositoryLabelLaneRequest<'a> {
+    paths: &'a IssueFinderPaths,
+    refresh: bool,
+    repository: &'a RepositoryScope,
+    label: &'static str,
+    stage: &'static str,
+    lane_id: &'a str,
+    per_page: usize,
+    profile: &'a ProfileConfig,
+}
+
+struct RepositorySearchLaneRequest<'a> {
+    paths: &'a IssueFinderPaths,
+    refresh: bool,
+    repository: &'a RepositoryScope,
+    query: &'a str,
+    stage: &'static str,
+    lane_id: &'a str,
+    per_page: usize,
+    profile: &'a ProfileConfig,
+}
+
+struct RepositoryRecentLaneRequest<'a> {
+    paths: &'a IssueFinderPaths,
+    refresh: bool,
+    repository: &'a RepositoryScope,
+    window: usize,
+    lane_id: &'a str,
+    profile: &'a ProfileConfig,
+}
+
+struct RepositoryLaneOutput {
+    candidates: Vec<DiscoveryCandidate>,
+    stats: DiscoveryStageStats,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FallbackTrustedRequest {
     repository: TrustedRepository,
@@ -1155,6 +1695,88 @@ fn search_term(term: &str) -> String {
     } else {
         term.to_string()
     }
+}
+
+fn repo_scoped_search_query(repository: &RepositoryScope, term: &str) -> String {
+    format!(
+        "repo:{} is:issue is:open no:assignee archived:false {}",
+        repository.full_name(),
+        search_term(term)
+    )
+}
+
+fn repo_scoped_label_lane_id(stage: &str, label: &str) -> String {
+    format!("repo_scoped:{stage}:{}", lane_fragment(label))
+}
+
+fn lane_fragment(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' {
+                character
+            } else if character.is_ascii_whitespace() {
+                '_'
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn repository_issue_candidates(
+    repository: &RepositoryScope,
+    issues: Vec<IssueResponse>,
+    lane_id: &str,
+    profile: &ProfileConfig,
+) -> Vec<DiscoveryCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    for item in issues {
+        if !should_include_issue(
+            item.pull_request.is_some(),
+            item.locked,
+            item.assignee.is_some(),
+            item.assignees
+                .as_ref()
+                .map(|items| !items.is_empty())
+                .unwrap_or(false),
+            &item.labels,
+        ) {
+            continue;
+        }
+
+        let key = format!("{}#{}", repository.full_name(), item.number);
+        if !seen.insert(key) {
+            continue;
+        }
+
+        let issue = GitHubIssue {
+            id: item.id,
+            number: item.number,
+            title: item.title,
+            body: item.body.unwrap_or_default(),
+            labels: extract_label_names(&item.labels),
+            url: item.html_url,
+            repo_full_name: repository.full_name(),
+            repo_name: repository.repo.clone(),
+            repo_description: String::new(),
+            repo_stars: 0,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+        };
+        candidates.push(DiscoveryCandidate::new(
+            issue,
+            lane_id.to_string(),
+            RepoTrustTier::Global,
+            profile,
+        ));
+    }
+    candidates
 }
 
 fn dedupe_repositories(repositories: Vec<TrustedRepository>) -> Vec<TrustedRepository> {

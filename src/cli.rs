@@ -53,6 +53,9 @@ pub struct ScoutArgs {
     /// Number of ranked candidates to show.
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
+    /// Restrict recommendation discovery to one repository.
+    #[arg(long)]
+    pub repo: Option<String>,
     /// Ignore the GitHub discovery cache.
     #[arg(long)]
     pub refresh: bool,
@@ -146,6 +149,9 @@ pub struct DailyArgs {
     /// Number of top issues to prepare.
     #[arg(long)]
     pub top: Option<usize>,
+    /// Restrict recommendation discovery and preparation to one repository.
+    #[arg(long)]
+    pub repo: Option<String>,
     /// Ignore the GitHub discovery cache.
     #[arg(long)]
     pub refresh: bool,

@@ -10,6 +10,7 @@ pub mod model;
 pub mod quality_policy;
 pub mod state;
 
+pub use crate::discovery::{DiscoveryScope, RepositoryScope};
 pub use engine::{RecommendationEngine, ScoutOptions, ScoutResult};
 pub use events::{
     append_event, load_events, record_event_for_issue, record_event_for_key, IssueKey,

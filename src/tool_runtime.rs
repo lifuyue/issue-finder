@@ -8,7 +8,9 @@ use crate::config::Config;
 use crate::github::GitHubIssue;
 use crate::paths::IssueFinderPaths;
 use crate::prepare_gate::{prepare_gate_decision, PrepareGateDecision};
-use crate::recommendation::{RecommendationEventSource, ScoutOptions};
+use crate::recommendation::{
+    DiscoveryScope, RecommendationEventSource, RepositoryScope, ScoutOptions,
+};
 use crate::tool_context::{read_context_section, ReadContextError, ReadContextToolArgs};
 use crate::tool_outputs::{
     assess_structured_output, assessment_output, candidate_output, failure_output,
@@ -242,6 +244,7 @@ impl IssueFinderToolRuntime {
         let args: ScoutToolArgs = parse_arguments(&invocation.arguments)?;
         let limit = args.limit.unwrap_or(10).max(1);
         let _reserved_min_category = args.min_category;
+        let scope = scout_scope(args.repo)?;
         let result = workflow::scout_with_options(
             &self.paths,
             &self.config,
@@ -252,6 +255,7 @@ impl IssueFinderToolRuntime {
                 record_exposure: args.record_exposure.unwrap_or(true),
                 source: RecommendationEventSource::ToolScout,
             },
+            scope,
         )
         .await
         .map_err(RuntimeFailure::System)?;
@@ -269,7 +273,12 @@ impl IssueFinderToolRuntime {
                 "Found {candidate_count} candidates ({} filtered).",
                 result.filtered_count
             ),
-            scout_structured_output(TOOL_SCOUT, candidates, result.filtered_count),
+            scout_structured_output(
+                TOOL_SCOUT,
+                candidates,
+                result.filtered_count,
+                result.diagnostics,
+            ),
         ))
     }
 
@@ -521,6 +530,15 @@ fn issue_selector(issue: Option<String>, url: Option<String>) -> RuntimeResult<I
     Ok(selector)
 }
 
+fn scout_scope(repo: Option<String>) -> RuntimeResult<DiscoveryScope> {
+    match normalized_optional(repo) {
+        Some(repo) => RepositoryScope::parse(&repo)
+            .map(DiscoveryScope::repository)
+            .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string())),
+        None => Ok(DiscoveryScope::Global),
+    }
+}
+
 fn issue_label(issue: &GitHubIssue) -> String {
     format!("{}#{}", issue.repo_full_name, issue.number)
 }
@@ -559,6 +577,7 @@ fn scout_schema() -> Value {
         "type": "object",
         "properties": {
             "limit": { "type": "integer", "minimum": 1, "default": 10 },
+            "repo": { "type": ["string", "null"], "default": null },
             "refresh": { "type": "boolean", "default": false },
             "includeFiltered": { "type": "boolean", "default": false },
             "recordExposure": { "type": "boolean", "default": true },
@@ -631,6 +650,8 @@ fn read_context_schema() -> Value {
 #[serde(rename_all = "camelCase")]
 struct ScoutToolArgs {
     limit: Option<usize>,
+    #[serde(default)]
+    repo: Option<String>,
     #[serde(default)]
     refresh: bool,
     #[serde(default)]

@@ -9,8 +9,8 @@ use issue_finder::inbox::{self, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::profile_bootstrap::{bootstrap_profile, render_profile_bootstrap_report};
 use issue_finder::recommendation::{
-    record_event_for_key, IssueKey, RecommendationEventSource, RecommendationEventType,
-    ScoutOptions,
+    record_event_for_key, DiscoveryScope, IssueKey, RecommendationEventSource,
+    RecommendationEventType, RepositoryScope, ScoutOptions,
 };
 use issue_finder::tool_runtime::{
     default_call_id, list_tool_specs, IssueFinderToolInvocation, IssueFinderToolOutput,
@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
         }
         Command::Scout(args) => {
             let config = Config::load(&paths)?;
+            let scope = discovery_scope(args.repo)?;
             let result = workflow::scout_with_options(
                 &paths,
                 &config,
@@ -52,6 +53,7 @@ async fn main() -> Result<()> {
                     record_exposure: !args.dry_run,
                     source: RecommendationEventSource::CliScout,
                 },
+                scope,
             )
             .await?;
             if args.stats_json {
@@ -149,7 +151,9 @@ async fn main() -> Result<()> {
         },
         Command::Daily(args) => {
             let config = Config::load(&paths)?;
-            let (report, path) = workflow::daily(&paths, &config, args.top, args.refresh).await?;
+            let scope = discovery_scope(args.repo)?;
+            let (report, path) =
+                workflow::daily(&paths, &config, args.top, args.refresh, scope).await?;
             println!("{}", workflow::render_daily(&report, &path));
         }
         Command::Report(args) => {
@@ -247,4 +251,11 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn discovery_scope(repo: Option<String>) -> Result<DiscoveryScope> {
+    match repo {
+        Some(repo) => Ok(DiscoveryScope::repository(RepositoryScope::parse(&repo)?)),
+        None => Ok(DiscoveryScope::Global),
+    }
 }

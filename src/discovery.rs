@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::config::ProfileConfig;
 use crate::github::GitHubIssue;
@@ -13,6 +15,209 @@ const OVERLAY_REPOSITORIES: &str =
     include_str!("../data/discovery/trusted-overlay-repositories.toml");
 const PROFILE_TRUSTED_REPOSITORIES: &str =
     include_str!("../data/discovery/profile-trusted-repositories.toml");
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiscoveryScope {
+    #[default]
+    Global,
+    Repository {
+        repository: RepositoryScope,
+    },
+}
+
+impl DiscoveryScope {
+    pub fn repository(repository: RepositoryScope) -> Self {
+        Self::Repository { repository }
+    }
+
+    pub fn cache_fragment(&self) -> String {
+        match self {
+            Self::Global => "scope-global".to_string(),
+            Self::Repository { repository } => {
+                format!("scope-repository-{}", repository.sanitized_cache_key())
+            }
+        }
+    }
+
+    pub fn diagnostics(&self) -> DiscoveryDiagnostics {
+        match self {
+            Self::Global => DiscoveryDiagnostics {
+                scope: "global".to_string(),
+                repository: None,
+                discovery_stages: Vec::new(),
+                stage_errors: Vec::new(),
+                fallback_exhausted: false,
+            },
+            Self::Repository { repository } => DiscoveryDiagnostics {
+                scope: "repository".to_string(),
+                repository: Some(repository.full_name()),
+                discovery_stages: Vec::new(),
+                stage_errors: Vec::new(),
+                fallback_exhausted: false,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct RepositoryScope {
+    pub owner: String,
+    pub repo: String,
+}
+
+impl RepositoryScope {
+    pub fn parse(value: &str) -> Result<Self> {
+        let value = value.trim();
+        if value.starts_with("http://") || value.starts_with("https://") {
+            return Self::parse_url(value);
+        }
+
+        let (owner, repo) = value
+            .split_once('/')
+            .ok_or_else(|| anyhow::anyhow!(REPOSITORY_SCOPE_ERROR))?;
+        let scope = Self {
+            owner: owner.trim().to_string(),
+            repo: repo.trim().to_string(),
+        };
+        scope.validate()?;
+        Ok(scope)
+    }
+
+    fn parse_url(value: &str) -> Result<Self> {
+        let url = Url::parse(value).map_err(|_| anyhow::anyhow!(REPOSITORY_SCOPE_ERROR))?;
+        if url.host_str() != Some("github.com") {
+            anyhow::bail!(REPOSITORY_SCOPE_ERROR);
+        }
+
+        let segments = url
+            .path_segments()
+            .ok_or_else(|| anyhow::anyhow!(REPOSITORY_SCOPE_ERROR))?
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>();
+        if segments.len() != 2 {
+            anyhow::bail!(REPOSITORY_SCOPE_ERROR);
+        }
+
+        let scope = Self {
+            owner: segments[0].to_string(),
+            repo: segments[1].trim_end_matches(".git").to_string(),
+        };
+        scope.validate()?;
+        Ok(scope)
+    }
+
+    pub fn full_name(&self) -> String {
+        format!("{}/{}", self.owner, self.repo)
+    }
+
+    pub fn sanitized_cache_key(&self) -> String {
+        self.full_name()
+            .chars()
+            .map(|character| {
+                if character == '/' {
+                    "__".to_string()
+                } else if character.is_ascii_alphanumeric() || character == '_' {
+                    character.to_string()
+                } else {
+                    "_".to_string()
+                }
+            })
+            .collect::<String>()
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.owner.trim().is_empty()
+            || self.repo.trim().is_empty()
+            || self.owner.contains('/')
+            || self.repo.contains('/')
+            || self.repo.contains('#')
+        {
+            anyhow::bail!(REPOSITORY_SCOPE_ERROR);
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for RepositoryScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.full_name())
+    }
+}
+
+const REPOSITORY_SCOPE_ERROR: &str = "expected owner/repo or https://github.com/owner/repo";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryDiagnostics {
+    pub scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    pub discovery_stages: Vec<DiscoveryStageStats>,
+    pub stage_errors: Vec<String>,
+    pub fallback_exhausted: bool,
+}
+
+impl DiscoveryDiagnostics {
+    pub fn merge(&mut self, mut other: DiscoveryDiagnostics) {
+        self.discovery_stages.append(&mut other.discovery_stages);
+        self.stage_errors.append(&mut other.stage_errors);
+        self.fallback_exhausted |= other.fallback_exhausted;
+    }
+
+    pub fn mark_ranked_and_visible(
+        &mut self,
+        ranked_keys_by_lane: &HashMap<String, HashSet<String>>,
+        visible_keys: &HashSet<String>,
+    ) {
+        for stage in &mut self.discovery_stages {
+            let Some(ranked_keys) = ranked_keys_by_lane.get(&stage.lane) else {
+                continue;
+            };
+            stage.ranked = ranked_keys.len();
+            stage.visible = ranked_keys.intersection(visible_keys).count();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryStageStats {
+    pub stage: String,
+    pub lane: String,
+    pub requested: usize,
+    pub returned: usize,
+    pub deduped: usize,
+    pub ranked: usize,
+    pub visible: usize,
+}
+
+impl DiscoveryStageStats {
+    pub fn new(
+        stage: impl Into<String>,
+        lane: impl Into<String>,
+        requested: usize,
+        returned: usize,
+        deduped: usize,
+    ) -> Self {
+        Self {
+            stage: stage.into(),
+            lane: lane.into(),
+            requested,
+            returned,
+            deduped,
+            ranked: 0,
+            visible: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryOutput {
+    pub candidates: Vec<DiscoveryCandidate>,
+    pub diagnostics: DiscoveryDiagnostics,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscoveryCandidate {
