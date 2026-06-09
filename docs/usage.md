@@ -208,7 +208,7 @@ If `llm.api_key_env` is set, Issue Finder reads the LLM key from that environmen
 
 ### Profile Bootstrap
 
-`issue-finder profile bootstrap --json` scans supported low-risk local Agent sources under the operating system home directory, such as Codex session indexes, history indexes, memories, and conservative Claude/Cursor index-style files. It then reads root project manifests for discovered working directories and emits a structured report with active projects, tech stack evidence, keyword evidence, recent task themes, and a recommended `[profile]` draft.
+`issue-finder profile bootstrap --json` scans supported low-risk local Agent sources under the operating system home directory, such as Codex session indexes, history indexes, rollout session JSONL files, archived session JSONL files, memories, and conservative Claude/Cursor index-style files. It then reads root project manifests for discovered working directories and emits a structured report with active projects, tech stack evidence, keyword evidence, recent task themes, and a recommended `[profile]` draft.
 
 The command does not write `config.toml`. A main Agent or human should review the report, remove noise, confirm preferences, and then update `[profile]`.
 

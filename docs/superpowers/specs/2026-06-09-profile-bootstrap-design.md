@@ -100,6 +100,8 @@ ProfileDraftBuilder
 ```text
 ~/.codex/session_index.jsonl
 ~/.codex/history.jsonl
+~/.codex/sessions/**/*.jsonl
+~/.codex/archived_sessions/*.jsonl
 ~/.codex/memories/*
 ~/.claude/**/index 或 history 类低风险文件
 Cursor 可识别的 workspace/history/memory 索引文件

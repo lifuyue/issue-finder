@@ -46,12 +46,11 @@ const DANGEROUS_JSON_KEYS: &[&str] = &[
 ];
 
 const SAFE_TEXT_KEYS: &[&str] = &[
-    "description",
     "headline",
-    "name",
     "summary",
     "task",
     "theme",
+    "thread_name",
     "title",
     "topic",
 ];
@@ -252,6 +251,14 @@ pub fn bootstrap_profile(scan_root: &Path) -> Result<ProfileBootstrapReport> {
 
     let mut projects = build_projects(records, &mut warnings);
     scan_project_manifests(&mut projects, &mut warnings);
+    filter_non_project_paths(&mut projects, &scan_root);
+    if projects.is_empty() {
+        warnings.push(BootstrapWarning::new(
+            "no_active_projects_found",
+            "No active project directories were discovered from supported Agent sources.",
+            None,
+        ));
+    }
     let (active_projects, tech_stack_evidence, keyword_evidence, recent_task_themes) =
         build_outputs(projects);
     let recommended_profile =
@@ -346,6 +353,24 @@ fn scan_codex_sources(
         records,
         warnings,
     );
+    scan_jsonl_tree(
+        &codex.join("sessions"),
+        "codex",
+        RecordKind::Session,
+        source_reports,
+        records,
+        warnings,
+        scan_root,
+    );
+    scan_jsonl_tree(
+        &codex.join("archived_sessions"),
+        "codex",
+        RecordKind::Session,
+        source_reports,
+        records,
+        warnings,
+        scan_root,
+    );
     scan_memory_dir(
         &codex.join("memories"),
         "codex",
@@ -354,6 +379,45 @@ fn scan_codex_sources(
         records,
         warnings,
     );
+}
+
+fn scan_jsonl_tree(
+    root: &Path,
+    source_kind: &str,
+    record_kind: RecordKind,
+    source_reports: &mut Vec<AgentSourceReport>,
+    records: &mut Vec<AgentRecord>,
+    warnings: &mut Vec<BootstrapWarning>,
+    scan_root: &Path,
+) {
+    if !root.exists() {
+        return;
+    }
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+    {
+        if should_skip_agent_file(entry.path()) {
+            continue;
+        }
+        if entry
+            .path()
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
+        {
+            scan_supported_file(
+                entry.path(),
+                source_kind,
+                record_kind,
+                scan_root,
+                source_reports,
+                records,
+                warnings,
+            );
+        }
+    }
 }
 
 fn scan_claude_sources(
@@ -418,6 +482,9 @@ fn scan_memory_dir(
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
     {
+        if should_skip_agent_file(entry.path()) {
+            continue;
+        }
         scan_supported_file(
             entry.path(),
             source_kind,
@@ -449,6 +516,9 @@ fn scan_matching_tree(
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
     {
+        if should_skip_agent_file(entry.path()) {
+            continue;
+        }
         if !looks_like_agent_index(entry.path()) {
             continue;
         }
@@ -467,6 +537,10 @@ fn scan_matching_tree(
             warnings,
         );
     }
+}
+
+fn should_skip_agent_file(path: &Path) -> bool {
+    matches!(file_name_lower(path).as_str(), ".ds_store")
 }
 
 fn looks_like_agent_index(path: &Path) -> bool {
@@ -815,14 +889,6 @@ fn build_projects(
         }
     }
 
-    if projects.is_empty() {
-        warnings.push(BootstrapWarning::new(
-            "no_active_projects_found",
-            "No active project directories were discovered from supported Agent sources.",
-            None,
-        ));
-    }
-
     projects
 }
 
@@ -876,6 +942,35 @@ fn scan_project_manifests(
             }
         }
     }
+}
+
+fn filter_non_project_paths(projects: &mut BTreeMap<String, ProjectBuilder>, scan_root: &Path) {
+    projects.retain(|_, project| {
+        !(project.manifests.is_empty() && is_non_project_path(&project.path, scan_root))
+    });
+}
+
+fn is_non_project_path(path: &Path, scan_root: &Path) -> bool {
+    if path == Path::new("/") || path == scan_root {
+        return true;
+    }
+
+    if path.starts_with(scan_root)
+        && path
+            .strip_prefix(scan_root)
+            .ok()
+            .and_then(|relative| relative.components().next())
+            .and_then(|component| component.as_os_str().to_str())
+            .is_some_and(|first| first.starts_with('.'))
+    {
+        return true;
+    }
+
+    let path_text = path.to_string_lossy();
+    path_text.starts_with("/opt/homebrew/Cellar/")
+        || path_text.starts_with("/usr/local/Cellar/")
+        || path_text.contains("/.nvm/")
+        || path_text.contains("/Library/Application Support/")
 }
 
 fn read_manifest_evidence(path: &Path, file_name: &str) -> Result<ManifestEvidence> {
@@ -990,7 +1085,18 @@ fn build_outputs(
     let mut keyword_evidence = BTreeMap::<String, EvidenceBuilder>::new();
     let mut themes = BTreeMap::<String, ThemeBuilder>::new();
 
-    for (index, project) in projects.into_values().enumerate() {
+    let mut projects = projects.into_values().collect::<Vec<_>>();
+    projects.sort_by(|left, right| {
+        right
+            .manifests
+            .len()
+            .cmp(&left.manifests.len())
+            .then_with(|| right.session_count.cmp(&left.session_count))
+            .then_with(|| right.memory_count.cmp(&left.memory_count))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    for (index, project) in projects.into_iter().enumerate() {
         let project_ref = format!("project:{}", index + 1);
         let path = project.path.to_string_lossy().to_string();
 

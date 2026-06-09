@@ -151,6 +151,135 @@ serde = "1"
 }
 
 #[test]
+fn profile_bootstrap_scans_codex_rollout_cwd_and_filters_memory_roots() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let rust_project = home.join("Projects/rust agent");
+    let node_project = home.join("Projects/node-app");
+    fs::create_dir_all(&rust_project).unwrap();
+    fs::create_dir_all(&node_project).unwrap();
+    fs::create_dir_all(home.join(".codex/sessions/2026/06/09")).unwrap();
+    fs::create_dir_all(home.join(".codex/archived_sessions")).unwrap();
+    fs::create_dir_all(home.join(".codex/memories")).unwrap();
+    fs::create_dir_all(home.join(".ssh")).unwrap();
+    fs::create_dir_all(home.join(".nvm")).unwrap();
+
+    fs::write(
+        rust_project.join("Cargo.toml"),
+        r#"
+[package]
+name = "rust-agent"
+version = "0.1.0"
+
+[dependencies]
+tokio = "1"
+serde = "1"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        node_project.join("package.json"),
+        r#"{"dependencies":{"typescript":"latest","next":"latest"}}"#,
+    )
+    .unwrap();
+
+    fs::write(
+        home.join(".codex/sessions/2026/06/09/rollout.jsonl"),
+        [
+            json!({
+                "type": "rollout",
+                "payload": {
+                    "cwd": rust_project,
+                    "timestamp": "2026-06-09T01:00:00Z",
+                    "title": "Rust agent runtime"
+                }
+            })
+            .to_string(),
+            json!({
+                "type": "message",
+                "payload": {
+                    "content": format!("Do not extract this private body path {}", home.join(".ssh").display()),
+                    "cwd": rust_project
+                }
+            })
+            .to_string(),
+            json!({
+                "type": "rollout",
+                "payload": {
+                    "cwd": home,
+                    "title": "Home directory shell setup should not become a project"
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+    fs::write(
+        home.join(".codex/archived_sessions/archived.jsonl"),
+        json!({
+            "payload": {
+                "cwd": node_project,
+                "summary": "Next.js browser form work",
+                "updated_at": "2026-06-08T01:00:00Z"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        home.join(".codex/memories/profile.md"),
+        format!(
+            "Memory mentions {} {} {} but these are not project roots.\n",
+            home.display(),
+            home.join(".ssh").display(),
+            home.join(".nvm").display()
+        ),
+    )
+    .unwrap();
+
+    let report = bootstrap_profile(home).unwrap();
+    assert!(report.agent_sources.iter().any(|source| source
+        .path
+        .ends_with(".codex/sessions/2026/06/09/rollout.jsonl")));
+    assert!(report.agent_sources.iter().any(|source| source
+        .path
+        .ends_with(".codex/archived_sessions/archived.jsonl")));
+
+    let rust = report
+        .active_projects
+        .iter()
+        .find(|project| project.path.ends_with("Projects/rust agent"))
+        .unwrap();
+    assert_eq!(rust.session_count, 2);
+    assert_eq!(rust.manifest_count, 1);
+    let node = report
+        .active_projects
+        .iter()
+        .find(|project| project.path.ends_with("Projects/node-app"))
+        .unwrap();
+    assert_eq!(node.session_count, 1);
+    assert_eq!(node.manifest_count, 1);
+
+    assert!(!report
+        .active_projects
+        .iter()
+        .any(|project| project.path == home.to_string_lossy()));
+    assert!(!report
+        .active_projects
+        .iter()
+        .any(|project| project.path.ends_with(".ssh") || project.path.ends_with(".nvm")));
+    assert!(report
+        .tech_stack_evidence
+        .iter()
+        .any(|evidence| evidence.term == "Rust" && !evidence.manifest_refs.is_empty()));
+    assert!(report
+        .tech_stack_evidence
+        .iter()
+        .any(|evidence| evidence.term == "TypeScript" && !evidence.manifest_refs.is_empty()));
+}
+
+#[test]
 fn profile_bootstrap_handles_empty_home_without_failing() {
     let dir = tempdir().unwrap();
     let report = bootstrap_profile(dir.path()).unwrap();
