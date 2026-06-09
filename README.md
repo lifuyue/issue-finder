@@ -22,6 +22,16 @@
 cargo install issue-finder
 ```
 
+If you want your main coding agent to handle first-run setup, give it this prompt:
+
+```text
+Install cargo issue-finder locally, run `issue-finder profile bootstrap --json`,
+review the report's tech stack, keyword, and project evidence, remove noise,
+then update `[profile]` in `~/.issue-finder/config.toml`. Do not copy session
+bodies, secrets, system prompts, or tool output into the config. Then run
+`issue-finder doctor` and `issue-finder scout --limit 10` to verify.
+```
+
 Then configure GitHub access and check local readiness:
 
 ```bash

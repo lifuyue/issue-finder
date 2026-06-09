@@ -62,6 +62,12 @@ Initialize local configuration and directories:
 issue-finder init
 ```
 
+Ask your main coding agent to draft profile settings from local Agent indexes and project manifests:
+
+```bash
+issue-finder profile bootstrap --json
+```
+
 Check local readiness:
 
 ```bash
@@ -112,6 +118,7 @@ issue-finder report --date YYYY-MM-DD
 | Command | Purpose |
 | --- | --- |
 | `issue-finder init` | Create local config and Issue Finder state directories |
+| `issue-finder profile bootstrap --json` | Scan supported local Agent indexes and project manifests, then print a profile bootstrap report |
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
@@ -198,6 +205,14 @@ model = "gpt-4o-mini"
 ```
 
 If `llm.api_key_env` is set, Issue Finder reads the LLM key from that environment variable instead of `llm.api_key`.
+
+### Profile Bootstrap
+
+`issue-finder profile bootstrap --json` scans supported low-risk local Agent sources under the operating system home directory, such as Codex session indexes, history indexes, memories, and conservative Claude/Cursor index-style files. It then reads root project manifests for discovered working directories and emits a structured report with active projects, tech stack evidence, keyword evidence, recent task themes, and a recommended `[profile]` draft.
+
+The command does not write `config.toml`. A main Agent or human should review the report, remove noise, confirm preferences, and then update `[profile]`.
+
+By default it does not read complete conversation bodies, system prompts, tool output, diffs, patches, shell output, or secrets. The scan is complete for supported source files and root manifests, but the conversation body mode remains disabled.
 
 ## Handoff Output
 

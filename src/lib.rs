@@ -18,6 +18,7 @@ pub mod paths;
 pub mod prepare_events;
 pub mod prepare_gate;
 pub mod probe;
+pub mod profile_bootstrap;
 pub mod readiness;
 pub mod recommendation;
 pub mod repo_scan;

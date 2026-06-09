@@ -22,6 +22,16 @@
 cargo install issue-finder
 ```
 
+如果希望主编码代理代为完成首次设置，可以给它这段提示词：
+
+```text
+帮我安装 cargo issue-finder 到本地并启动。请运行
+`issue-finder profile bootstrap --json`，审阅报告中的技术栈、关键词和项目证据，
+结合我的实际偏好去噪后，更新 `~/.issue-finder/config.toml` 的 `[profile]`。
+不要把会话正文、密钥、系统提示或工具输出写进配置。完成后运行
+`issue-finder doctor` 和 `issue-finder scout --limit 10` 验证。
+```
+
 然后配置 GitHub 访问并检查本地就绪状态：
 
 ```bash
