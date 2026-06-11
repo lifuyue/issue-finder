@@ -74,6 +74,12 @@ Check local readiness:
 issue-finder doctor
 ```
 
+Check JSON tool readiness before an agent calls discovery or prepare:
+
+```bash
+issue-finder tools call issue-finder.status --arguments '{}'
+```
+
 Discover and rank candidate issues:
 
 ```bash
@@ -122,6 +128,7 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder init` | Create local config and Issue Finder state directories |
 | `issue-finder profile bootstrap --json` | Scan supported local Agent indexes and project manifests, then print a profile bootstrap report |
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
+| `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |

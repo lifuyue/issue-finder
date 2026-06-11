@@ -156,6 +156,43 @@ pub struct FailureOutput {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct StatusConfigOutput {
+    pub path: String,
+    pub exists: bool,
+    pub load_ok: bool,
+    pub load_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusGitHubOutput {
+    pub token_source: String,
+    pub auth: StatusGitHubAuthOutput,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusGitHubAuthOutput {
+    pub checked: bool,
+    pub ok: bool,
+    pub login: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub config: StatusConfigOutput,
+    pub github: StatusGitHubOutput,
+    pub next_fix_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ScoutStructuredOutput {
     pub kind: String,
     pub tool: String,
@@ -417,6 +454,24 @@ pub fn prepare_failed_structured_output(
         prepare_gate,
         failure,
         gate_bypass,
+    })
+}
+
+pub fn status_structured_output(
+    tool: &str,
+    status: String,
+    config: StatusConfigOutput,
+    github: StatusGitHubOutput,
+    next_fix_command: Option<String>,
+) -> Value {
+    to_value(StatusStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status,
+        success: true,
+        config,
+        github,
+        next_fix_command,
     })
 }
 

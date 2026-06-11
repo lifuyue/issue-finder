@@ -223,6 +223,15 @@ async fn main() -> Result<()> {
                                 .execute(invocation)
                                 .await
                         }
+                        Err(error) if args.tool == "issue-finder.status" => {
+                            IssueFinderToolRuntime::new_with_config_load_error(
+                                paths.clone(),
+                                Config::default(),
+                                Some(error.to_string()),
+                            )
+                            .execute(invocation)
+                            .await
+                        }
                         Err(error) => IssueFinderToolOutput::failure(
                             call_id,
                             args.turn_id,

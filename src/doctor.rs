@@ -62,17 +62,21 @@ pub async fn run_doctor(paths: &IssueFinderPaths, config: Option<&Config>) -> Ve
     }
 
     if let Some(config) = config {
+        let github_token = config.resolved_github_token();
         checks.push(DoctorCheck {
             name: "github_token".to_string(),
-            ok: !config.github.token.trim().is_empty(),
-            message: if config.github.token.trim().is_empty() {
+            ok: !github_token.token.trim().is_empty(),
+            message: if github_token.token.trim().is_empty() {
                 "GitHub token is missing".to_string()
             } else {
-                "GitHub token is configured".to_string()
+                format!(
+                    "GitHub token is configured from {}",
+                    github_token.source.as_str()
+                )
             },
         });
 
-        if !config.github.token.trim().is_empty() {
+        if !github_token.token.trim().is_empty() {
             let github = GitHubClient::new(config);
             match github {
                 Ok(client) => match client.validate_token().await {

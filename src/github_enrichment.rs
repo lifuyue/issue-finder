@@ -229,7 +229,7 @@ impl GitHubEnrichmentClient {
                 .user_agent("issue-finder")
                 .timeout(ENRICHMENT_HTTP_TIMEOUT)
                 .build()?,
-            token: config.github.token.clone(),
+            token: config.resolved_github_token().token,
             api_base_url: api_base_url.into(),
             budget,
         })

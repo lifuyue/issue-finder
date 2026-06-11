@@ -29,6 +29,9 @@ use issue_finder::value_scoring::{
 use issue_finder::workflow::{self, PrepareOutcome};
 use issue_finder::workspace::git_available;
 use tempfile::tempdir;
+use tokio::sync::Mutex;
+
+static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[test]
 fn tools_list_outputs_stable_issue_finder_specs() {
@@ -49,6 +52,7 @@ fn tools_list_outputs_stable_issue_finder_specs() {
     assert_eq!(
         names,
         vec![
+            "issue-finder.status",
             "issue-finder.scout",
             "issue-finder.assess",
             "issue-finder.prepare",
@@ -61,6 +65,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         .find(|tool| tool["name"] == "scout")
         .expect("scout tool spec");
     assert!(scout["inputSchema"]["properties"]["repo"].is_object());
+    let status = tools
+        .iter()
+        .find(|tool| tool["name"] == "status")
+        .expect("status tool spec");
+    assert!(status["inputSchema"]["properties"]["checkAuth"].is_object());
 }
 
 #[test]
@@ -84,6 +93,136 @@ fn tools_call_invalid_arguments_emits_single_json_object() {
     assert_eq!(value["call_id"], "call_test");
     assert_eq!(value["success"], false);
     assert_eq!(value["status"], "invalid_arguments");
+}
+
+#[test]
+fn tools_call_status_reports_invalid_config_as_json() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    fs::create_dir_all(&paths.home).unwrap();
+    fs::write(&paths.config, "github = [").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+        .env("ISSUE_FINDER_HOME", &paths.home)
+        .env_remove("GITHUB_TOKEN")
+        .args([
+            "tools",
+            "call",
+            "issue-finder.status",
+            "--arguments",
+            r#"{"checkAuth":false}"#,
+            "--call-id",
+            "status_invalid_config",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap();
+    assert_eq!(value["call_id"], "status_invalid_config");
+    assert_eq!(value["success"], true);
+    assert_eq!(value["status"], "needs_setup");
+    assert_eq!(value["structured_content"]["config"]["exists"], true);
+    assert_eq!(value["structured_content"]["config"]["loadOk"], false);
+    assert!(value["structured_content"]["config"]["loadError"].is_string());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tool_status_reports_missing_config_and_token() {
+    let _env_lock = ENV_LOCK.lock().await;
+    let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+
+    let status = runtime
+        .execute(invocation("issue-finder.status", "{}", "status_missing"))
+        .await;
+
+    assert!(status.success, "{status:?}");
+    assert_eq!(status.status, "needs_setup");
+    assert_eq!(
+        status.structured_content["config"]["path"].as_str(),
+        Some(paths.config.to_string_lossy().as_ref())
+    );
+    assert_eq!(status.structured_content["config"]["exists"], false);
+    assert_eq!(
+        status.structured_content["github"]["tokenSource"],
+        "missing"
+    );
+    assert_eq!(status.structured_content["github"]["auth"]["checked"], true);
+    assert_eq!(status.structured_content["github"]["auth"]["ok"], false);
+    assert_eq!(
+        status.structured_content["nextFixCommand"],
+        r#"export GITHUB_TOKEN="$(gh auth token)""#
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tool_status_reports_config_token_without_auth_check() {
+    let _env_lock = ENV_LOCK.lock().await;
+    let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let mut config = Config::default();
+    config.github.token = "config-token".to_string();
+    config.save(&paths).unwrap();
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), config);
+
+    let status = runtime
+        .execute(invocation(
+            "issue-finder.status",
+            r#"{"checkAuth":false}"#,
+            "status_config_token",
+        ))
+        .await;
+
+    assert!(status.success, "{status:?}");
+    assert_eq!(status.status, "ready");
+    assert_eq!(status.structured_content["config"]["exists"], true);
+    assert_eq!(status.structured_content["github"]["tokenSource"], "config");
+    assert_eq!(
+        status.structured_content["github"]["auth"]["checked"],
+        false
+    );
+    assert_eq!(
+        status.structured_content["nextFixCommand"],
+        serde_json::Value::Null
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tool_status_prefers_env_token_and_reports_auth_login() {
+    let _env_lock = ENV_LOCK.lock().await;
+    let _token_guard = EnvVarGuard::set("GITHUB_TOKEN", "env-token");
+    let mock_github = start_mock_tool_github();
+    let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
+
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let mut config = Config::default();
+    config.github.token = "config-token".to_string();
+    config.save(&paths).unwrap();
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), config);
+
+    let status = runtime
+        .execute(invocation("issue-finder.status", "{}", "status_env_token"))
+        .await;
+
+    assert!(status.success, "{status:?}");
+    assert_eq!(status.status, "ready");
+    assert_eq!(
+        status.structured_content["github"]["tokenSource"],
+        "env:GITHUB_TOKEN"
+    );
+    assert_eq!(status.structured_content["github"]["auth"]["ok"], true);
+    assert_eq!(
+        status.structured_content["github"]["auth"]["login"],
+        "tool-user"
+    );
+
+    mock_github.stop();
 }
 
 #[test]
@@ -113,15 +252,15 @@ fn daily_and_tool_prepare_gate_share_allowed_category_policy() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
+    let _env_lock = ENV_LOCK.lock().await;
     if !git_available() {
         return;
     }
 
     let mock_github = start_mock_tool_github();
-    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
-    let _env_guard = EnvGuard;
+    let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -371,11 +510,31 @@ async fn tool_read_context_allows_fixed_sections_and_rejects_escape() {
     }
 }
 
-struct EnvGuard;
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<String>,
+}
 
-impl Drop for EnvGuard {
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let original = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self { key, original }
+    }
+
+    fn unset(key: &'static str) -> Self {
+        let original = std::env::var(key).ok();
+        std::env::remove_var(key);
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
     fn drop(&mut self) {
-        std::env::remove_var("ISSUE_FINDER_GITHUB_API_BASE");
+        match &self.original {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
     }
 }
 
@@ -485,6 +644,10 @@ fn start_mock_tool_github() -> MockToolGithub {
 }
 
 fn response_body(request: &str, base_url: &str, search_count: &AtomicUsize) -> String {
+    if request.starts_with("GET /user") {
+        return r#"{"login":"tool-user"}"#.to_string();
+    }
+
     if request.starts_with("GET /search/issues") {
         let count = search_count.fetch_add(1, Ordering::SeqCst);
         return if count == 0 {
