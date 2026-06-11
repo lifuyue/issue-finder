@@ -18,7 +18,7 @@
 - `cargo clippy --all-targets -- -D warnings`：对所有目标执行代码检查，并把警告视为错误。
 - `cargo fmt --all`：提交前格式化整个程序包。
 - `cargo install --path .`：把当前 checkout 安装为 `issue-finder`。
-- `cargo run -- tools list`：本地冒烟验证 JSON tool contract 是否能列出四个 Issue Finder tool specs。
+- `cargo run -- tools list`：本地冒烟验证 JSON tool contract 是否能列出五个 Issue Finder tool specs。
 
 进行隔离的手动运行时，设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo`，避免生成的状态写入 `~/.issue-finder`。
 

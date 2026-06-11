@@ -11,15 +11,19 @@ use issue_finder::github_enrichment::{competition_timeline_missing, GitHubEnrich
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::value_scoring::assess_issue;
 use tempfile::tempdir;
+use tokio::sync::Mutex;
 
-#[tokio::test]
+static ENRICHMENT_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+#[tokio::test(flavor = "current_thread")]
 async fn enrichment_cache_is_used_unless_refresh_is_passed() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_enrichment_server();
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let client = GitHubEnrichmentClient::with_api_base(&config, base_url).unwrap();
     let enriched = client.enrich_issue(&paths, &issue, true).await;
@@ -55,14 +59,15 @@ async fn enrichment_cache_is_used_unless_refresh_is_passed() {
     assert!(!refreshed.warnings.is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn stale_enrichment_cache_refreshes_from_network() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_enrichment_server();
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let mut stale = issue_finder::github_enrichment::EnrichedIssue::from_issue(&issue);
     stale.repository.forks = 7;
@@ -81,12 +86,13 @@ async fn stale_enrichment_cache_refreshes_from_network() {
     assert!(refreshed.warnings.is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn partial_enrichment_failure_still_produces_assessment() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let enriched = GitHubEnrichmentClient::with_api_base(&config, "http://127.0.0.1:9")
         .unwrap()
@@ -99,12 +105,13 @@ async fn partial_enrichment_failure_still_produces_assessment() {
     assert!(!assessment.missing_evidence.is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn budget_exhaustion_is_deterministic_and_explainable() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let budget = GitHubApiBudget::with_total_budget(Some(0));
     let enriched = GitHubEnrichmentClient::with_api_base_and_budget(
@@ -129,14 +136,15 @@ async fn budget_exhaustion_is_deterministic_and_explainable() {
     assert!(!budget.report().budget_exhausted.is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn enrichment_samples_tail_pages_for_recent_stars_and_comments() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_tail_sampling_server();
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let enriched = GitHubEnrichmentClient::with_api_base(&config, base_url)
         .unwrap()
@@ -165,14 +173,15 @@ async fn enrichment_samples_tail_pages_for_recent_stars_and_comments() {
     assert!(enriched.activity.maintainer_recent_response);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn timeline_completion_updates_missing_competition_cache() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_timeline_completion_server();
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let current = issue_finder::github_enrichment::EnrichedIssue::from_issue(&issue);
     assert!(competition_timeline_missing(&current));
@@ -207,14 +216,15 @@ async fn timeline_completion_updates_missing_competition_cache() {
     assert_eq!(budget.report().total_network_requests, 0);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn fresh_cache_preserves_ranking_assessment() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_enrichment_server();
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
-    let config = Config::default();
+    let config = test_config();
     let issue = issue();
     let enriched = GitHubEnrichmentClient::with_api_base(&config, base_url)
         .unwrap()
@@ -244,6 +254,12 @@ fn test_paths(root: &std::path::Path) -> IssueFinderPaths {
         inbox_dir: root.join("issue-finder-home/inbox"),
         reports_dir: root.join("issue-finder-home/reports"),
     }
+}
+
+fn test_config() -> Config {
+    let mut config = Config::default();
+    config.github.token.clear();
+    config
 }
 
 fn issue() -> GitHubIssue {

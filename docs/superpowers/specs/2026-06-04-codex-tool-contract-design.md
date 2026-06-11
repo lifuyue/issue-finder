@@ -136,6 +136,7 @@ pub struct IssueFinderToolSpec {
 v1 namespace 固定为 `issue-finder`。模型或 adapter 看到的完整名为：
 
 ```text
+issue-finder.status
 issue-finder.scout
 issue-finder.assess
 issue-finder.prepare
@@ -187,6 +188,45 @@ pub enum IssueFinderContentItem {
 业务阻止使用 `success=true`，例如 `blocked_by_gate`。
 
 ## Tools
+
+### `issue-finder.status`
+
+用途：在 agent 调用 discovery、assessment 或 prepare 前，返回本地配置和 GitHub auth 可用性。
+
+输入：
+
+```json
+{
+  "checkAuth": true
+}
+```
+
+输出 `structured_content` 不包含 token，只包含 config 路径存在性、token 来源、GitHub login 检查结果和下一步修复命令：
+
+```json
+{
+  "kind": "issue_finder_tool_output",
+  "tool": "issue-finder.status",
+  "status": "ready",
+  "success": true,
+  "config": {
+    "path": "~/.issue-finder/config.toml",
+    "exists": true,
+    "loadOk": true,
+    "loadError": null
+  },
+  "github": {
+    "tokenSource": "env:GITHUB_TOKEN",
+    "auth": {
+      "checked": true,
+      "ok": true,
+      "login": "octocat",
+      "error": null
+    }
+  },
+  "nextFixCommand": null
+}
+```
 
 ### `issue-finder.scout`
 
@@ -480,6 +520,7 @@ probe_json    -> probe.json
 
 ```bash
 issue-finder tools list
+issue-finder tools call issue-finder.status --arguments '{}'
 issue-finder tools call issue-finder.scout --arguments '{"limit":10}'
 issue-finder tools call issue-finder.assess --arguments '{"issue":"owner/repo#123"}'
 issue-finder tools call issue-finder.prepare --arguments '{"issue":"owner/repo#123"}'
@@ -504,7 +545,7 @@ issue-finder tools call issue-finder.scout \
   "tools": [
     {
       "namespace": "issue-finder",
-      "name": "scout",
+      "name": "status",
       "description": "...",
       "inputSchema": {},
       "deferLoading": false
@@ -657,7 +698,8 @@ tool call 无法完成：
 
 - `cargo test` 通过。
 - `cargo clippy --all-targets -- -D warnings` 通过。
-- `issue-finder tools list` 输出四个 tool specs。
+- `issue-finder tools list` 输出五个 tool specs。
+- `issue-finder tools call issue-finder.status --arguments '{}'` 返回 config、token source 和 GitHub auth 诊断，不输出 token。
 - `issue-finder tools call issue-finder.scout --arguments '{"limit":5}'` 返回 category-first 候选。
 - `issue-finder tools call issue-finder.assess --arguments '{"issue":"owner/repo#123"}'` 返回完整 gate summary 且不写 handoff。
 - `issue-finder tools call issue-finder.prepare --arguments '{"issue":"owner/repo#123"}'` 对非 high-value 默认返回 `blocked_by_gate`。
@@ -690,7 +732,7 @@ tool call 无法完成：
 
 如果未来 tool 数量变多，可参考 Codex `tool_search`：
 
-- 默认只暴露 `issue-finder.scout`、`issue-finder.assess`、`issue-finder.prepare`
+- 默认只暴露 `issue-finder.status`、`issue-finder.scout`、`issue-finder.assess`、`issue-finder.prepare`
 - 将 `read_context` 或更细粒度 evidence readers 标记为 deferred
 - agent 需要时再发现和加载
 

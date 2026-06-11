@@ -226,9 +226,10 @@ impl GitHubClient {
         let http = reqwest::Client::builder()
             .user_agent("issue-finder")
             .build()?;
+        let token = config.resolved_github_token().token;
         Ok(Self {
             http,
-            token: config.github.token.clone(),
+            token,
             api_base_url: std::env::var("ISSUE_FINDER_GITHUB_API_BASE")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             budget,
@@ -244,9 +245,10 @@ impl GitHubClient {
         let http = reqwest::Client::builder()
             .user_agent("issue-finder")
             .build()?;
+        let token = config.resolved_github_token().token;
         Ok(Self {
             http,
-            token: config.github.token.clone(),
+            token,
             api_base_url: api_base_url.into(),
             budget,
         })

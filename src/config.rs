@@ -21,6 +21,29 @@ pub struct GitHubConfig {
     pub username: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedGitHubToken {
+    pub token: String,
+    pub source: GitHubTokenSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitHubTokenSource {
+    EnvGithubToken,
+    Config,
+    Missing,
+}
+
+impl GitHubTokenSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EnvGithubToken => "env:GITHUB_TOKEN",
+            Self::Config => "config",
+            Self::Missing => "missing",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfileConfig {
     pub tech_stack: Vec<String>,
@@ -98,6 +121,29 @@ impl Config {
         }
 
         self.llm.api_key.clone()
+    }
+
+    pub fn resolved_github_token(&self) -> ResolvedGitHubToken {
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            if !token.trim().is_empty() {
+                return ResolvedGitHubToken {
+                    token,
+                    source: GitHubTokenSource::EnvGithubToken,
+                };
+            }
+        }
+
+        if !self.github.token.trim().is_empty() {
+            return ResolvedGitHubToken {
+                token: self.github.token.clone(),
+                source: GitHubTokenSource::Config,
+            };
+        }
+
+        ResolvedGitHubToken {
+            token: String::new(),
+            source: GitHubTokenSource::Missing,
+        }
     }
 }
 

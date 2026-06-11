@@ -4,8 +4,8 @@ use chrono::Utc;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::config::Config;
-use crate::github::GitHubIssue;
+use crate::config::{Config, GitHubTokenSource};
+use crate::github::{GitHubClient, GitHubIssue};
 use crate::paths::IssueFinderPaths;
 use crate::prepare_gate::{prepare_gate_decision, PrepareGateDecision};
 use crate::recommendation::{
@@ -16,8 +16,9 @@ use crate::tool_outputs::{
     assess_structured_output, assessment_output, candidate_output, failure_output,
     gate_bypass_output, handoff_output, issue_output, prepare_blocked_structured_output,
     prepare_failed_structured_output, prepare_gate_output, prepare_prepared_structured_output,
-    readiness_output, scout_structured_output, to_value, AssessmentOutput, GateBypassOutput,
-    IssueOutput, PrepareGateOutput,
+    readiness_output, scout_structured_output, status_structured_output, to_value,
+    AssessmentOutput, GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput,
+    StatusGitHubAuthOutput, StatusGitHubOutput,
 };
 use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
@@ -26,6 +27,7 @@ const TOOL_SCOUT: &str = "issue-finder.scout";
 const TOOL_ASSESS: &str = "issue-finder.assess";
 const TOOL_PREPARE: &str = "issue-finder.prepare";
 const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
+const TOOL_STATUS: &str = "issue-finder.status";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct IssueFinderToolSpecsEnvelope {
@@ -73,6 +75,7 @@ pub enum IssueFinderContentItem {
 pub struct IssueFinderToolRuntime {
     paths: IssueFinderPaths,
     config: Config,
+    config_load_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -193,7 +196,23 @@ impl IssueFinderToolOutput {
 
 impl IssueFinderToolRuntime {
     pub fn new(paths: IssueFinderPaths, config: Config) -> Self {
-        Self { paths, config }
+        Self {
+            paths,
+            config,
+            config_load_error: None,
+        }
+    }
+
+    pub fn new_with_config_load_error(
+        paths: IssueFinderPaths,
+        config: Config,
+        config_load_error: Option<String>,
+    ) -> Self {
+        Self {
+            paths,
+            config,
+            config_load_error,
+        }
     }
 
     pub async fn execute(&self, invocation: IssueFinderToolInvocation) -> IssueFinderToolOutput {
@@ -208,6 +227,7 @@ impl IssueFinderToolRuntime {
         }
 
         let result = match invocation.tool_name.as_str() {
+            TOOL_STATUS => self.call_status(&invocation).await,
             TOOL_SCOUT => self.call_scout(&invocation).await,
             TOOL_ASSESS => self.call_assess(&invocation).await,
             TOOL_PREPARE => self.call_prepare(&invocation).await,
@@ -235,6 +255,81 @@ impl IssueFinderToolRuntime {
                 error.to_string(),
             ),
         }
+    }
+
+    async fn call_status(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: StatusToolArgs = parse_arguments(&invocation.arguments)?;
+        let check_auth = args.check_auth.unwrap_or(true);
+        let config_exists = self.paths.config.exists();
+        let config_load_ok = !config_exists || self.config_load_error.is_none();
+        let token = self.config.resolved_github_token();
+        let mut auth = StatusGitHubAuthOutput {
+            checked: check_auth,
+            ok: false,
+            login: None,
+            error: None,
+        };
+
+        if check_auth {
+            if token.source == GitHubTokenSource::Missing {
+                auth.error = Some("GitHub token is missing".to_string());
+            } else {
+                match GitHubClient::new(&self.config) {
+                    Ok(client) => match client.validate_token().await {
+                        Ok(login) => {
+                            auth.ok = true;
+                            auth.login = Some(login);
+                        }
+                        Err(error) => {
+                            auth.error = Some(error.to_string());
+                        }
+                    },
+                    Err(error) => {
+                        auth.error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+
+        let status = status_name(
+            config_exists,
+            config_load_ok,
+            token.source,
+            check_auth.then_some(auth.ok),
+        );
+        let next_fix_command = next_fix_command(
+            config_exists,
+            config_load_ok,
+            token.source,
+            check_auth,
+            auth.ok,
+        );
+        let content_text = status_content_text(&status, token.source, &auth, &next_fix_command);
+        let structured = status_structured_output(
+            TOOL_STATUS,
+            status.clone(),
+            StatusConfigOutput {
+                path: self.paths.config.to_string_lossy().to_string(),
+                exists: config_exists,
+                load_ok: config_load_ok,
+                load_error: self.config_load_error.clone(),
+            },
+            StatusGitHubOutput {
+                token_source: token.source.as_str().to_string(),
+                auth,
+            },
+            next_fix_command,
+        );
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            status,
+            content_text,
+            structured,
+        ))
     }
 
     async fn call_scout(
@@ -425,6 +520,12 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
         version: 1,
         tools: vec![
             tool_spec(
+                "status",
+                "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
+                status_schema(),
+                false,
+            ),
+            tool_spec(
                 "scout",
                 "Discover and rank candidate GitHub issues with gate-aware summaries.",
                 scout_schema(),
@@ -538,6 +639,79 @@ fn scout_scope(repo: Option<String>) -> RuntimeResult<DiscoveryScope> {
     }
 }
 
+fn status_name(
+    config_exists: bool,
+    config_load_ok: bool,
+    token_source: GitHubTokenSource,
+    auth_ok: Option<bool>,
+) -> String {
+    if token_source == GitHubTokenSource::Missing || !config_exists || !config_load_ok {
+        return "needs_setup".to_string();
+    }
+
+    if auth_ok == Some(false) {
+        return "auth_failed".to_string();
+    }
+
+    "ready".to_string()
+}
+
+fn next_fix_command(
+    config_exists: bool,
+    config_load_ok: bool,
+    token_source: GitHubTokenSource,
+    check_auth: bool,
+    auth_ok: bool,
+) -> Option<String> {
+    if !config_load_ok {
+        return Some("issue-finder init --force".to_string());
+    }
+
+    if token_source == GitHubTokenSource::Missing || (check_auth && !auth_ok) {
+        return Some(r#"export GITHUB_TOKEN="$(gh auth token)""#.to_string());
+    }
+
+    if !config_exists {
+        return Some("issue-finder init".to_string());
+    }
+
+    None
+}
+
+fn status_content_text(
+    status: &str,
+    token_source: GitHubTokenSource,
+    auth: &StatusGitHubAuthOutput,
+    next_fix_command: &Option<String>,
+) -> String {
+    let auth_text = if auth.checked {
+        if auth.ok {
+            format!(
+                "GitHub authenticated as {} using {}.",
+                auth.login.as_deref().unwrap_or("unknown"),
+                token_source.as_str()
+            )
+        } else {
+            format!(
+                "GitHub auth is not available: {}.",
+                auth.error.as_deref().unwrap_or("unknown error")
+            )
+        }
+    } else {
+        format!(
+            "GitHub auth was not checked; token source is {}.",
+            token_source.as_str()
+        )
+    };
+
+    match next_fix_command {
+        Some(command) => {
+            format!("Issue Finder status: {status}. {auth_text} Next fix: `{command}`.")
+        }
+        None => format!("Issue Finder status: {status}. {auth_text}"),
+    }
+}
+
 fn issue_label(issue: &GitHubIssue) -> String {
     format!("{}#{}", issue.repo_full_name, issue.number)
 }
@@ -569,6 +743,16 @@ fn tool_spec(
         input_schema,
         defer_loading,
     }
+}
+
+fn status_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "checkAuth": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+    })
 }
 
 fn scout_schema() -> Value {
@@ -646,6 +830,13 @@ fn read_context_schema() -> Value {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StatusToolArgs {
+    #[serde(default)]
+    check_auth: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ScoutToolArgs {
     limit: Option<usize>,
     #[serde(default)]
@@ -690,11 +881,11 @@ struct PrepareToolArgs {
 mod tests {
     use super::{
         list_tool_specs, IssueFinderToolInvocation, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT,
-        TOOL_SCOUT,
+        TOOL_SCOUT, TOOL_STATUS,
     };
 
     #[test]
-    fn lists_four_issue_finder_tool_specs() {
+    fn lists_five_issue_finder_tool_specs() {
         let specs = list_tool_specs();
         let names = specs
             .tools
@@ -709,7 +900,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             names,
-            vec![TOOL_SCOUT, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT]
+            vec![
+                TOOL_STATUS,
+                TOOL_SCOUT,
+                TOOL_ASSESS,
+                TOOL_PREPARE,
+                TOOL_READ_CONTEXT
+            ]
         );
     }
 
