@@ -121,9 +121,17 @@ src/tool_context.rs
 
 ### ToolSpec
 
-Issue Finder tool spec 应接近 Codex `DynamicToolSpec`：
+Issue Finder tool catalog 应接近 Codex `DynamicToolSpec`，但 catalog metadata 与 runtime execution 应保持分离。`src/tool_specs.rs` 负责 tool specs、input schema builders、agent onboarding metadata 和 `list_tool_specs()`；`src/tool_runtime.rs` 只负责 invocation、dispatch、具体 tool call 和 runtime error mapping。
 
 ```rust
+pub struct IssueFinderToolSpecsEnvelope {
+    pub kind: String,
+    pub version: u8,
+    pub quick_start: ToolQuickStart,
+    pub recommended_workflow: Vec<ToolWorkflowStep>,
+    pub tools: Vec<IssueFinderToolSpec>,
+}
+
 pub struct IssueFinderToolSpec {
     pub namespace: Option<String>,
     pub name: String,
@@ -542,6 +550,42 @@ issue-finder tools call issue-finder.scout \
 {
   "kind": "issue_finder_tool_specs",
   "version": 1,
+  "quickStart": {
+    "summary": "Use scout to find candidates, assess the top issue, prepare it if the gate allows, then read deferred context sections as needed.",
+    "firstCall": {
+      "defaultTool": "issue-finder.scout",
+      "defaultArguments": {
+        "repo": "owner/repo",
+        "limit": 10
+      },
+      "whenReadyUnknown": "issue-finder.status",
+      "fallbackAfterSetupFailure": "issue-finder.status"
+    }
+  },
+  "recommendedWorkflow": [
+    {
+      "step": "discover",
+      "tool": "issue-finder.scout",
+      "purpose": "Find and rank candidates. Use repo when the user named a repository."
+    },
+    {
+      "step": "assess",
+      "tool": "issue-finder.assess",
+      "purpose": "Assess the best candidate before preparing workspace state."
+    },
+    {
+      "step": "prepare",
+      "tool": "issue-finder.prepare",
+      "purpose": "Prepare workspace and handoff only when the prepare gate allows."
+    },
+    {
+      "step": "read_context",
+      "tool": "issue-finder.read_context",
+      "purpose": "After prepare, read entry first, then safety and probe; read larger sections only when needed.",
+      "deferred": true,
+      "firstSections": ["entry", "safety", "probe"]
+    }
+  ],
   "tools": [
     {
       "namespace": "issue-finder",
