@@ -27,6 +27,7 @@ pub mod scoring;
 pub mod tool_context;
 pub mod tool_outputs;
 pub mod tool_runtime;
+pub mod tool_specs;
 pub mod value_gates;
 pub mod value_model;
 pub mod value_scores;

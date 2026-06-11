@@ -13,9 +13,9 @@ use issue_finder::recommendation::{
     RecommendationEventType, RepositoryScope, ScoutOptions,
 };
 use issue_finder::tool_runtime::{
-    default_call_id, list_tool_specs, IssueFinderToolInvocation, IssueFinderToolOutput,
-    IssueFinderToolRuntime,
+    default_call_id, IssueFinderToolInvocation, IssueFinderToolOutput, IssueFinderToolRuntime,
 };
+use issue_finder::tool_specs::list_tool_specs;
 use issue_finder::workflow;
 
 #[tokio::main]

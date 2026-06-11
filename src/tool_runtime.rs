@@ -20,31 +20,9 @@ use crate::tool_outputs::{
     AssessmentOutput, GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput,
     StatusGitHubAuthOutput, StatusGitHubOutput,
 };
+use crate::tool_specs::{TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS};
 use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
-
-const TOOL_SCOUT: &str = "issue-finder.scout";
-const TOOL_ASSESS: &str = "issue-finder.assess";
-const TOOL_PREPARE: &str = "issue-finder.prepare";
-const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
-const TOOL_STATUS: &str = "issue-finder.status";
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct IssueFinderToolSpecsEnvelope {
-    pub kind: String,
-    pub version: u8,
-    pub tools: Vec<IssueFinderToolSpec>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueFinderToolSpec {
-    pub namespace: Option<String>,
-    pub name: String,
-    pub description: String,
-    pub input_schema: Value,
-    pub defer_loading: bool,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IssueFinderToolInvocation {
@@ -514,45 +492,6 @@ impl IssueFinderToolRuntime {
     }
 }
 
-pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
-    IssueFinderToolSpecsEnvelope {
-        kind: "issue_finder_tool_specs".to_string(),
-        version: 1,
-        tools: vec![
-            tool_spec(
-                "status",
-                "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
-                status_schema(),
-                false,
-            ),
-            tool_spec(
-                "scout",
-                "Discover and rank candidate GitHub issues with gate-aware summaries.",
-                scout_schema(),
-                false,
-            ),
-            tool_spec(
-                "assess",
-                "Assess one GitHub issue without preparing workspace or handoff state.",
-                assess_schema(),
-                false,
-            ),
-            tool_spec(
-                "prepare",
-                "Prepare a workspace and handoff for one issue after the prepare gate passes.",
-                prepare_schema(),
-                false,
-            ),
-            tool_spec(
-                "read_context",
-                "Read one fixed section from a prepared Issue Finder handoff context pack.",
-                read_context_schema(),
-                true,
-            ),
-        ],
-    }
-}
-
 pub fn default_call_id() -> String {
     format!("issue-finder-call-{}", Utc::now().timestamp_millis())
 }
@@ -730,104 +669,6 @@ fn normalized_optional(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn tool_spec(
-    name: &str,
-    description: &str,
-    input_schema: Value,
-    defer_loading: bool,
-) -> IssueFinderToolSpec {
-    IssueFinderToolSpec {
-        namespace: Some("issue-finder".to_string()),
-        name: name.to_string(),
-        description: description.to_string(),
-        input_schema,
-        defer_loading,
-    }
-}
-
-fn status_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "checkAuth": { "type": "boolean", "default": true }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn scout_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "limit": { "type": "integer", "minimum": 1, "default": 10 },
-            "repo": { "type": ["string", "null"], "default": null },
-            "refresh": { "type": "boolean", "default": false },
-            "includeFiltered": { "type": "boolean", "default": false },
-            "recordExposure": { "type": "boolean", "default": true }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn assess_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "issue": { "type": ["string", "null"] },
-            "url": { "type": ["string", "null"] },
-            "refresh": { "type": "boolean", "default": false },
-            "recordRead": { "type": "boolean", "default": true }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn prepare_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "issue": { "type": ["string", "null"] },
-            "url": { "type": ["string", "null"] },
-            "refresh": { "type": "boolean", "default": false },
-            "allowGateBypass": { "type": "boolean", "default": false },
-            "bypassReason": { "type": ["string", "null"], "default": null }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn read_context_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "handoffId": { "type": "string" },
-            "section": {
-                "type": "string",
-                "enum": [
-                    "entry",
-                    "safety",
-                    "probe",
-                    "value",
-                    "issue",
-                    "repo",
-                    "validation",
-                    "handoff_json",
-                    "agent_policy",
-                    "probe_json"
-                ]
-            },
-            "maxBytes": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 50000,
-                "default": 12000
-            }
-        },
-        "required": ["handoffId", "section"],
-        "additionalProperties": false
-    })
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StatusToolArgs {
@@ -879,36 +720,9 @@ struct PrepareToolArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        list_tool_specs, IssueFinderToolInvocation, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT,
-        TOOL_SCOUT, TOOL_STATUS,
-    };
+    use crate::tool_specs::TOOL_SCOUT;
 
-    #[test]
-    fn lists_five_issue_finder_tool_specs() {
-        let specs = list_tool_specs();
-        let names = specs
-            .tools
-            .iter()
-            .map(|tool| {
-                format!(
-                    "{}.{}",
-                    tool.namespace.as_deref().unwrap_or_default(),
-                    tool.name
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec![
-                TOOL_STATUS,
-                TOOL_SCOUT,
-                TOOL_ASSESS,
-                TOOL_PREPARE,
-                TOOL_READ_CONTEXT
-            ]
-        );
-    }
+    use super::IssueFinderToolInvocation;
 
     #[test]
     fn invocation_requires_json_object_arguments() {

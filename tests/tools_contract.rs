@@ -20,9 +20,8 @@ use issue_finder::prepare_gate::{
 use issue_finder::recommendation::{
     load_events, RecommendationEventSource, RecommendationEventType,
 };
-use issue_finder::tool_runtime::{
-    list_tool_specs, IssueFinderToolInvocation, IssueFinderToolRuntime,
-};
+use issue_finder::tool_runtime::{IssueFinderToolInvocation, IssueFinderToolRuntime};
+use issue_finder::tool_specs::list_tool_specs;
 use issue_finder::value_scoring::{
     is_daily_prepare_candidate, RecommendationCategory, ValueAssessment,
 };
@@ -38,6 +37,49 @@ fn tools_list_outputs_stable_issue_finder_specs() {
     let specs = serde_json::to_value(list_tool_specs()).unwrap();
     assert_eq!(specs["kind"], "issue_finder_tool_specs");
     assert_eq!(specs["version"], 1);
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["defaultTool"],
+        "issue-finder.scout"
+    );
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["defaultArguments"]["repo"],
+        "owner/repo"
+    );
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["defaultArguments"]["limit"],
+        10
+    );
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["whenReadyUnknown"],
+        "issue-finder.status"
+    );
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["fallbackAfterSetupFailure"],
+        "issue-finder.status"
+    );
+    let workflow = specs["recommendedWorkflow"].as_array().unwrap();
+    let workflow_tools = workflow
+        .iter()
+        .map(|step| step["tool"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        workflow_tools,
+        vec![
+            "issue-finder.scout",
+            "issue-finder.assess",
+            "issue-finder.prepare",
+            "issue-finder.read_context"
+        ]
+    );
+    let read_context_step = workflow
+        .iter()
+        .find(|step| step["tool"] == "issue-finder.read_context")
+        .expect("read_context workflow step");
+    assert_eq!(read_context_step["deferred"], true);
+    assert_eq!(
+        read_context_step["firstSections"],
+        serde_json::json!(["entry", "safety", "probe"])
+    );
     let tools = specs["tools"].as_array().unwrap();
     let names = tools
         .iter()
@@ -75,6 +117,30 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         .find(|tool| tool["name"] == "status")
         .expect("status tool spec");
     assert!(status["inputSchema"]["properties"]["checkAuth"].is_object());
+    let read_context = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_context")
+        .expect("read_context tool spec");
+    assert_eq!(read_context["deferLoading"], true);
+}
+
+#[test]
+fn tools_list_cli_outputs_single_json_workflow_entry_object() {
+    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+        .args(["tools", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap();
+    assert_eq!(value["kind"], "issue_finder_tool_specs");
+    assert_eq!(
+        value["quickStart"]["firstCall"]["defaultTool"],
+        "issue-finder.scout"
+    );
+    assert!(value["recommendedWorkflow"].is_array());
+    assert!(value["tools"].is_array());
 }
 
 #[test]
