@@ -40,6 +40,8 @@ pub struct Handoff {
     #[serde(default)]
     pub recommendation: RecommendationAssessment,
     pub evidence_pack: EvidencePack,
+    #[serde(default)]
+    pub memory_context: HandoffMemoryContext,
     pub instructions: HandoffInstructions,
     pub llm_enhancement: LlmEnhancement,
     pub llm_review: LlmReview,
@@ -77,6 +79,25 @@ pub struct HandoffInstructions {
     pub suggested_start: Vec<String>,
     pub constraints: Vec<String>,
     pub expected_output: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct HandoffMemoryContext {
+    pub approved_hints: Vec<HandoffMemoryHint>,
+    pub activation_run_id: Option<String>,
+    pub evidence_refs: Vec<String>,
+    pub risk_notes: Vec<String>,
+    pub agent_selection_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HandoffMemoryHint {
+    pub id: String,
+    pub hint_type: String,
+    pub scope_type: String,
+    pub scope_ref: String,
+    pub summary: String,
+    pub effective_weight: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,6 +203,7 @@ impl Handoff {
             value_assessment,
             recommendation,
             evidence_pack,
+            memory_context: HandoffMemoryContext::default(),
             instructions: HandoffInstructions::default(),
             llm_enhancement: LlmEnhancement::disabled(),
             llm_review,
@@ -206,6 +228,16 @@ impl Handoff {
                 .validation_commands
                 .iter()
                 .map(|command| command.command.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let memory_hints = if self.memory_context.approved_hints.is_empty() {
+            "None".to_string()
+        } else {
+            self.memory_context
+                .approved_hints
+                .iter()
+                .map(|hint| hint.id.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -240,6 +272,7 @@ impl Handoff {
                 "- Feed score: {}",
                 self.recommendation.final_feed_score
             ),
+            format!("- Memory hints: {memory_hints}"),
             format!(
                 "- Feed freshness: +{} | feedback penalty: -{} | quality penalty: -{} | reactivation: +{} | visibility: {}",
                 self.recommendation.freshness_boost,

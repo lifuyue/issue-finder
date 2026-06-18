@@ -6,6 +6,13 @@ pub const TOOL_ASSESS: &str = "issue-finder.assess";
 pub const TOOL_PREPARE: &str = "issue-finder.prepare";
 pub const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
 pub const TOOL_STATUS: &str = "issue-finder.status";
+pub const TOOL_MEMORY_STATUS: &str = "issue-finder.memory_status";
+pub const TOOL_MEMORY_RECALL: &str = "issue-finder.memory_recall";
+pub const TOOL_MEMORY_DREAMS_LIST: &str = "issue-finder.memory_dreams_list";
+pub const TOOL_MEMORY_DREAM_SHOW: &str = "issue-finder.memory_dream_show";
+pub const TOOL_MEMORY_HINTS_LIST: &str = "issue-finder.memory_hints_list";
+pub const TOOL_MEMORY_HINT_UPDATE: &str = "issue-finder.memory_hint_update";
+pub const TOOL_MEMORY_TOMBSTONE: &str = "issue-finder.memory_tombstone";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +98,48 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
                 "Read one fixed section from a prepared Issue Finder handoff context pack.",
                 read_context_schema(),
                 true,
+            ),
+            tool_spec(
+                "memory_status",
+                "Report local contribution memory status without exposing raw payloads.",
+                memory_status_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_recall",
+                "Recall memory for an issue and return compact evidence references.",
+                memory_recall_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_dreams_list",
+                "List reviewable memory dreams.",
+                empty_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_dream_show",
+                "Show one memory dream and its candidate hints.",
+                memory_dream_show_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_hints_list",
+                "List memory hints and decision eligibility metadata.",
+                empty_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_hint_update",
+                "Review or control one memory hint using a structured state transition.",
+                memory_hint_update_schema(),
+                false,
+            ),
+            tool_spec(
+                "memory_tombstone",
+                "Tombstone a memory raw event, node, or hint id.",
+                memory_tombstone_schema(),
+                false,
             ),
         ],
     }
@@ -250,10 +299,79 @@ fn read_context_schema() -> Value {
     })
 }
 
+fn empty_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
+fn memory_status_schema() -> Value {
+    empty_schema()
+}
+
+fn memory_recall_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "issue": { "type": "string" },
+            "kind": {
+                "type": "string",
+                "enum": ["scout-ranking", "dispatch-planning", "github-draft", "profile-review"],
+                "default": "scout-ranking"
+            },
+            "limit": { "type": "integer", "minimum": 1, "default": 10 }
+        },
+        "required": ["issue"],
+        "additionalProperties": false
+    })
+}
+
+fn memory_dream_show_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "dreamId": { "type": "string" }
+        },
+        "required": ["dreamId"],
+        "additionalProperties": false
+    })
+}
+
+fn memory_hint_update_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "hintId": { "type": "string" },
+            "action": {
+                "type": "string",
+                "enum": ["approve", "reject", "pin", "deprioritize", "suppress", "stale", "tombstone"]
+            },
+            "reason": { "type": ["string", "null"], "default": null }
+        },
+        "required": ["hintId", "action"],
+        "additionalProperties": false
+    })
+}
+
+fn memory_tombstone_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": { "type": "string" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        list_tool_specs, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+        list_tool_specs, TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW,
+        TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS,
+        TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
     };
 
     #[test]
@@ -277,7 +395,14 @@ mod tests {
                 TOOL_SCOUT,
                 TOOL_ASSESS,
                 TOOL_PREPARE,
-                TOOL_READ_CONTEXT
+                TOOL_READ_CONTEXT,
+                TOOL_MEMORY_STATUS,
+                TOOL_MEMORY_RECALL,
+                TOOL_MEMORY_DREAMS_LIST,
+                TOOL_MEMORY_DREAM_SHOW,
+                TOOL_MEMORY_HINTS_LIST,
+                TOOL_MEMORY_HINT_UPDATE,
+                TOOL_MEMORY_TOMBSTONE
             ]
         );
 

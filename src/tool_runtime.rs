@@ -6,6 +6,10 @@ use serde_json::{json, Value};
 
 use crate::config::{Config, GitHubTokenSource};
 use crate::github::{GitHubClient, GitHubIssue};
+use crate::memory::{
+    memory_dream_show, memory_dreams_list, memory_hint_update, memory_hints_list, memory_recall,
+    memory_status, memory_tombstone, parse_query_kind, MemoryHintStatus,
+};
 use crate::paths::IssueFinderPaths;
 use crate::prepare_gate::{prepare_gate_decision, PrepareGateDecision};
 use crate::recommendation::{
@@ -20,7 +24,11 @@ use crate::tool_outputs::{
     AssessmentOutput, GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput,
     StatusGitHubAuthOutput, StatusGitHubOutput,
 };
-use crate::tool_specs::{TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS};
+use crate::tool_specs::{
+    TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST,
+    TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS, TOOL_MEMORY_TOMBSTONE,
+    TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+};
 use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
 
@@ -210,6 +218,13 @@ impl IssueFinderToolRuntime {
             TOOL_ASSESS => self.call_assess(&invocation).await,
             TOOL_PREPARE => self.call_prepare(&invocation).await,
             TOOL_READ_CONTEXT => self.call_read_context(&invocation),
+            TOOL_MEMORY_STATUS => self.call_memory_status(&invocation),
+            TOOL_MEMORY_RECALL => self.call_memory_recall(&invocation),
+            TOOL_MEMORY_DREAMS_LIST => self.call_memory_dreams_list(&invocation),
+            TOOL_MEMORY_DREAM_SHOW => self.call_memory_dream_show(&invocation),
+            TOOL_MEMORY_HINTS_LIST => self.call_memory_hints_list(&invocation),
+            TOOL_MEMORY_HINT_UPDATE => self.call_memory_hint_update(&invocation),
+            TOOL_MEMORY_TOMBSTONE => self.call_memory_tombstone(&invocation),
             _ => Err(RuntimeFailure::InvalidArguments(format!(
                 "unknown Issue Finder tool {}",
                 invocation.tool_name
@@ -472,6 +487,125 @@ impl IssueFinderToolRuntime {
         ))
     }
 
+    fn call_memory_status(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let _args: EmptyToolArgs = parse_arguments(&invocation.arguments)?;
+        let output = memory_status(&self.paths).map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!(
+                "Memory has {} events and {} hints.",
+                output.counts.raw_events, output.counts.hints
+            ),
+            to_value(output),
+        ))
+    }
+
+    fn call_memory_recall(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: MemoryRecallToolArgs = parse_arguments(&invocation.arguments)?;
+        let kind = parse_query_kind(args.kind.as_deref().unwrap_or("scout-ranking"))
+            .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string()))?;
+        let output = memory_recall(&self.paths, &args.issue, kind, args.limit.unwrap_or(10))
+            .map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Recalled {} memory items.", output.items.len()),
+            to_value(output),
+        ))
+    }
+
+    fn call_memory_dreams_list(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let _args: EmptyToolArgs = parse_arguments(&invocation.arguments)?;
+        let output = memory_dreams_list(&self.paths).map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Listed {} memory dreams.", output.dreams.len()),
+            to_value(output),
+        ))
+    }
+
+    fn call_memory_dream_show(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: MemoryDreamShowToolArgs = parse_arguments(&invocation.arguments)?;
+        let output =
+            memory_dream_show(&self.paths, &args.dream_id).map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Read memory dream {}.", output.dream.id),
+            to_value(output),
+        ))
+    }
+
+    fn call_memory_hints_list(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let _args: EmptyToolArgs = parse_arguments(&invocation.arguments)?;
+        let output = memory_hints_list(&self.paths).map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Listed {} memory hints.", output.hints.len()),
+            to_value(output),
+        ))
+    }
+
+    fn call_memory_hint_update(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: MemoryHintUpdateToolArgs = parse_arguments(&invocation.arguments)?;
+        let status = hint_action_status(&args.action)?;
+        match memory_hint_update(&self.paths, &args.hint_id, status, args.reason.as_deref()) {
+            Ok(output) => Ok(IssueFinderToolOutput::success(
+                invocation,
+                "ok",
+                format!("Updated memory hint {} to {}.", output.id, output.status),
+                to_value(output),
+            )),
+            Err(error) => Ok(IssueFinderToolOutput::failure_with_structured(
+                invocation,
+                "invalid_transition",
+                error.to_string(),
+                json!({
+                    "kind": "issue_finder_tool_output",
+                    "tool": TOOL_MEMORY_HINT_UPDATE,
+                    "status": "invalid_transition",
+                    "success": false,
+                    "error": { "message": error.to_string() }
+                }),
+            )),
+        }
+    }
+
+    fn call_memory_tombstone(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: MemoryTombstoneToolArgs = parse_arguments(&invocation.arguments)?;
+        let output = memory_tombstone(&self.paths, &args.id).map_err(RuntimeFailure::System)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Tombstoned {} {}.", output.target_type, output.target_id),
+            to_value(output),
+        ))
+    }
+
     async fn assess_selection(
         &self,
         selector: IssueSelector,
@@ -669,6 +803,21 @@ fn normalized_optional(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn hint_action_status(action: &str) -> RuntimeResult<MemoryHintStatus> {
+    match action {
+        "approve" => Ok(MemoryHintStatus::Approved),
+        "reject" => Ok(MemoryHintStatus::Rejected),
+        "pin" => Ok(MemoryHintStatus::Pinned),
+        "deprioritize" => Ok(MemoryHintStatus::Deprioritized),
+        "suppress" => Ok(MemoryHintStatus::Suppressed),
+        "stale" => Ok(MemoryHintStatus::Stale),
+        "tombstone" => Ok(MemoryHintStatus::Tombstoned),
+        other => Err(RuntimeFailure::InvalidArguments(format!(
+            "unknown memory hint action `{other}`"
+        ))),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StatusToolArgs {
@@ -716,6 +865,41 @@ struct PrepareToolArgs {
     allow_gate_bypass: bool,
     #[serde(default)]
     bypass_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmptyToolArgs {}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryRecallToolArgs {
+    issue: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryDreamShowToolArgs {
+    dream_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryHintUpdateToolArgs {
+    hint_id: String,
+    action: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryTombstoneToolArgs {
+    id: String,
 }
 
 #[cfg(test)]

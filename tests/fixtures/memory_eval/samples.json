@@ -1,0 +1,44 @@
+{
+  "samples": [
+    {
+      "id": "factual_recall_prior_rejection",
+      "dimension": "factual_recall",
+      "expectedBehavior": "A directly matching prior rejection is recalled with an evidence event id."
+    },
+    {
+      "id": "preference_following_approved_hint",
+      "dimension": "preference_following",
+      "expectedBehavior": "Only approved or pinned preference hints are decision eligible."
+    },
+    {
+      "id": "stale_correction_expired_hint",
+      "dimension": "stale_correction",
+      "expectedBehavior": "Expired hints are not decision eligible and can produce stale review candidates."
+    },
+    {
+      "id": "over_recall_candidate_hidden",
+      "dimension": "over_recall_prevention",
+      "expectedBehavior": "Candidate dreams and candidate hints do not affect decision output."
+    },
+    {
+      "id": "deletion_tombstone_cascade",
+      "dimension": "deletion_tombstone",
+      "expectedBehavior": "Tombstoned raw events invalidate derived indexes, edges, dreams, and hints."
+    },
+    {
+      "id": "graph_value_near_ripple",
+      "dimension": "graph_value",
+      "expectedBehavior": "A direct seed can surface a related node through a non-hub graph edge."
+    },
+    {
+      "id": "anti_hub_penalty",
+      "dimension": "anti_hub",
+      "expectedBehavior": "High fan-in/fan-out nodes are penalized during activation settlement."
+    },
+    {
+      "id": "writeback_safety_no_ripple_reinforcement",
+      "dimension": "write_back_safety",
+      "expectedBehavior": "Pure ripple recall is not reinforced by write-back."
+    }
+  ]
+}

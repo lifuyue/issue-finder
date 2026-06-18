@@ -80,7 +80,7 @@ fn start_concurrent_mock_github() -> (String, MockGithubServer) {
         let mut served = 0usize;
 
         while started.elapsed() < Duration::from_secs(10) {
-            if served > 0 && last_request_at.elapsed() > Duration::from_millis(1_200) {
+            if served > 0 && last_request_at.elapsed() > Duration::from_millis(2_500) {
                 break;
             }
 
@@ -92,9 +92,7 @@ fn start_concurrent_mock_github() -> (String, MockGithubServer) {
                     let active_detail_requests = Arc::clone(&active_detail_requests_for_thread);
                     let max_detail_concurrency = Arc::clone(&max_detail_concurrency_for_thread);
                     thread::spawn(move || {
-                        let mut buffer = [0u8; 4096];
-                        let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+                        let request = read_request(&mut stream);
                         let response = response_for(&request, &base_url);
                         if response.tracks_detail_concurrency {
                             let in_flight =
@@ -322,6 +320,35 @@ fn issue_number(repo: &str) -> u64 {
         "broken" => 4,
         _ => 0,
     }
+}
+
+fn read_request(stream: &mut std::net::TcpStream) -> String {
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(bytes_read) => {
+                request.extend_from_slice(&buffer[..bytes_read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n")
+                    || request.len() >= 16 * 1024
+                {
+                    break;
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&request).to_string()
 }
 
 fn write_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {

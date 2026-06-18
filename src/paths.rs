@@ -93,6 +93,10 @@ impl IssueFinderPaths {
         self.recommendation_dir().join("events.jsonl")
     }
 
+    pub fn state_db_path(&self) -> PathBuf {
+        self.home.join("state.sqlite3")
+    }
+
     pub fn workspace_path_for(&self, repo_full_name: &str) -> PathBuf {
         self.workspaces_dir.join(sanitize_repo_name(repo_full_name))
     }
