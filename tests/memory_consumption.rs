@@ -44,6 +44,43 @@ fn approved_ranking_hints_append_explanation_without_changing_score() {
 }
 
 #[test]
+fn approved_ranking_hints_replace_stale_cached_memory_refs() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    seed_memory_hints(&paths);
+    let mut ranked = vec![ranked_issue("owner/repo", 42)];
+    ranked[0]
+        .explanation
+        .push("Memory hint refs: stale-ranking".to_string());
+    ranked[0]
+        .recommendation
+        .reasons
+        .push("Memory hint refs: stale-ranking".to_string());
+
+    apply_ranking_hints_to_ranked(&paths, &mut ranked).unwrap();
+
+    let explanation_refs = ranked[0]
+        .explanation
+        .iter()
+        .map(String::as_str)
+        .filter(|reason| reason.starts_with("Memory hint refs:"))
+        .collect::<Vec<_>>();
+    let recommendation_refs = ranked[0]
+        .recommendation
+        .reasons
+        .iter()
+        .map(String::as_str)
+        .filter(|reason| reason.starts_with("Memory hint refs:"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(explanation_refs, vec!["Memory hint refs: approved-ranking"]);
+    assert_eq!(
+        recommendation_refs,
+        vec!["Memory hint refs: approved-ranking"]
+    );
+}
+
+#[test]
 fn handoff_memory_context_contains_approved_ranking_and_dispatch_hints_only() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -52,16 +89,31 @@ fn handoff_memory_context_contains_approved_ranking_and_dispatch_hints_only() {
     let context = handoff_memory_context_for_issue(&paths, &issue("owner/repo", 42)).unwrap();
     let ids = hint_ids(&context);
 
-    assert_eq!(ids, vec!["approved-dispatch", "approved-ranking"]);
+    assert_eq!(
+        ids,
+        vec![
+            "approved-agent-dispatch",
+            "approved-dispatch",
+            "approved-ranking"
+        ]
+    );
     assert_eq!(
         context.evidence_refs,
         vec![
+            "memory_hint:approved-agent-dispatch".to_string(),
             "memory_hint:approved-dispatch".to_string(),
             "memory_hint:approved-ranking".to_string()
         ]
     );
-    assert_eq!(context.agent_selection_notes.len(), 1);
-    assert!(context.agent_selection_notes[0].contains("Dispatch"));
+    assert_eq!(context.agent_selection_notes.len(), 2);
+    assert!(context
+        .agent_selection_notes
+        .iter()
+        .any(|note| note.contains("Dispatch")));
+    assert!(context
+        .agent_selection_notes
+        .iter()
+        .any(|note| note.contains("Agent dispatch")));
 }
 
 fn seed_memory_hints(paths: &IssueFinderPaths) {
@@ -113,6 +165,24 @@ fn seed_memory_hints(paths: &IssueFinderPaths) {
         MemoryHintStatus::Approved,
         "Dispatch approved hint",
     );
+    seed_scoped_hint(
+        &store,
+        "approved-agent-dispatch",
+        MemoryHintType::Dispatch,
+        MemoryHintStatus::Approved,
+        MemoryHintScopeType::Agent,
+        "codex",
+        "Agent dispatch approved hint",
+    );
+    seed_scoped_hint(
+        &store,
+        "candidate-agent-dispatch",
+        MemoryHintType::Dispatch,
+        MemoryHintStatus::Candidate,
+        MemoryHintScopeType::Agent,
+        "codex",
+        "Agent dispatch candidate hint",
+    );
 }
 
 fn seed_hint(
@@ -122,13 +192,33 @@ fn seed_hint(
     status: MemoryHintStatus,
     summary: &str,
 ) {
+    seed_scoped_hint(
+        store,
+        id,
+        hint_type,
+        status,
+        MemoryHintScopeType::Repo,
+        "owner/repo",
+        summary,
+    );
+}
+
+fn seed_scoped_hint(
+    store: &MemoryStore,
+    id: &str,
+    hint_type: MemoryHintType,
+    status: MemoryHintStatus,
+    scope_type: MemoryHintScopeType,
+    scope_ref: &str,
+    summary: &str,
+) {
     store
         .insert_hint(&NewMemoryHint {
             id: id.to_string(),
             dream_id: "consumption-dream".to_string(),
             hint_type,
-            scope_type: MemoryHintScopeType::Repo,
-            scope_ref: "owner/repo".to_string(),
+            scope_type,
+            scope_ref: scope_ref.to_string(),
             summary: summary.to_string(),
             policy_json: json!({"kind": "consumption_test"}),
             weight: 1.0,

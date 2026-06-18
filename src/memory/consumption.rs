@@ -1,15 +1,20 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use anyhow::Result;
 use chrono::Utc;
 
 use crate::github::GitHubIssue;
 use crate::handoff::{HandoffMemoryContext, HandoffMemoryHint};
 use crate::memory::controls::{
-    MemoryControlPlane, MemoryDecisionHintRequest, MemoryHintScope, MemoryRuntimeMode,
+    MemoryControlPlane, MemoryDecisionHint, MemoryDecisionHintRequest, MemoryHintScope,
+    MemoryRuntimeMode,
 };
 use crate::memory::model::{MemoryHintScopeType, MemoryHintType};
 use crate::memory::store::MemoryStore;
 use crate::paths::IssueFinderPaths;
 use crate::value_scoring::RankedValueIssue;
+
+const MEMORY_HINT_REFS_PREFIX: &str = "Memory hint refs:";
 
 pub fn apply_ranking_hints_to_ranked(
     paths: &IssueFinderPaths,
@@ -18,10 +23,17 @@ pub fn apply_ranking_hints_to_ranked(
     let store = MemoryStore::open(paths)?;
     let now = Utc::now().to_rfc3339();
     for item in ranked {
-        let hints = decision_hints_for_repo(
+        item.explanation
+            .retain(|reason| !reason.starts_with(MEMORY_HINT_REFS_PREFIX));
+        item.recommendation
+            .reasons
+            .retain(|reason| !reason.starts_with(MEMORY_HINT_REFS_PREFIX));
+
+        let hints = decision_hints_for_scope(
             &store,
             MemoryHintType::Ranking,
-            &item.issue.repo_full_name,
+            MemoryHintScopeType::Repo,
+            item.issue.repo_full_name.as_str(),
             &now,
         )?;
         if hints.is_empty() {
@@ -32,7 +44,7 @@ pub fn apply_ranking_hints_to_ranked(
             .map(|hint| hint.id.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        let reason = format!("Memory hint refs: {refs}");
+        let reason = format!("{MEMORY_HINT_REFS_PREFIX} {refs}");
         if !item.explanation.contains(&reason) {
             item.explanation.push(reason.clone());
         }
@@ -49,27 +61,42 @@ pub fn handoff_memory_context_for_issue(
 ) -> Result<HandoffMemoryContext> {
     let store = MemoryStore::open(paths)?;
     let now = Utc::now().to_rfc3339();
-    let ranking_hints =
-        decision_hints_for_repo(&store, MemoryHintType::Ranking, &issue.repo_full_name, &now)?;
-    let dispatch_hints = decision_hints_for_repo(
+    let ranking_hints = decision_hints_for_scope(
         &store,
-        MemoryHintType::Dispatch,
-        &issue.repo_full_name,
+        MemoryHintType::Ranking,
+        MemoryHintScopeType::Repo,
+        issue.repo_full_name.as_str(),
         &now,
     )?;
-    let mut approved_hints = ranking_hints
+    let repo_dispatch_hints = decision_hints_for_scope(
+        &store,
+        MemoryHintType::Dispatch,
+        MemoryHintScopeType::Repo,
+        issue.repo_full_name.as_str(),
+        &now,
+    )?;
+    let agent_dispatch_hints = agent_dispatch_hints(&store, &now)?;
+
+    let mut hint_by_id = BTreeMap::new();
+    for hint in ranking_hints
         .into_iter()
-        .chain(dispatch_hints)
+        .chain(repo_dispatch_hints)
+        .chain(agent_dispatch_hints)
+    {
+        hint_by_id.entry(hint.id.clone()).or_insert(hint);
+    }
+
+    let approved_hints = hint_by_id
+        .into_values()
         .map(|hint| HandoffMemoryHint {
             id: hint.id,
             hint_type: hint.hint_type,
             scope_type: hint.scope_type,
             scope_ref: hint.scope_ref,
             summary: hint.summary,
-            effective_weight: hint.effective_weight.unwrap_or(hint.weight),
+            effective_weight: hint.effective_weight,
         })
         .collect::<Vec<_>>();
-    approved_hints.sort_by(|left, right| left.id.cmp(&right.id));
     let evidence_refs = approved_hints
         .iter()
         .map(|hint| format!("memory_hint:{}", hint.id))
@@ -88,41 +115,80 @@ pub fn handoff_memory_context_for_issue(
     })
 }
 
-fn decision_hints_for_repo(
+#[derive(Debug, Clone, PartialEq)]
+struct ConsumedMemoryHint {
+    id: String,
+    hint_type: String,
+    scope_type: String,
+    scope_ref: String,
+    summary: String,
+    effective_weight: f64,
+}
+
+fn decision_hints_for_scope(
     store: &MemoryStore,
     hint_type: MemoryHintType,
-    repo_full_name: &str,
+    scope_type: MemoryHintScopeType,
+    scope_ref: &str,
     now: &str,
-) -> Result<Vec<crate::memory::commands::MemoryHintOutput>> {
+) -> Result<Vec<ConsumedMemoryHint>> {
+    decision_hints_for_scope_with_limit(store, hint_type, scope_type, scope_ref, now, 5)
+}
+
+fn decision_hints_for_scope_with_limit(
+    store: &MemoryStore,
+    hint_type: MemoryHintType,
+    scope_type: MemoryHintScopeType,
+    scope_ref: &str,
+    now: &str,
+    limit: usize,
+) -> Result<Vec<ConsumedMemoryHint>> {
     let hints = MemoryControlPlane::decision_eligible_hints(
         store,
         &MemoryDecisionHintRequest {
             mode: MemoryRuntimeMode::Enabled,
             hint_type: Some(hint_type),
             scope: Some(MemoryHintScope {
-                scope_type: MemoryHintScopeType::Repo,
-                scope_ref: repo_full_name.to_string(),
+                scope_type,
+                scope_ref: scope_ref.to_string(),
             }),
             now: Some(now.to_string()),
-            limit: 5,
+            limit,
         },
     )?;
-    Ok(hints
+    Ok(hints.into_iter().map(consumed_hint).collect())
+}
+
+fn agent_dispatch_hints(store: &MemoryStore, now: &str) -> Result<Vec<ConsumedMemoryHint>> {
+    let agent_scope_refs = store
+        .list_hints()?
         .into_iter()
-        .map(|decision| crate::memory::commands::MemoryHintOutput {
-            id: decision.hint.id,
-            dream_id: decision.hint.dream_id,
-            hint_type: decision.hint.hint_type.as_str().to_string(),
-            scope_type: decision.hint.scope_type.as_str().to_string(),
-            scope_ref: decision.hint.scope_ref,
-            summary: decision.hint.summary,
-            weight: decision.hint.weight,
-            effective_weight: Some(decision.effective_weight),
-            status: decision.hint.status.as_str().to_string(),
-            created_at: decision.hint.created_at,
-            approved_at: decision.hint.approved_at,
-            expires_at: decision.hint.expires_at,
-            policy: decision.hint.policy_json,
-        })
-        .collect())
+        .filter(|hint| hint.hint_type == MemoryHintType::Dispatch)
+        .filter(|hint| hint.scope_type == MemoryHintScopeType::Agent)
+        .map(|hint| hint.scope_ref)
+        .collect::<BTreeSet<_>>();
+
+    let mut hints = Vec::new();
+    for scope_ref in agent_scope_refs {
+        hints.extend(decision_hints_for_scope_with_limit(
+            store,
+            MemoryHintType::Dispatch,
+            MemoryHintScopeType::Agent,
+            scope_ref.as_str(),
+            now,
+            5,
+        )?);
+    }
+    Ok(hints)
+}
+
+fn consumed_hint(decision: MemoryDecisionHint) -> ConsumedMemoryHint {
+    ConsumedMemoryHint {
+        id: decision.hint.id,
+        hint_type: decision.hint.hint_type.as_str().to_string(),
+        scope_type: decision.hint.scope_type.as_str().to_string(),
+        scope_ref: decision.hint.scope_ref,
+        summary: decision.hint.summary,
+        effective_weight: decision.effective_weight,
+    }
 }

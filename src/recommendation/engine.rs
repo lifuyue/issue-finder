@@ -192,7 +192,6 @@ impl<'a> RecommendationEngine<'a> {
                 .await?
             }
         };
-        let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
 
         if options.record_exposure {
             self.record_exposure(&run.ranked, options.source, &scope)?;
@@ -209,6 +208,7 @@ impl<'a> RecommendationEngine<'a> {
                 },
             )?;
         }
+        let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
 
         Ok(ScoutResult {
             ranked: run.ranked,
