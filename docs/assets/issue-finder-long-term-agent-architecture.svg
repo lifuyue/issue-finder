@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1620" viewBox="0 0 2400 1620" role="img" aria-label="Issue Finder final architecture overview">
+<defs>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#14213d" flood-opacity="0.11"/></filter>
+  <marker id="arrow" markerWidth="13" markerHeight="13" refX="10.5" refY="6.5" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L11,6.5 L2,11 Z" fill="#8490a3"/></marker>
+  <style>text { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }</style>
+</defs>
+<rect x="0" y="0" width="2400" height="1620" fill="#f7f8fb"/>
+
+<text x="1200" y="66" text-anchor="middle" font-size="44" font-weight="850" fill="#172033">Issue Finder Final Architecture</text>
+<text x="1200" y="106" text-anchor="middle" font-size="24" font-weight="550" fill="#5c667a">Local-first issue intelligence and agent dispatch control plane</text>
+<rect x="120" y="160" width="2160" height="175" rx="18" fill="#f1f3f7" stroke="#a7adb8" stroke-width="2.4" filter="url(#shadow)"/>
+<text x="175" y="200" text-anchor="start" font-size="24" font-weight="850" fill="#172033">Interfaces and Triggers</text>
+<rect x="220" y="225" width="300" height="72" rx="14" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.6"/>
+<text x="370.0" y="256" text-anchor="middle" font-size="22" font-weight="800" fill="#172033">CLI</text>
+<text x="370.0" y="283" text-anchor="middle" font-size="16" font-weight="550" fill="#5c667a">human local use</text>
+<rect x="625" y="225" width="300" height="72" rx="14" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.6"/>
+<text x="775.0" y="256" text-anchor="middle" font-size="22" font-weight="800" fill="#172033">JSON Tools</text>
+<text x="775.0" y="283" text-anchor="middle" font-size="16" font-weight="550" fill="#5c667a">agent tool contract</text>
+<rect x="1030" y="225" width="300" height="72" rx="14" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.6"/>
+<text x="1180.0" y="256" text-anchor="middle" font-size="22" font-weight="800" fill="#172033">Scheduler</text>
+<text x="1180.0" y="283" text-anchor="middle" font-size="16" font-weight="550" fill="#5c667a">daily automation</text>
+<rect x="1435" y="225" width="300" height="72" rx="14" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.6"/>
+<text x="1585.0" y="256" text-anchor="middle" font-size="22" font-weight="800" fill="#172033">GitHub</text>
+<text x="1585.0" y="283" text-anchor="middle" font-size="16" font-weight="550" fill="#5c667a">issues, comments, PRs</text>
+<rect x="1840" y="225" width="300" height="72" rx="14" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.6"/>
+<text x="1990.0" y="256" text-anchor="middle" font-size="22" font-weight="800" fill="#172033">A2A</text>
+<text x="1990.0" y="283" text-anchor="middle" font-size="16" font-weight="550" fill="#5c667a">external tasks/results</text>
+<rect x="120" y="420" width="2160" height="610" rx="18" fill="#ffffff" stroke="#c8d0dc" stroke-width="2.6" filter="url(#shadow)"/>
+<text x="1200" y="468" text-anchor="middle" font-size="38" font-weight="850" fill="#172033">Issue Finder Control Plane</text>
+<text x="1200" y="504" text-anchor="middle" font-size="21" font-weight="550" fill="#5c667a">Owns discovery, confirmation, memory, dispatch state, approvals, artifacts, and GitHub projection</text>
+<rect x="170" y="555" width="635" height="400" rx="18" fill="#e7f0ff" stroke="#6f9de8" stroke-width="2.5" filter="url(#shadow)"/>
+<text x="487" y="600" text-anchor="middle" font-size="31" font-weight="850" fill="#172033">Issue Intelligence</text>
+<rect x="210" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="342.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Discovery</text>
+<text x="342.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">GitHub search + trusted recall</text>
+<rect x="510" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="642.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Ranking</text>
+<text x="642.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">fit, value, freshness, competition</text>
+<rect x="210" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="342.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Evidence Check</text>
+<text x="342.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">repro, scope, validation path</text>
+<rect x="510" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="642.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">LLM Confirm</text>
+<text x="642.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">optional review, never sole source</text>
+<rect x="210" y="823" width="565" height="70" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="492.5" y="854" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">GitHub Drafts</text>
+<text x="492.5" y="881" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">tracking and result comments</text>
+<rect x="880" y="555" width="635" height="400" rx="18" fill="#fff4dc" stroke="#e3b64b" stroke-width="2.5" filter="url(#shadow)"/>
+<text x="1197" y="600" text-anchor="middle" font-size="31" font-weight="850" fill="#172033">Hybrid Memory</text>
+<rect x="920" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1052.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Raw Events</text>
+<text x="1052.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">immutable evidence source</text>
+<rect x="1220" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1352.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Indexes</text>
+<text x="1352.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">FTS, embedding, entity</text>
+<rect x="920" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1052.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Activation</text>
+<text x="1052.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">direct + ripple scoring</text>
+<rect x="1220" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1352.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Dreaming</text>
+<text x="1352.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">background consolidation</text>
+<rect x="920" y="823" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1052.5" y="854" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Write-back Guard</text>
+<text x="1052.5" y="881" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">top-k, evidence, decay controls</text>
+<rect x="1220" y="823" width="265" height="70" rx="14" fill="#ffffff" stroke="#dfc06c" stroke-width="1.6"/>
+<text x="1352.5" y="854" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">User Controls</text>
+<text x="1352.5" y="881" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">pin, deprioritize, suppress, delete</text>
+<rect x="1590" y="555" width="635" height="400" rx="18" fill="#e9f8ef" stroke="#63b67a" stroke-width="2.5" filter="url(#shadow)"/>
+<text x="1907" y="600" text-anchor="middle" font-size="31" font-weight="850" fill="#172033">Dispatch Runtime</text>
+<rect x="1630" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="1762.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Task Package</text>
+<text x="1762.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">portable validated work unit</text>
+<rect x="1930" y="635" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="2062.5" y="666" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Approval Gate</text>
+<text x="2062.5" y="693" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">dispatch and GitHub writes</text>
+<rect x="1630" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="1762.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Run State</text>
+<text x="1762.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">queued, running, completed</text>
+<rect x="1930" y="729" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="2062.5" y="760" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Session Links</text>
+<text x="2062.5" y="787" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">native thread/session binding</text>
+<rect x="1630" y="823" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="1762.5" y="854" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Event Log</text>
+<text x="1762.5" y="881" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">streamed native events</text>
+<rect x="1930" y="823" width="265" height="70" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="2062.5" y="854" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Artifacts</text>
+<text x="2062.5" y="881" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">handoff, result, patch, PR refs</text>
+<rect x="170" y="965" width="635" height="45" rx="999" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.5" stroke-dasharray="10 8"/>
+<text x="487" y="994" text-anchor="middle" font-size="16" font-weight="700" fill="#5c667a">Offline mode remains independent: discover -&gt; rank -&gt; prepare -&gt; handoff -&gt; inbox/report</text>
+<rect x="120" y="1120" width="2160" height="255" rx="18" fill="#f3eefe" stroke="#a68be8" stroke-width="2.5" filter="url(#shadow)"/>
+<text x="1200" y="1165" text-anchor="middle" font-size="36" font-weight="850" fill="#172033">Native Agent Execution Layer</text>
+<text x="1200" y="1198" text-anchor="middle" font-size="21" font-weight="550" fill="#5c667a">Adapters preserve native capabilities instead of flattening agents into prompt-only wrappers</text>
+<rect x="220" y="1237" width="420" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="430.0" y="1268" text-anchor="middle" font-size="23" font-weight="800" fill="#172033">Capability Registry</text>
+<text x="430.0" y="1293" text-anchor="middle" font-size="15" font-weight="550" fill="#5c667a">start/resume/list/rename/fork</text>
+<text x="430.0" y="1315" text-anchor="middle" font-size="15" font-weight="550" fill="#5c667a">stream/read/interrupt/review/open_pr</text>
+<rect x="760" y="1237" width="500" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1010.0" y="1268" text-anchor="middle" font-size="23" font-weight="800" fill="#172033">Native Agent Adapters</text>
+<text x="1010.0" y="1295" text-anchor="middle" font-size="15" font-weight="550" fill="#5c667a">Codex app-server, Claude Code, OpenHands, SWE-agent, custom HTTP</text>
+<rect x="1380" y="1237" width="760" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1760.0" y="1268" text-anchor="middle" font-size="23" font-weight="800" fill="#172033">Native Sessions and Workspaces</text>
+<text x="1760.0" y="1295" text-anchor="middle" font-size="15" font-weight="550" fill="#5c667a">Codex threads, Claude sessions, OpenHands workspaces, sandboxes, worktrees, validation runs</text>
+<rect x="120" y="1450" width="2160" height="115" rx="18" fill="#f1f3f7" stroke="#a7adb8" stroke-width="2.4" filter="url(#shadow)"/>
+<text x="175" y="1490" text-anchor="start" font-size="25" font-weight="850" fill="#172033">Durable State and Observability</text>
+<rect x="500" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="605.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">SQLite store</text>
+<rect x="770" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="875.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">artifact files</text>
+<rect x="1040" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="1145.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">memory graph</text>
+<rect x="1310" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="1415.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">activation traces</text>
+<rect x="1580" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="1685.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">dispatch traces</text>
+<rect x="1850" y="1515" width="210" height="38" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="1955.0" y="1540.0" text-anchor="middle" font-size="16" font-weight="750" fill="#172033">eval reports</text>
+<path d="M 370 335 L 370 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 625 335 L 625 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 875 335 L 875 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 1120 335 L 1120 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 1375 335 L 1375 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 1640 335 L 1640 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 1900 335 L 1900 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 2140 335 L 2140 420" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 805 755 L 880 755" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="767.0" y="708" width="150" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="842" y="731" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">memory signals</text>
+<path d="M 1515 755 L 1590 755" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1492.0" y="708" width="120" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="1552" y="731" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">package</text>
+<path d="M 1907 955 L 1907 1120" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1812.0" y="1026" width="190" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="1907" y="1049" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">dispatch</text>
+<path d="M 640 1278 L 760 1278" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 1260 1278 L 1380 1278" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M 487 1030 L 487 1450" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<path d="M 1197 1030 L 1197 1450" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<path d="M 1907 1030 L 1907 1450" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<path d="M 1200 1030 L 1200 1450" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+</svg>

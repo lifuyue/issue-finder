@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1350" viewBox="0 0 2400 1350" role="img" aria-label="Issue Finder execution and session ownership boundaries">
+<defs>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#14213d" flood-opacity="0.11"/></filter>
+  <marker id="arrow" markerWidth="13" markerHeight="13" refX="10.5" refY="6.5" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L11,6.5 L2,11 Z" fill="#8490a3"/></marker>
+  <style>text { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }</style>
+</defs>
+<rect x="0" y="0" width="2400" height="1350" fill="#f7f8fb"/>
+
+<text x="1200" y="66" text-anchor="middle" font-size="44" font-weight="850" fill="#172033">Execution and Session Ownership</text>
+<text x="1200" y="106" text-anchor="middle" font-size="24" font-weight="550" fill="#5c667a">OpenAI-style split: outer runtime owns control state; native sessions own code execution</text>
+<rect x="100" y="190" width="650" height="650" rx="18" fill="#e9f8ef" stroke="#63b67a" stroke-width="2.6" filter="url(#shadow)"/>
+<text x="425.0" y="242" text-anchor="middle" font-size="32" font-weight="850" fill="#172033">Issue Finder Runtime</text>
+<text x="425.0" y="278" text-anchor="middle" font-size="20" font-weight="550" fill="#5c667a">Owns control plane state</text>
+<rect x="875" y="190" width="650" height="650" rx="18" fill="#f3eefe" stroke="#a68be8" stroke-width="2.6" filter="url(#shadow)"/>
+<text x="1200.0" y="242" text-anchor="middle" font-size="32" font-weight="850" fill="#172033">Native Agent Adapter</text>
+<text x="1200.0" y="278" text-anchor="middle" font-size="20" font-weight="550" fill="#5c667a">Maps generic capabilities to native APIs</text>
+<rect x="1650" y="190" width="650" height="650" rx="18" fill="#e7f0ff" stroke="#6f9de8" stroke-width="2.6" filter="url(#shadow)"/>
+<text x="1975.0" y="242" text-anchor="middle" font-size="32" font-weight="850" fill="#172033">Native Agent Session</text>
+<text x="1975.0" y="278" text-anchor="middle" font-size="20" font-weight="550" fill="#5c667a">Owns execution workspace and code changes</text>
+<rect x="145" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="270.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Approvals</text>
+<text x="270.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">dispatch, GitHub writes, risky actions</text>
+<rect x="435" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="560.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Dispatch State</text>
+<text x="560.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">runs, status, retries, interruptions</text>
+<rect x="145" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="270.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Session Links</text>
+<text x="270.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">native thread/session identifiers</text>
+<rect x="435" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="560.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Artifacts</text>
+<text x="560.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">task package, result, patch, PR refs</text>
+<rect x="145" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="270.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Traces</text>
+<text x="270.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">events, decisions, activation records</text>
+<rect x="435" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#8dc89b" stroke-width="1.6"/>
+<text x="560.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Memory</text>
+<text x="560.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">raw events, graph, hints, controls</text>
+<rect x="920" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1045.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Capability Registry</text>
+<text x="1045.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">declares supported native operations</text>
+<rect x="1210" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1335.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Session Control</text>
+<text x="1335.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">start, resume, list, rename, fork</text>
+<rect x="920" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1045.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Event Bridge</text>
+<text x="1045.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">stream native events into runtime log</text>
+<rect x="1210" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1335.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Result Mapping</text>
+<text x="1335.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">convert output into Issue Finder artifacts</text>
+<rect x="920" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1045.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Error Mapping</text>
+<text x="1045.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">native failures -&gt; dispatch states</text>
+<rect x="1210" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#bfaeea" stroke-width="1.6"/>
+<text x="1335.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">A2A Bridge</text>
+<text x="1335.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">optional external task/result mapping</text>
+<rect x="1695" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="1820.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Codex Thread</text>
+<text x="1820.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">app-server session, turns, transcript</text>
+<rect x="1985" y="330" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="2110.0" y="361" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Claude Session</text>
+<text x="2110.0" y="388" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">native resume and context</text>
+<rect x="1695" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="1820.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">OpenHands Workspace</text>
+<text x="1820.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">agent server, event stream</text>
+<rect x="1985" y="460" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="2110.0" y="491" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Sandbox / Worktree</text>
+<text x="2110.0" y="518" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">files, commands, tests, patch</text>
+<rect x="1695" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="1820.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">Validation</text>
+<text x="1820.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">targeted checks inside native workspace</text>
+<rect x="1985" y="590" width="250" height="82" rx="14" fill="#ffffff" stroke="#9fb9e9" stroke-width="1.6"/>
+<text x="2110.0" y="621" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">PR / Patch Surface</text>
+<text x="2110.0" y="648" text-anchor="middle" font-size="14" font-weight="550" fill="#5c667a">result returned, not owned by Issue Finder</text>
+<path d="M 750 500 L 875 500" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="737.0" y="448" width="150" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="812" y="471" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">task package</text>
+<path d="M 1525 500 L 1650 500" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1513.0" y="448" width="150" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="1588" y="471" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">native call</text>
+<path d="M 1650 620 L 1525 620" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1505.5" y="640" width="165" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="1588" y="663" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">events/results</text>
+<path d="M 875 620 L 750 620" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="747.0" y="640" width="130" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="812" y="663" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">artifacts</text>
+<rect x="100" y="930" width="1050" height="250" rx="18" fill="#f1f3f7" stroke="#a7adb8" stroke-width="2.5" filter="url(#shadow)"/>
+<text x="625" y="980" text-anchor="middle" font-size="32" font-weight="850" fill="#172033">Durable Local State</text>
+<text x="625" y="1015" text-anchor="middle" font-size="20" font-weight="550" fill="#5c667a">SQLite + artifact files preserve every link in the chain</text>
+<rect x="145" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="247.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">issue_tasks</text>
+<rect x="395" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="497.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">dispatch_runs</text>
+<rect x="645" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="747.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_session_links</text>
+<rect x="895" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="997.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_events</text>
+<rect x="145" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="247.5" y="1139.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_artifacts</text>
+<rect x="395" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="497.5" y="1139.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">github_interactions</text>
+<rect x="645" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="747.5" y="1139.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">memory_events</text>
+<rect x="895" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
+<text x="997.5" y="1139.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">activation_traces</text>
+<rect x="1250" y="930" width="1050" height="250" rx="18" fill="#ffe8e8" stroke="#d98686" stroke-width="2.5" stroke-dasharray="10 8" filter="url(#shadow)"/>
+<text x="1775" y="980" text-anchor="middle" font-size="32" font-weight="850" fill="#172033">Safety and Human Control Boundary</text>
+<text x="1775" y="1015" text-anchor="middle" font-size="20" font-weight="550" fill="#5c667a">Issue Finder can route and record work, but does not silently perform risky external effects.</text>
+<rect x="1305" y="1060" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1515.0" y="1082.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">no target source edits by Issue Finder</text>
+<rect x="1785" y="1060" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1995.0" y="1082.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">no dependency installs by Issue Finder</text>
+<rect x="1305" y="1102" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1515.0" y="1124.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">no commits, pushes, or PRs by Issue Finder</text>
+<rect x="1785" y="1102" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1995.0" y="1124.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">GitHub writes require approval</text>
+<rect x="1305" y="1144" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1515.0" y="1166.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">profile changes require review</text>
+<rect x="1785" y="1144" width="420" height="32" rx="999" fill="#ffffff" stroke="#d98686" stroke-width="1.5"/>
+<text x="1995.0" y="1166.0" text-anchor="middle" font-size="14" font-weight="750" fill="#172033">LLM output cannot rewrite raw memory</text>
+<path d="M 425 840 L 425 930" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<rect x="330.0" y="870" width="190" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="425" y="893" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">persist</text>
+<path d="M 1200 840 L 625 930" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<rect x="815.0" y="880" width="190" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="910" y="903" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">trace</text>
+<path d="M 1975 840 L 1975 930" fill="none" stroke="#8490a3" stroke-width="3" marker-end="url(#arrow)" stroke-dasharray="9 8"/>
+<rect x="1880.0" y="870" width="190" height="32" rx="16" fill="#f7f8fb" opacity="0.96"/>
+<text x="1975" y="893" text-anchor="middle" font-size="16" font-weight="750" fill="#5c667a">guard</text>
+<rect x="875" y="1220" width="650" height="70" rx="18" fill="#e7fbfb" stroke="#66bfc2" stroke-width="2.2" filter="url(#shadow)"/>
+<text x="1200" y="1264" text-anchor="middle" font-size="21" font-weight="800" fill="#172033">A2A is an interoperability boundary, not the internal runtime or database model</text>
+</svg>
