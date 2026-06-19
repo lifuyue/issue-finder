@@ -14,6 +14,7 @@ pub mod handoff;
 pub mod inbox;
 pub mod llm;
 pub mod llm_review;
+pub mod memory;
 pub mod paths;
 pub mod prepare_events;
 pub mod prepare_gate;

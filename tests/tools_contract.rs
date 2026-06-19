@@ -13,6 +13,11 @@ use issue_finder::config::Config;
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::WrittenHandoff;
 use issue_finder::inbox::{load_index, upsert_ready};
+use issue_finder::memory::{
+    MemoryDreamRun, MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType,
+    MemoryHintScopeType, MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryStore,
+    NewMemoryDream, NewMemoryHint,
+};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::prepare_gate::{
     default_prepare_allowed, prepare_gate_decision, PrepareGateDecision,
@@ -98,7 +103,14 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.scout",
             "issue-finder.assess",
             "issue-finder.prepare",
-            "issue-finder.read_context"
+            "issue-finder.read_context",
+            "issue-finder.memory_status",
+            "issue-finder.memory_recall",
+            "issue-finder.memory_dreams_list",
+            "issue-finder.memory_dream_show",
+            "issue-finder.memory_hints_list",
+            "issue-finder.memory_hint_update",
+            "issue-finder.memory_tombstone"
         ]
     );
     assert!(tools.iter().all(|tool| tool["inputSchema"].is_object()));
@@ -122,6 +134,14 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         .find(|tool| tool["name"] == "read_context")
         .expect("read_context tool spec");
     assert_eq!(read_context["deferLoading"], true);
+    let memory_recall = tools
+        .iter()
+        .find(|tool| tool["name"] == "memory_recall")
+        .expect("memory_recall tool spec");
+    assert_eq!(
+        memory_recall["inputSchema"]["required"],
+        serde_json::json!(["issue"])
+    );
 }
 
 #[test]
@@ -249,6 +269,40 @@ async fn tool_status_rejects_unknown_arguments() {
         .as_str()
         .unwrap()
         .contains("unexpected"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tool_memory_status_and_hint_update_are_structured() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    seed_candidate_memory_hint(&paths);
+    let runtime = IssueFinderToolRuntime::new(paths, Config::default());
+
+    let status = runtime
+        .execute(invocation(
+            "issue-finder.memory_status",
+            "{}",
+            "memory_status_call",
+        ))
+        .await;
+    assert!(status.success, "{status:?}");
+    assert_eq!(status.status, "ok");
+    assert_eq!(status.structured_content["kind"], "memory_status");
+    assert_eq!(status.structured_content["counts"]["hints"], 1);
+
+    let invalid = runtime
+        .execute(invocation(
+            "issue-finder.memory_hint_update",
+            r#"{"hintId":"candidate-hint","action":"pin"}"#,
+            "memory_hint_update_invalid",
+        ))
+        .await;
+    assert!(!invalid.success, "{invalid:?}");
+    assert_eq!(invalid.status, "invalid_transition");
+    assert_eq!(
+        invalid.structured_content["tool"],
+        "issue-finder.memory_hint_update"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -680,6 +734,52 @@ fn test_paths(root: &Path) -> IssueFinderPaths {
         inbox_dir: root.join("issue-finder-home/inbox"),
         reports_dir: root.join("issue-finder-home/reports"),
     }
+}
+
+fn seed_candidate_memory_hint(paths: &IssueFinderPaths) {
+    let store = MemoryStore::open(paths).unwrap();
+    store
+        .insert_dream_run(&MemoryDreamRun {
+            id: "candidate-dream-run".to_string(),
+            trigger: MemoryDreamTrigger::Manual,
+            scope: MemoryDreamScope::Global,
+            input_activation_run_ids_json: serde_json::json!([]),
+            model_status: MemoryModelStatus::Disabled,
+            created_at: Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    store
+        .insert_dream(&NewMemoryDream {
+            id: "candidate-dream".to_string(),
+            dream_run_id: "candidate-dream-run".to_string(),
+            dream_type: MemoryDreamType::DiscoveryPolicy,
+            summary: "Candidate policy".to_string(),
+            evidence_node_ids_json: serde_json::json!([]),
+            evidence_event_ids_json: serde_json::json!([]),
+            evidence_hint_ids_json: serde_json::json!([]),
+            status: MemoryDreamStatus::Candidate,
+            confidence: 0.5,
+            version: 1,
+            created_at: Utc::now().to_rfc3339(),
+            reviewed_at: None,
+        })
+        .unwrap();
+    store
+        .insert_hint(&NewMemoryHint {
+            id: "candidate-hint".to_string(),
+            dream_id: "candidate-dream".to_string(),
+            hint_type: MemoryHintType::Ranking,
+            scope_type: MemoryHintScopeType::Repo,
+            scope_ref: "owner/repo".to_string(),
+            summary: "Candidate ranking hint".to_string(),
+            policy_json: serde_json::json!({"kind": "ranking_test"}),
+            weight: 1.0,
+            status: MemoryHintStatus::Candidate,
+            created_at: Utc::now().to_rfc3339(),
+            approved_at: None,
+            expires_at: None,
+        })
+        .unwrap();
 }
 
 fn issue(repo_full_name: &str, number: u64) -> GitHubIssue {
