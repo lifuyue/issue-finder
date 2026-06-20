@@ -1,12 +1,14 @@
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    ApprovalStatus, DispatchProposalRequest, DispatchRuntime, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType, NewIssueTask,
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchOutcomeRecordRequest,
+    DispatchProposalRequest, DispatchRuntime, DispatchTaskClass, DispatchValidationOutcome,
+    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType, NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff};
 use issue_finder::inbox::upsert_ready;
+use issue_finder::memory::{MemoryRawEventType, MemoryStore};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::repo_scan::{CandidateFile, RepoScan, ValidationCommand};
 use issue_finder::workspace::{PreparedWorkspace, WorkspaceInfo};
@@ -111,6 +113,69 @@ fn issue_review_rejection_records_memory_and_blocks_dispatch() {
         .unwrap()
         .current_package_artifact_id
         .is_none());
+}
+
+#[test]
+fn dispatch_outcome_record_ingests_hybrid_memory_best_effort() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
+    let task = create_packaged_task(&runtime, 456);
+    let proposal = runtime
+        .propose_dispatch(DispatchProposalRequest {
+            issue: "owner/repo#456".to_string(),
+            agent_id: "codex".to_string(),
+            requested_by: "test".to_string(),
+            selected_session_link_id: None,
+            new_session: true,
+        })
+        .unwrap();
+    runtime
+        .resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)
+        .unwrap();
+
+    let result = runtime
+        .record_dispatch_outcome(DispatchOutcomeRecordRequest {
+            run_id: proposal.run.id,
+            idempotency_key: Some("outcome-456".to_string()),
+            outcome_kind: DispatchOutcomeKind::Failed,
+            failure_class: Some(DispatchOutcomeFailureClass::ValidationFailed),
+            failure_detail: Some("cargo test still fails".to_string()),
+            task_class: Some(DispatchTaskClass::RustCliPanic),
+            validation_outcome: Some(DispatchValidationOutcome::Failed),
+            result_artifact_id: None,
+            metadata_json: serde_json::json!({ "source": "test" }),
+        })
+        .unwrap();
+
+    assert_eq!(result.run.status.to_string(), "failed");
+    assert_eq!(result.outcome.outcome_kind, DispatchOutcomeKind::Failed);
+    assert!(result.memory_ingest.is_some());
+    let memory = runtime
+        .store()
+        .list_memory_events_for_issue_task(&task.id)
+        .unwrap();
+    assert_eq!(memory.len(), 2);
+    assert_eq!(
+        memory[1].event_type,
+        MemoryEventType::AgentPerformanceSignal
+    );
+    assert_eq!(memory[1].payload_json["failureClass"], "validation_failed");
+
+    let raw_events = MemoryStore::open(&paths)
+        .unwrap()
+        .list_raw_events()
+        .unwrap();
+    assert_eq!(raw_events.len(), 1);
+    assert_eq!(
+        raw_events[0].event_type,
+        MemoryRawEventType::DispatchFailure
+    );
+    assert_eq!(raw_events[0].payload_json["outcomeKind"], "failed");
+    assert_eq!(
+        raw_events[0].payload_json["failureClass"],
+        "validation_failed"
+    );
 }
 
 fn create_packaged_task(

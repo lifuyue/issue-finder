@@ -1,0 +1,199 @@
+{
+  "name": "dispatch_outcome_replay",
+  "profile": "default_cli_devtools",
+  "limit": 10,
+  "samples": [
+    {
+      "id": "dispatch_success_boosts_repo_candidate",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "clap-rs/clap",
+        "number": 9001,
+        "title": "CLI panic when parsing nested subcommand aliases",
+        "body": "Reproduce with cargo test parse_nested_aliases. Expected: no panic and a clear error. Suggested fix: adjust parser branch and add regression tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 30,
+        "updatedAgeDays": 4
+      },
+      "repository": {
+        "description": "Rust command line argument parser",
+        "language": "Rust",
+        "stars": 15000,
+        "forks": 1200,
+        "watchers": 180,
+        "openIssues": 320,
+        "topics": ["rust", "cli", "developer-tools"],
+        "pushedAgeDays": 2
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "repoFullName": "clap-rs/clap",
+          "outcomeKind": "fix_ready",
+          "taskClass": "rust_cli_panic",
+          "weight": 0.35
+        }
+      ],
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minMemoryAdjustment": 30,
+        "maxRankBucket": 3,
+        "reasons": ["Approved dispatch success should boost similar repo/task candidates."]
+      }
+    },
+    {
+      "id": "dispatch_validation_failure_cools_task_class",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-cli",
+        "number": 88,
+        "title": "CLI panic on malformed config path",
+        "body": "The CLI panics when config path contains invalid UTF-8. cargo test should cover malformed config inputs.",
+        "labels": ["bug", "help wanted"],
+        "createdAgeDays": 18,
+        "updatedAgeDays": 3
+      },
+      "repository": {
+        "description": "Rust CLI utilities",
+        "language": "Rust",
+        "stars": 900,
+        "forks": 80,
+        "watchers": 20,
+        "openIssues": 40,
+        "topics": ["rust", "cli"],
+        "pushedAgeDays": 2
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "failed",
+          "failureClass": "validation_failed",
+          "taskClass": "rust_cli_panic",
+          "weight": -0.45
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "maxMemoryAdjustment": -30,
+        "reasons": ["Validation failures should cool similar task-class candidates."]
+      }
+    },
+    {
+      "id": "dispatch_policy_block_does_not_pollute_similar_issue",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-cli",
+        "number": 89,
+        "title": "Add CLI regression test for config parser panic",
+        "body": "A small regression test should cover config parser panic handling. The code path is isolated and has existing test helpers.",
+        "labels": ["test", "good first issue"],
+        "createdAgeDays": 12,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Rust CLI utilities",
+        "language": "Rust",
+        "stars": 900,
+        "forks": 80,
+        "watchers": 20,
+        "openIssues": 40,
+        "topics": ["rust", "cli"],
+        "pushedAgeDays": 2
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "blocked",
+          "failureClass": "policy_blocked",
+          "taskClass": "rust_cli_panic",
+          "weight": -0.60
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "minMemoryAdjustment": 0,
+        "maxMemoryAdjustment": 0,
+        "reasons": ["Policy-blocked outcomes should not penalize similar feed candidates."]
+      }
+    },
+    {
+      "id": "dispatch_candidate_hint_inert_until_approved",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/devtool",
+        "number": 44,
+        "title": "Improve CLI error message for missing workspace",
+        "body": "The CLI reports a generic error when workspace config is absent. Expected: clear message and test.",
+        "labels": ["good first issue", "cli"],
+        "createdAgeDays": 20,
+        "updatedAgeDays": 5
+      },
+      "repository": {
+        "description": "Developer tool CLI",
+        "language": "Rust",
+        "stars": 1200,
+        "forks": 100,
+        "watchers": 30,
+        "openIssues": 55,
+        "topics": ["rust", "cli", "developer-tools"],
+        "pushedAgeDays": 3
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": false,
+          "outcomeKind": "fix_ready",
+          "taskClass": "rust_cli_panic",
+          "weight": 0.60
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "minMemoryAdjustment": 0,
+        "maxMemoryAdjustment": 0,
+        "reasons": ["Candidate outcome hints must remain inert until approved."]
+      }
+    },
+    {
+      "id": "dispatch_approved_hint_rerank_pressure",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "owner/test-runner",
+        "number": 31,
+        "title": "CLI panic hides failing test name",
+        "body": "When a Rust test runner panics, the CLI hides the failing test name. Add context and regression tests.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 4,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust CLI test runner",
+        "language": "Rust",
+        "stars": 600,
+        "forks": 60,
+        "watchers": 20,
+        "openIssues": 18,
+        "topics": ["rust", "cli", "testing"],
+        "pushedAgeDays": 1
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "fix_ready",
+          "taskClass": "rust_cli_panic",
+          "weight": 0.45
+        }
+      ],
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible_top",
+        "minMemoryAdjustment": 40,
+        "maxRankBucket": 3,
+        "reasons": ["Approved dispatch outcome hints should apply enough pressure to influence rank."]
+      }
+    }
+  ]
+}

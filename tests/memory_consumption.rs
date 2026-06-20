@@ -18,7 +18,7 @@ use tempfile::tempdir;
 const NOW: &str = "2026-06-18T00:00:00Z";
 
 #[test]
-fn approved_ranking_hints_append_explanation_without_changing_score() {
+fn approved_ranking_hints_apply_bounded_score_adjustment() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     seed_memory_hints(&paths);
@@ -27,7 +27,8 @@ fn approved_ranking_hints_append_explanation_without_changing_score() {
 
     apply_ranking_hints_to_ranked(&paths, &mut ranked).unwrap();
 
-    assert_eq!(ranked[0].recommendation.final_feed_score, before_score);
+    assert_eq!(ranked[0].recommendation.memory_adjustment, 60);
+    assert_eq!(ranked[0].recommendation.final_feed_score, before_score + 60);
     assert!(ranked[0]
         .explanation
         .iter()
@@ -41,6 +42,29 @@ fn approved_ranking_hints_append_explanation_without_changing_score() {
         .reasons
         .iter()
         .any(|reason| reason.contains("Memory hint refs")));
+    assert!(ranked[0]
+        .recommendation
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("Memory ranking adjustment: +60")));
+}
+
+#[test]
+fn candidate_ranking_hints_do_not_change_score() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    seed_candidate_only_ranking_hint(&paths);
+    let mut ranked = vec![ranked_issue("owner/repo", 42)];
+    let before_score = ranked[0].recommendation.final_feed_score;
+
+    apply_ranking_hints_to_ranked(&paths, &mut ranked).unwrap();
+
+    assert_eq!(ranked[0].recommendation.memory_adjustment, 0);
+    assert_eq!(ranked[0].recommendation.final_feed_score, before_score);
+    assert!(!ranked[0]
+        .explanation
+        .iter()
+        .any(|reason| reason.contains("candidate-ranking-only")));
 }
 
 #[test]
@@ -116,34 +140,21 @@ fn handoff_memory_context_contains_approved_ranking_and_dispatch_hints_only() {
         .any(|note| note.contains("Agent dispatch")));
 }
 
+fn seed_candidate_only_ranking_hint(paths: &IssueFinderPaths) {
+    let store = MemoryStore::open(paths).unwrap();
+    seed_dream(&store);
+    seed_hint(
+        &store,
+        "candidate-ranking-only",
+        MemoryHintType::Ranking,
+        MemoryHintStatus::Candidate,
+        "Candidate ranking hint",
+    );
+}
+
 fn seed_memory_hints(paths: &IssueFinderPaths) {
     let store = MemoryStore::open(paths).unwrap();
-    store
-        .insert_dream_run(&MemoryDreamRun {
-            id: "consumption-dream-run".to_string(),
-            trigger: MemoryDreamTrigger::Manual,
-            scope: MemoryDreamScope::Global,
-            input_activation_run_ids_json: json!([]),
-            model_status: MemoryModelStatus::Disabled,
-            created_at: NOW.to_string(),
-        })
-        .unwrap();
-    store
-        .insert_dream(&NewMemoryDream {
-            id: "consumption-dream".to_string(),
-            dream_run_id: "consumption-dream-run".to_string(),
-            dream_type: MemoryDreamType::DiscoveryPolicy,
-            summary: "Consumption test".to_string(),
-            evidence_node_ids_json: json!([]),
-            evidence_event_ids_json: json!([]),
-            evidence_hint_ids_json: json!([]),
-            status: MemoryDreamStatus::Candidate,
-            confidence: 0.5,
-            version: 1,
-            created_at: NOW.to_string(),
-            reviewed_at: None,
-        })
-        .unwrap();
+    seed_dream(&store);
     seed_hint(
         &store,
         "approved-ranking",
@@ -183,6 +194,35 @@ fn seed_memory_hints(paths: &IssueFinderPaths) {
         "codex",
         "Agent dispatch candidate hint",
     );
+}
+
+fn seed_dream(store: &MemoryStore) {
+    store
+        .insert_dream_run(&MemoryDreamRun {
+            id: "consumption-dream-run".to_string(),
+            trigger: MemoryDreamTrigger::Manual,
+            scope: MemoryDreamScope::Global,
+            input_activation_run_ids_json: json!([]),
+            model_status: MemoryModelStatus::Disabled,
+            created_at: NOW.to_string(),
+        })
+        .unwrap();
+    store
+        .insert_dream(&NewMemoryDream {
+            id: "consumption-dream".to_string(),
+            dream_run_id: "consumption-dream-run".to_string(),
+            dream_type: MemoryDreamType::DiscoveryPolicy,
+            summary: "Consumption test".to_string(),
+            evidence_node_ids_json: json!([]),
+            evidence_event_ids_json: json!([]),
+            evidence_hint_ids_json: json!([]),
+            status: MemoryDreamStatus::Candidate,
+            confidence: 0.5,
+            version: 1,
+            created_at: NOW.to_string(),
+            reviewed_at: None,
+        })
+        .unwrap();
 }
 
 fn seed_hint(

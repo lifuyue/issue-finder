@@ -75,9 +75,12 @@ fn dispatch_failure_ingests_agent_task_failure_and_validation_nodes() {
         id: "dispatch-run-1".to_string(),
         issue_key: IssueKey::new("owner/repo", 42),
         agent_id: "codex".to_string(),
+        outcome_kind: Some("failed".to_string()),
         task_type: "rust_cli_panic".to_string(),
         succeeded: false,
+        failure_class: Some("validation_failed".to_string()),
         failure_reason: Some("unclear_validation".to_string()),
+        validation_outcome: Some("failed".to_string()),
         validation_paths: vec!["cargo test -p cli".to_string()],
         artifact_refs: vec!["inbox/item/handoff.json".to_string()],
         occurred_at: NOW.to_string(),
@@ -102,7 +105,7 @@ fn dispatch_failure_ingests_agent_task_failure_and_validation_nodes() {
     assert_eq!(raw.subject_ref, "owner/repo#42");
 
     let nodes = store.list_nodes_for_raw_event(&raw.id).unwrap();
-    assert_eq!(nodes.len(), 5);
+    assert_eq!(nodes.len(), 8);
     assert!(nodes
         .iter()
         .any(|node| node.node_type == MemoryNodeType::RawEvent));
@@ -115,8 +118,20 @@ fn dispatch_failure_ingests_agent_task_failure_and_validation_nodes() {
             && node.normalized_value.as_deref() == Some("rust_cli_panic")
     }));
     assert!(nodes.iter().any(|node| {
+        node.entity_type.as_deref() == Some("outcome_kind")
+            && node.normalized_value.as_deref() == Some("failed")
+    }));
+    assert!(nodes.iter().any(|node| {
+        node.entity_type.as_deref() == Some("failure_class")
+            && node.normalized_value.as_deref() == Some("validation_failed")
+    }));
+    assert!(nodes.iter().any(|node| {
         node.entity_type.as_deref() == Some("failure_reason")
             && node.normalized_value.as_deref() == Some("unclear_validation")
+    }));
+    assert!(nodes.iter().any(|node| {
+        node.entity_type.as_deref() == Some("validation_outcome")
+            && node.normalized_value.as_deref() == Some("failed")
     }));
     assert!(nodes.iter().any(|node| {
         node.entity_type.as_deref() == Some("validation_path")

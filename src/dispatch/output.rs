@@ -10,8 +10,8 @@ use super::model::{
 };
 use super::packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchStatusSnapshot,
-    SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordResult,
+    DispatchProposal, DispatchStatusSnapshot, SessionSearchResult,
 };
 use super::session_approvals::{SessionMutationApprovalResolution, SessionMutationProposal};
 use super::session_ops::{SessionTranscriptResult, SessionsSyncResult};
@@ -360,6 +360,34 @@ pub(crate) fn render_dispatch_approval(result: &DispatchApprovalResolution) -> S
         "Dispatch run {} approval is {}.\nRun status: {}",
         result.run.id, result.run.approval_state, result.run.status
     )
+}
+
+pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResult) -> String {
+    let mut lines = vec![format!(
+        "Recorded dispatch outcome {} for run {}: {}",
+        result.outcome.id, result.run.id, result.outcome.outcome_kind
+    )];
+    if let Some(task_class) = result.outcome.task_class {
+        lines.push(format!("Task class: {task_class}"));
+    }
+    if let Some(failure_class) = result.outcome.failure_class {
+        lines.push(format!("Failure class: {failure_class}"));
+    }
+    if let Some(validation_outcome) = result.outcome.validation_outcome {
+        lines.push(format!("Validation: {validation_outcome}"));
+    }
+    if let Some(memory) = &result.memory_ingest {
+        lines.push(format!(
+            "Memory ingest: dispatch={} rawEvents={} nodes={}",
+            memory.dispatch_memory_event_id,
+            memory.memory_raw_event_ids.len(),
+            memory.memory_node_ids.len()
+        ));
+    }
+    if let Some(error) = &result.memory_ingest_error {
+        lines.push(format!("Memory ingest failed: {error}"));
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> String {

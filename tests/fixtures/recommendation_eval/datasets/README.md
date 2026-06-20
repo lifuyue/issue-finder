@@ -12,6 +12,7 @@ Each dataset focuses on one ranking pressure. Add new samples to an existing dat
 - `profile_devops_infra.json`: Kubernetes, Docker, CI, GitOps, and cloud infrastructure issues.
 - `source_trust.json`: GFI trusted, overlay trusted, and global source trust behavior.
 - `feedback_replay.json`: shown/read/prepared/done/dismissed/restored state behavior.
+- `dispatch_outcome_replay.json`: approved dispatch outcome trends, validation failure cooldown, policy/user block exclusion, and candidate-hint inertness.
 
 ## Profile Names
 
@@ -25,4 +26,3 @@ Use these stable profile identifiers:
 - `devops_infra`
 
 Each sample must either inherit the dataset `profile` or set its own `profile`.
-

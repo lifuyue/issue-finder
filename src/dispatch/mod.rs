@@ -32,19 +32,22 @@ pub use model::{
     AdapterProbeStatus, AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile,
     AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
     CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchFailure, DispatchFailureClass, DispatchRun, DispatchRunStatus, DispatchSubjectType,
-    GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType, IssueTask, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult,
-    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact,
-    NewDispatchEvent, NewDispatchFailure, NewDispatchRun, NewGitHubInteraction, NewIssueTask,
-    NewMemoryEvent, NewSessionTranscriptItem, PolicyAction, PolicyRequirement,
-    SessionTranscriptItem, TranscriptPayloadStorage,
+    DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind,
+    DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
+    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
+    IssueTask, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEvent,
+    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
+    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    NewSessionTranscriptItem, PolicyAction, PolicyRequirement, SessionTranscriptItem,
+    TranscriptPayloadStorage,
 };
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
 pub use runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchProposalRequest,
-    DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeMemoryIngestView,
+    DispatchOutcomeRecordRequest, DispatchOutcomeRecordResult, DispatchProposal,
+    DispatchProposalRequest, DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
 };
 pub use session_approvals::{
     PendingSessionMutation, SessionMutationApprovalResolution, SessionMutationProposal,

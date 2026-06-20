@@ -13,13 +13,14 @@ use super::model::{
     AdapterProbeResult, AdapterProbeStatus, AgentArtifact, AgentCapability, AgentCapabilityName,
     AgentProfile, AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus,
     ApprovalType, CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity,
-    DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchRun, DispatchRunStatus,
-    DispatchSubjectType, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent, MemoryEventType,
-    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewAgentSessionLink,
-    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
-    NewGitHubInteraction, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
-    SessionTranscriptItem, TranscriptPayloadStorage,
+    DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass,
+    DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType,
+    DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus,
+    GitHubInteractionType, IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent,
+    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
+    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    NewSessionTranscriptItem, SessionTranscriptItem, TranscriptPayloadStorage,
 };
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -398,6 +399,112 @@ impl DispatchStore {
             ],
         )?;
         self.get_dispatch_run(run_id)
+    }
+
+    pub fn record_dispatch_run_outcome(
+        &self,
+        input: NewDispatchRunOutcome,
+    ) -> Result<DispatchRunOutcome> {
+        if let Some(existing) = self.find_dispatch_run_outcome_by_run(&input.run_id)? {
+            if dispatch_outcome_matches(&existing, &input) {
+                return Ok(existing);
+            }
+            anyhow::bail!(
+                "dispatch run {} already has outcome {} with idempotency key {}",
+                input.run_id,
+                existing.id,
+                existing.idempotency_key
+            );
+        }
+        if let Some(existing) =
+            self.find_dispatch_run_outcome_by_idempotency_key(&input.idempotency_key)?
+        {
+            if dispatch_outcome_matches(&existing, &input) {
+                return Ok(existing);
+            }
+            anyhow::bail!(
+                "dispatch outcome idempotency key {} already belongs to run {}",
+                input.idempotency_key,
+                existing.run_id
+            );
+        }
+
+        let id = next_id("dispatch-outcome");
+        let recorded_at = now();
+        self.conn.execute(
+            "INSERT INTO dispatch_run_outcomes (
+                id, run_id, idempotency_key, outcome_kind, failure_class, failure_detail,
+                task_class, validation_outcome, result_artifact_id, metadata_json, recorded_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                id,
+                input.run_id,
+                input.idempotency_key,
+                input.outcome_kind.as_str(),
+                input.failure_class.map(DispatchOutcomeFailureClass::as_str),
+                input.failure_detail,
+                input.task_class.map(DispatchTaskClass::as_str),
+                input
+                    .validation_outcome
+                    .map(DispatchValidationOutcome::as_str),
+                input.result_artifact_id,
+                json_text(&input.metadata_json)?,
+                recorded_at
+            ],
+        )?;
+        self.get_dispatch_run_outcome(&id)
+            .with_context(|| format!("dispatch run outcome {id} was not persisted"))
+    }
+
+    pub fn get_dispatch_run_outcome(&self, id: &str) -> Result<DispatchRunOutcome> {
+        self.conn
+            .query_row(
+                "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
+                        failure_detail, task_class, validation_outcome, result_artifact_id,
+                        metadata_json, recorded_at
+                 FROM dispatch_run_outcomes
+                 WHERE id = ?1",
+                params![id],
+                dispatch_run_outcome_from_row,
+            )
+            .with_context(|| format!("dispatch run outcome {id} not found"))
+    }
+
+    pub fn find_dispatch_run_outcome_by_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<DispatchRunOutcome>> {
+        self.conn
+            .query_row(
+                "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
+                        failure_detail, task_class, validation_outcome, result_artifact_id,
+                        metadata_json, recorded_at
+                 FROM dispatch_run_outcomes
+                 WHERE run_id = ?1",
+                params![run_id],
+                dispatch_run_outcome_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn find_dispatch_run_outcome_by_idempotency_key(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Option<DispatchRunOutcome>> {
+        self.conn
+            .query_row(
+                "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
+                        failure_detail, task_class, validation_outcome, result_artifact_id,
+                        metadata_json, recorded_at
+                 FROM dispatch_run_outcomes
+                 WHERE idempotency_key = ?1",
+                params![idempotency_key],
+                dispatch_run_outcome_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn create_session_link(&self, input: NewAgentSessionLink) -> Result<AgentSessionLink> {
@@ -1200,6 +1307,8 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 NULL,
                 CASE event_type
                     WHEN 'dispatch_approval_resolved' THEN 'dispatch_approval_resolved'
+                    WHEN 'dispatch_outcome_recorded' THEN 'dispatch_outcome_recorded'
+                    WHEN 'dispatch_outcome_memory_ingest_failed' THEN 'dispatch_outcome_memory_ingest_failed'
                     WHEN 'dispatch_starting' THEN 'dispatch_starting'
                     WHEN 'dispatch_failed' THEN 'dispatch_failed'
                     WHEN 'session_synced' THEN 'session_synced'
@@ -1220,7 +1329,11 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 END,
                 COALESCE(session_link_id, run_id),
                 'migration',
-                CASE WHEN event_type = 'dispatch_failed' THEN 'error' ELSE 'info' END,
+                CASE
+                    WHEN event_type = 'dispatch_failed' THEN 'error'
+                    WHEN event_type = 'dispatch_outcome_memory_ingest_failed' THEN 'warning'
+                    ELSE 'info'
+                END,
                 run_id,
                 NULL,
                 native_event_id,
@@ -1293,6 +1406,22 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE CASCADE,
             FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE RESTRICT,
             FOREIGN KEY (selected_session_link_id) REFERENCES agent_session_links(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS dispatch_run_outcomes (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL UNIQUE,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            outcome_kind TEXT NOT NULL,
+            failure_class TEXT,
+            failure_detail TEXT,
+            task_class TEXT,
+            validation_outcome TEXT,
+            result_artifact_id TEXT,
+            metadata_json TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (result_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS agent_session_links (
@@ -1428,6 +1557,7 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_issue_tasks_issue_key ON issue_tasks(issue_key);
         CREATE INDEX IF NOT EXISTS idx_dispatch_runs_issue_task ON dispatch_runs(issue_task_id);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_run_outcomes_run ON dispatch_run_outcomes(run_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_links_issue_task ON agent_session_links(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_events_run ON dispatch_events(run_id, sequence);
         CREATE INDEX IF NOT EXISTS idx_dispatch_events_session ON dispatch_events(session_link_id, sequence);
@@ -1514,6 +1644,36 @@ fn dispatch_run_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRun> {
         selected_session_link_id: row.get(9)?,
         result_artifact_id: row.get(10)?,
         failure_reason: row.get(11)?,
+    })
+}
+
+fn dispatch_run_outcome_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRunOutcome> {
+    let outcome_kind: String = row.get(3)?;
+    let failure_class: Option<String> = row.get(4)?;
+    let task_class: Option<String> = row.get(6)?;
+    let validation_outcome: Option<String> = row.get(7)?;
+    let metadata: String = row.get(9)?;
+    Ok(DispatchRunOutcome {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        idempotency_key: row.get(2)?,
+        outcome_kind: parse_enum(&outcome_kind, DispatchOutcomeKind::parse_value)?,
+        failure_class: failure_class
+            .as_deref()
+            .map(|value| parse_enum(value, DispatchOutcomeFailureClass::parse_value))
+            .transpose()?,
+        failure_detail: row.get(5)?,
+        task_class: task_class
+            .as_deref()
+            .map(|value| parse_enum(value, DispatchTaskClass::parse_value))
+            .transpose()?,
+        validation_outcome: validation_outcome
+            .as_deref()
+            .map(|value| parse_enum(value, DispatchValidationOutcome::parse_value))
+            .transpose()?,
+        result_artifact_id: row.get(8)?,
+        metadata_json: parse_json(&metadata)?,
+        recorded_at: row.get(10)?,
     })
 }
 
@@ -1721,6 +1881,18 @@ fn bool_int(value: bool) -> i64 {
     } else {
         0
     }
+}
+
+fn dispatch_outcome_matches(existing: &DispatchRunOutcome, input: &NewDispatchRunOutcome) -> bool {
+    existing.run_id == input.run_id
+        && existing.idempotency_key == input.idempotency_key
+        && existing.outcome_kind == input.outcome_kind
+        && existing.failure_class == input.failure_class
+        && existing.failure_detail == input.failure_detail
+        && existing.task_class == input.task_class
+        && existing.validation_outcome == input.validation_outcome
+        && existing.result_artifact_id == input.result_artifact_id
+        && existing.metadata_json == input.metadata_json
 }
 
 fn dispatch_started(status: DispatchRunStatus) -> bool {

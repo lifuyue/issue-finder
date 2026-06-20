@@ -20,9 +20,12 @@ pub struct DispatchMemoryOutcome {
     pub id: String,
     pub issue_key: IssueKey,
     pub agent_id: String,
+    pub outcome_kind: Option<String>,
     pub task_type: String,
     pub succeeded: bool,
+    pub failure_class: Option<String>,
     pub failure_reason: Option<String>,
+    pub validation_outcome: Option<String>,
     pub validation_paths: Vec<String>,
     pub artifact_refs: Vec<String>,
     pub occurred_at: String,
@@ -147,9 +150,12 @@ impl<'a> MemoryIngestor<'a> {
                 "outcomeId": outcome.id,
                 "issue": outcome.issue_key.label(),
                 "agentId": outcome.agent_id,
+                "outcomeKind": outcome.outcome_kind,
                 "taskType": outcome.task_type,
                 "succeeded": outcome.succeeded,
+                "failureClass": outcome.failure_class,
                 "failureReason": outcome.failure_reason,
+                "validationOutcome": outcome.validation_outcome,
                 "validationPaths": outcome.validation_paths,
                 "artifactRefs": outcome.artifact_refs,
                 "metadata": outcome.metadata,
@@ -183,11 +189,35 @@ impl<'a> MemoryIngestor<'a> {
             &outcome.task_type,
             &outcome.occurred_at,
         )?);
+        if let Some(outcome_kind) = outcome.outcome_kind.as_deref() {
+            node_ids.push(self.ensure_entity_node(
+                &raw_id,
+                "outcome_kind",
+                outcome_kind,
+                &outcome.occurred_at,
+            )?);
+        }
+        if let Some(failure_class) = outcome.failure_class.as_deref() {
+            node_ids.push(self.ensure_entity_node(
+                &raw_id,
+                "failure_class",
+                failure_class,
+                &outcome.occurred_at,
+            )?);
+        }
         if let Some(reason) = outcome.failure_reason.as_deref() {
             node_ids.push(self.ensure_entity_node(
                 &raw_id,
                 "failure_reason",
                 reason,
+                &outcome.occurred_at,
+            )?);
+        }
+        if let Some(validation_outcome) = outcome.validation_outcome.as_deref() {
+            node_ids.push(self.ensure_entity_node(
+                &raw_id,
+                "validation_outcome",
+                validation_outcome,
                 &outcome.occurred_at,
             )?);
         }

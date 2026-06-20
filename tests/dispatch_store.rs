@@ -4,12 +4,13 @@ use std::path::Path;
 use issue_finder::dispatch::{
     AdapterProbeStatus, AgentCapabilityName, AgentSessionStatus, ApprovalStatus, ApprovalType,
     CapabilityStatus, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchFailureClass, DispatchRunStatus, DispatchStore, DispatchSubjectType,
+    DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
+    DispatchStore, DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
     GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
     IssueTaskStatus, MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
     NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewGitHubInteraction, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
-    TranscriptPayloadStorage,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    NewSessionTranscriptItem, TranscriptPayloadStorage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -512,6 +513,85 @@ fn artifact_write_cleans_file_when_database_insert_fails() {
         .unwrap_err();
     assert!(error.to_string().contains("FOREIGN KEY"));
     assert_eq!(count_files(&paths.dispatch_artifacts_dir()), 0);
+}
+
+#[test]
+fn dispatch_store_persists_outcomes_idempotently_and_rejects_conflicts() {
+    let dir = tempdir().unwrap();
+    let store = DispatchStore::open(test_paths(dir.path())).unwrap();
+    seed_agent(&store);
+    let task = store
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 99,
+            title: "Fix parser panic".to_string(),
+            url: "https://github.com/owner/repo/issues/99".to_string(),
+            status: IssueTaskStatus::UserApproved,
+            priority: Some(10),
+            category: Some("high_value_ready".to_string()),
+        })
+        .unwrap();
+    let run = store
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id,
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Running,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_session_link_id: None,
+        })
+        .unwrap();
+    let input = NewDispatchRunOutcome {
+        run_id: run.id.clone(),
+        idempotency_key: "outcome-key-1".to_string(),
+        outcome_kind: DispatchOutcomeKind::Failed,
+        failure_class: Some(DispatchOutcomeFailureClass::ValidationFailed),
+        failure_detail: Some("cargo test still fails".to_string()),
+        task_class: Some(DispatchTaskClass::RustCliPanic),
+        validation_outcome: Some(DispatchValidationOutcome::Failed),
+        result_artifact_id: None,
+        metadata_json: json!({ "source": "test" }),
+    };
+
+    let first = store.record_dispatch_run_outcome(input.clone()).unwrap();
+    let second = store.record_dispatch_run_outcome(input).unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(
+        store
+            .find_dispatch_run_outcome_by_run(&run.id)
+            .unwrap()
+            .unwrap()
+            .outcome_kind,
+        DispatchOutcomeKind::Failed
+    );
+    let conflict = store
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
+            run_id: run.id,
+            idempotency_key: "outcome-key-1".to_string(),
+            outcome_kind: DispatchOutcomeKind::FixReady,
+            failure_class: None,
+            failure_detail: None,
+            task_class: Some(DispatchTaskClass::RustCliPanic),
+            validation_outcome: Some(DispatchValidationOutcome::Passed),
+            result_artifact_id: None,
+            metadata_json: json!({ "source": "test" }),
+        })
+        .unwrap_err();
+    assert!(conflict.to_string().contains("already has outcome"));
+}
+
+fn seed_agent(store: &DispatchStore) {
+    store
+        .create_agent_profile(NewAgentProfile {
+            id: Some("codex".to_string()),
+            kind: "codex".to_string(),
+            display_name: "Codex".to_string(),
+            adapter: "codex_app_server".to_string(),
+            config_json: json!({}),
+            enabled: true,
+        })
+        .unwrap();
 }
 
 fn test_paths(root: &Path) -> IssueFinderPaths {

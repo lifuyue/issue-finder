@@ -9,19 +9,22 @@ use crate::tool_specs::{
     TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT, TOOL_A2A_REJECT_SEND,
     TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_AGENT_PROBE, TOOL_DISPATCH,
     TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
-    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_REJECT,
-    TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT,
-    TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS, TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE,
-    TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
-    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
-    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_SESSIONS_APPROVE_MUTATION,
-    TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
-    TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY,
+    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_RECORD_OUTCOME,
+    TOOL_DISPATCH_REJECT, TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST,
+    TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS,
+    TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT,
+    TOOL_GITHUB_DRAFT_FINAL_COMMENT, TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS,
+    TOOL_GITHUB_POST_COMMENT, TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
+    TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST,
+    TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY,
     TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
 };
 
-use super::model::{ApprovalStatus, DispatchRunStatus};
-use super::runtime::{DispatchProposalRequest, DispatchRuntime};
+use super::model::{
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
+    DispatchTaskClass, DispatchValidationOutcome,
+};
+use super::runtime::{DispatchOutcomeRecordRequest, DispatchProposalRequest, DispatchRuntime};
 use super::session_ops::SessionsSyncRequest;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +89,7 @@ pub fn is_dispatch_tool(tool_name: &str) -> bool {
             | TOOL_DISPATCH_APPROVE
             | TOOL_DISPATCH_REJECT
             | TOOL_DISPATCH_EXECUTE
+            | TOOL_DISPATCH_RECORD_OUTCOME
             | TOOL_A2A_EXPORT_TASK
             | TOOL_A2A_APPROVE_SEND
             | TOOL_A2A_REJECT_SEND
@@ -468,6 +472,39 @@ pub fn execute_dispatch_tool(
                 }
             }
         }
+        TOOL_DISPATCH_RECORD_OUTCOME => {
+            let args: DispatchRecordOutcomeToolArgs = parse_arguments(arguments)?;
+            let result = runtime
+                .record_dispatch_outcome(DispatchOutcomeRecordRequest {
+                    run_id: args.run_id,
+                    idempotency_key: normalized_optional(args.idempotency_key),
+                    outcome_kind: parse_dispatch_outcome_kind(&args.outcome)?,
+                    failure_class: args
+                        .failure_class
+                        .as_deref()
+                        .map(parse_dispatch_failure_class)
+                        .transpose()?,
+                    failure_detail: normalized_optional(args.failure_reason),
+                    task_class: args
+                        .task_class
+                        .as_deref()
+                        .map(parse_dispatch_task_class)
+                        .transpose()?,
+                    validation_outcome: args
+                        .validation_outcome
+                        .as_deref()
+                        .map(parse_dispatch_validation_outcome)
+                        .transpose()?,
+                    result_artifact_id: normalized_optional(args.result_artifact_id),
+                    metadata_json: json!({ "source": "tool_dispatch_record_outcome" }),
+                })
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!("Recorded dispatch outcome {}.", result.outcome.id),
+                json!({ "dispatchOutcome": result }),
+            ))
+        }
         TOOL_A2A_EXPORT_TASK => {
             let args: A2aExportTaskToolArgs = parse_arguments(arguments)?;
             let result = runtime
@@ -517,6 +554,15 @@ pub fn execute_dispatch_tool(
                 .as_deref()
                 .map(parse_dispatch_run_status)
                 .transpose()?;
+            let outcome = optional_outcome_record_request(
+                args.outcome.as_deref(),
+                args.failure_class.as_deref(),
+                normalized_optional(args.failure_reason),
+                args.task_class.as_deref(),
+                args.validation_outcome.as_deref(),
+                normalized_optional(args.idempotency_key),
+                args.run_id.clone(),
+            )?;
             let result = runtime
                 .import_a2a_result(
                     &args.run_id,
@@ -526,6 +572,7 @@ pub fn execute_dispatch_tool(
                         .content_type
                         .unwrap_or_else(|| "application/json".to_string()),
                     status,
+                    outcome,
                 )
                 .map_err(DispatchToolError::System)?;
             Ok(output(
@@ -672,6 +719,67 @@ fn parse_dispatch_run_status(
     DispatchRunStatus::parse_value(value).ok_or_else(|| {
         DispatchToolError::InvalidArguments(format!("invalid dispatch status {value}"))
     })
+}
+
+fn parse_dispatch_outcome_kind(
+    value: &str,
+) -> std::result::Result<DispatchOutcomeKind, DispatchToolError> {
+    DispatchOutcomeKind::parse_value(value).ok_or_else(|| {
+        DispatchToolError::InvalidArguments(format!("invalid dispatch outcome kind {value}"))
+    })
+}
+
+fn parse_dispatch_failure_class(
+    value: &str,
+) -> std::result::Result<DispatchOutcomeFailureClass, DispatchToolError> {
+    DispatchOutcomeFailureClass::parse_value(value).ok_or_else(|| {
+        DispatchToolError::InvalidArguments(format!("invalid dispatch failure class {value}"))
+    })
+}
+
+fn parse_dispatch_task_class(
+    value: &str,
+) -> std::result::Result<DispatchTaskClass, DispatchToolError> {
+    DispatchTaskClass::parse_value(value).ok_or_else(|| {
+        DispatchToolError::InvalidArguments(format!("invalid dispatch task class {value}"))
+    })
+}
+
+fn parse_dispatch_validation_outcome(
+    value: &str,
+) -> std::result::Result<DispatchValidationOutcome, DispatchToolError> {
+    DispatchValidationOutcome::parse_value(value).ok_or_else(|| {
+        DispatchToolError::InvalidArguments(format!("invalid dispatch validation outcome {value}"))
+    })
+}
+
+fn optional_outcome_record_request(
+    outcome: Option<&str>,
+    failure_class: Option<&str>,
+    failure_reason: Option<String>,
+    task_class: Option<&str>,
+    validation_outcome: Option<&str>,
+    idempotency_key: Option<String>,
+    run_id: String,
+) -> std::result::Result<Option<DispatchOutcomeRecordRequest>, DispatchToolError> {
+    let Some(outcome) = outcome else {
+        return Ok(None);
+    };
+    Ok(Some(DispatchOutcomeRecordRequest {
+        run_id,
+        idempotency_key,
+        outcome_kind: parse_dispatch_outcome_kind(outcome)?,
+        failure_class: failure_class
+            .map(parse_dispatch_failure_class)
+            .transpose()?,
+        failure_detail: failure_reason,
+        task_class: task_class.map(parse_dispatch_task_class).transpose()?,
+        validation_outcome: validation_outcome
+            .map(parse_dispatch_validation_outcome)
+            .transpose()?,
+        result_artifact_id: None,
+        metadata_json: json!({ "source": "tool_a2a_import_result" }),
+    }))
 }
 
 fn map_runtime_error(error: anyhow::Error) -> DispatchToolError {
@@ -926,6 +1034,37 @@ struct A2aImportResultToolArgs {
     content_type: Option<String>,
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    failure_class: Option<String>,
+    #[serde(default)]
+    failure_reason: Option<String>,
+    #[serde(default)]
+    task_class: Option<String>,
+    #[serde(default)]
+    validation_outcome: Option<String>,
+    #[serde(default)]
+    idempotency_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchRecordOutcomeToolArgs {
+    run_id: String,
+    outcome: String,
+    #[serde(default)]
+    failure_class: Option<String>,
+    #[serde(default)]
+    failure_reason: Option<String>,
+    #[serde(default)]
+    task_class: Option<String>,
+    #[serde(default)]
+    validation_outcome: Option<String>,
+    #[serde(default)]
+    result_artifact_id: Option<String>,
+    #[serde(default)]
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

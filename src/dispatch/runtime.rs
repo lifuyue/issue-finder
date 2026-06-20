@@ -20,12 +20,15 @@ use super::github_projection::{
     ReqwestGitHubCommentWriter,
 };
 use super::memory::record_dispatch_approval_signal;
+use super::memory::{ingest_dispatch_outcome_memory, DispatchOutcomeMemoryIngest};
 use super::model::{
     AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, AgentSessionLink,
     AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus,
     DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
-    DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus, NewAgentCapability,
-    NewAgentProfile, NewApprovalRequest, NewDispatchRun, PolicyAction, SessionTranscriptItem,
+    DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRun, DispatchRunOutcome,
+    DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction,
+    IssueTaskStatus, NewAgentCapability, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
+    NewDispatchRunOutcome, PolicyAction, SessionTranscriptItem,
 };
 use super::packaging::{self, IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::policy::{classify_action, ensure_capability_preconditions};
@@ -90,6 +93,37 @@ pub struct DispatchProposal {
 pub struct DispatchApprovalResolution {
     pub run: DispatchRun,
     pub approval_request: ApprovalRequest,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchOutcomeRecordResult {
+    pub run: DispatchRun,
+    pub issue_task: super::model::IssueTask,
+    pub outcome: DispatchRunOutcome,
+    pub memory_ingest: Option<DispatchOutcomeMemoryIngestView>,
+    pub memory_ingest_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchOutcomeMemoryIngestView {
+    pub dispatch_memory_event_id: String,
+    pub memory_raw_event_ids: Vec<String>,
+    pub memory_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchOutcomeRecordRequest {
+    pub run_id: String,
+    pub idempotency_key: Option<String>,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchOutcomeFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,8 +373,44 @@ impl DispatchRuntime {
         kind: &str,
         content_type: &str,
         status: Option<DispatchRunStatus>,
+        outcome: Option<DispatchOutcomeRecordRequest>,
     ) -> Result<A2aResultImport> {
-        a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)
+        let mut result =
+            a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)?;
+        let outcome_request = outcome.or_else(|| {
+            status.and_then(|status| {
+                terminal_outcome_for_status(status).map(|outcome_kind| {
+                    DispatchOutcomeRecordRequest {
+                        run_id: run_id.to_string(),
+                        idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
+                        outcome_kind,
+                        failure_class: None,
+                        failure_detail: None,
+                        task_class: None,
+                        validation_outcome: None,
+                        result_artifact_id: Some(result.artifact.id.clone()),
+                        metadata_json: json!({
+                            "source": "a2a_import_result",
+                            "artifactKind": kind,
+                            "coarseTerminalOutcome": true
+                        }),
+                    }
+                })
+            })
+        });
+        if let Some(mut request) = outcome_request {
+            request.run_id = run_id.to_string();
+            if request.result_artifact_id.is_none() {
+                request.result_artifact_id = Some(result.artifact.id.clone());
+            }
+            if request.idempotency_key.is_none() {
+                request.idempotency_key = Some(format!("a2a_result_import:{}", result.artifact.id));
+            }
+            let recorded = self.record_dispatch_outcome(request)?;
+            result.run = recorded.run;
+            result.outcome = Some(recorded.outcome);
+        }
+        Ok(result)
     }
 
     pub fn propose_dispatch(&self, request: DispatchProposalRequest) -> Result<DispatchProposal> {
@@ -459,6 +529,102 @@ impl DispatchRuntime {
         Ok(DispatchApprovalResolution {
             run,
             approval_request,
+        })
+    }
+
+    pub fn record_dispatch_outcome(
+        &self,
+        request: DispatchOutcomeRecordRequest,
+    ) -> Result<DispatchOutcomeRecordResult> {
+        let run = self.store.get_dispatch_run(&request.run_id)?;
+        let already_recorded = self
+            .store
+            .find_dispatch_run_outcome_by_run(&run.id)?
+            .is_some();
+        let idempotency_key = request
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("dispatch_outcome:{}:{}", run.id, request.outcome_kind));
+        let outcome = self
+            .store
+            .record_dispatch_run_outcome(NewDispatchRunOutcome {
+                run_id: run.id.clone(),
+                idempotency_key,
+                outcome_kind: request.outcome_kind,
+                failure_class: request.failure_class,
+                failure_detail: request.failure_detail.clone(),
+                task_class: request.task_class,
+                validation_outcome: request.validation_outcome,
+                result_artifact_id: request.result_artifact_id.clone(),
+                metadata_json: request.metadata_json,
+            })?;
+        if already_recorded {
+            let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+            return Ok(DispatchOutcomeRecordResult {
+                run,
+                issue_task,
+                outcome,
+                memory_ingest: None,
+                memory_ingest_error: None,
+            });
+        }
+
+        if let Some(artifact_id) = outcome.result_artifact_id.as_deref() {
+            if run.result_artifact_id.as_deref() != Some(artifact_id) {
+                self.store
+                    .set_dispatch_run_result_artifact(&run.id, artifact_id)?;
+            }
+        }
+        let failure_reason = outcome.failure_detail.clone().or_else(|| {
+            outcome
+                .failure_class
+                .map(|class| class.as_str().to_string())
+        });
+        let mut run = self.store.update_dispatch_run_status(
+            &run.id,
+            outcome.outcome_kind.terminal_status(),
+            failure_reason,
+        )?;
+        if outcome.outcome_kind == DispatchOutcomeKind::FixReady {
+            self.store
+                .update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
+        }
+        run = self.store.get_dispatch_run(&run.id)?;
+        self.store.append_dispatch_event(dispatch_run_event(
+            &run,
+            DispatchEventKind::DispatchOutcomeRecorded,
+            DispatchEventSource::Runtime,
+            DispatchEventSeverity::Info,
+            json!({
+                "outcomeId": outcome.id,
+                "outcomeKind": outcome.outcome_kind,
+                "failureClass": outcome.failure_class,
+                "taskClass": outcome.task_class,
+                "validationOutcome": outcome.validation_outcome,
+            }),
+        ))?;
+
+        let memory_ingest = match ingest_dispatch_outcome_memory(&self.store, &run, &outcome) {
+            Ok(ingest) => (Some(memory_ingest_view(ingest)), None),
+            Err(error) => {
+                let message = error.to_string();
+                let _ = self.store.append_dispatch_event(dispatch_run_event(
+                    &run,
+                    DispatchEventKind::DispatchOutcomeMemoryIngestFailed,
+                    DispatchEventSource::Runtime,
+                    DispatchEventSeverity::Warning,
+                    json!({ "error": message }),
+                ));
+                (None, Some(message))
+            }
+        };
+        let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+        Ok(DispatchOutcomeRecordResult {
+            run,
+            issue_task,
+            outcome,
+            memory_ingest: memory_ingest.0,
+            memory_ingest_error: memory_ingest.1,
         })
     }
 
@@ -588,6 +754,23 @@ impl DispatchRuntime {
             );
         }
         Ok(())
+    }
+}
+
+fn memory_ingest_view(ingest: DispatchOutcomeMemoryIngest) -> DispatchOutcomeMemoryIngestView {
+    DispatchOutcomeMemoryIngestView {
+        dispatch_memory_event_id: ingest.dispatch_memory_event.id,
+        memory_raw_event_ids: ingest.memory_ingest.raw_event_ids,
+        memory_node_ids: ingest.memory_ingest.node_ids,
+    }
+}
+
+fn terminal_outcome_for_status(status: DispatchRunStatus) -> Option<DispatchOutcomeKind> {
+    match status {
+        DispatchRunStatus::Completed => Some(DispatchOutcomeKind::FixReady),
+        DispatchRunStatus::Failed => Some(DispatchOutcomeKind::Failed),
+        DispatchRunStatus::Canceled => Some(DispatchOutcomeKind::Canceled),
+        _ => None,
     }
 }
 

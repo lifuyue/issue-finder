@@ -266,6 +266,7 @@ fn deterministic_proposals(
 ) -> Vec<MemoryDreamProposal> {
     let mut proposals = Vec::new();
     proposals.extend(agent_performance_proposals(evidence));
+    proposals.extend(dispatch_ranking_trend_proposals(evidence));
     proposals.extend(feedback_policy_proposals(request, evidence));
     proposals.extend(repo_summary_proposals(evidence));
     proposals.extend(stale_hint_proposals(request, evidence));
@@ -275,6 +276,14 @@ fn deterministic_proposals(
 
 #[derive(Default)]
 struct AgentPerformanceStats {
+    successes: usize,
+    failures: usize,
+    event_ids: BTreeSet<String>,
+    node_ids: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct OutcomeTrendStats {
     successes: usize,
     failures: usize,
     event_ids: BTreeSet<String>,
@@ -336,6 +345,85 @@ fn agent_performance_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamPropo
             }
         })
         .collect()
+}
+
+fn dispatch_ranking_trend_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamProposal> {
+    let mut by_repo = BTreeMap::<String, OutcomeTrendStats>::new();
+    let mut by_task = BTreeMap::<String, OutcomeTrendStats>::new();
+    for event in evidence.raw_events.values() {
+        let Some(outcome) = ranking_outcome(event) else {
+            continue;
+        };
+        if let Some(repo) = repo_from_event(event) {
+            let stats = by_repo.entry(repo).or_default();
+            add_outcome_trend(stats, &outcome, evidence, event);
+        }
+        if let Some(task_type) = json_string(&event.payload_json, "taskType") {
+            let stats = by_task.entry(task_type).or_default();
+            add_outcome_trend(stats, &outcome, evidence, event);
+        }
+    }
+
+    let repo_proposals = by_repo
+        .into_iter()
+        .map(|(repo, stats)| ranking_trend_proposal(MemoryHintScopeType::Repo, repo, stats));
+    let task_proposals = by_task.into_iter().map(|(task_type, stats)| {
+        ranking_trend_proposal(MemoryHintScopeType::IssueType, task_type, stats)
+    });
+    repo_proposals.chain(task_proposals).collect()
+}
+
+fn add_outcome_trend(
+    stats: &mut OutcomeTrendStats,
+    outcome: &RankingOutcome,
+    evidence: &DreamEvidence,
+    event: &MemoryRawEvent,
+) {
+    if outcome.positive {
+        stats.successes += 1;
+    } else {
+        stats.failures += 1;
+    }
+    stats.event_ids.insert(event.id.clone());
+    stats.node_ids.extend(evidence.event_node_ids(&event.id));
+}
+
+fn ranking_trend_proposal(
+    scope_type: MemoryHintScopeType,
+    scope_ref: String,
+    stats: OutcomeTrendStats,
+) -> MemoryDreamProposal {
+    let net = stats.successes as isize - stats.failures as isize;
+    let weight = (net as f64 * 0.20).clamp(-0.60, 0.45);
+    let recommendation = if net >= 0 { "boost" } else { "cooldown" };
+    MemoryDreamProposal {
+        dream_type: MemoryDreamType::DiscoveryPolicy,
+        summary: format!(
+            "Dispatch outcomes for `{scope_ref}` include {} success and {} failure events.",
+            stats.successes, stats.failures
+        ),
+        evidence_node_ids: stats.node_ids.into_iter().collect(),
+        evidence_event_ids: stats.event_ids.into_iter().collect(),
+        evidence_hint_ids: Vec::new(),
+        confidence: 0.55,
+        hint: Some(MemoryHintProposal {
+            hint_type: MemoryHintType::Ranking,
+            scope_type,
+            scope_ref: scope_ref.clone(),
+            summary: format!(
+                "Use dispatch outcome trend for `{scope_ref}` as a `{recommendation}` ranking signal."
+            ),
+            policy_json: json!({
+                "kind": "dispatch_outcome_trend",
+                "scope": scope_ref,
+                "successes": stats.successes,
+                "failures": stats.failures,
+                "recommendation": recommendation,
+            }),
+            weight,
+            expires_at: None,
+        }),
+    }
 }
 
 #[derive(Default)]
@@ -671,6 +759,34 @@ fn dispatch_outcome(event: &MemoryRawEvent) -> Option<(String, String, bool)> {
     let task_type =
         json_string(&event.payload_json, "taskType").unwrap_or_else(|| "unknown_task".to_string());
     Some((agent_id, task_type, succeeded))
+}
+
+struct RankingOutcome {
+    positive: bool,
+}
+
+fn ranking_outcome(event: &MemoryRawEvent) -> Option<RankingOutcome> {
+    let failure_class = json_string(&event.payload_json, "failureClass");
+    if failure_class
+        .as_deref()
+        .is_some_and(|class| matches!(class, "policy_blocked" | "user_canceled"))
+    {
+        return None;
+    }
+
+    if let Some(outcome_kind) = json_string(&event.payload_json, "outcomeKind") {
+        let positive = match outcome_kind.as_str() {
+            "fix_ready" | "completed_no_change" => true,
+            "failed" | "blocked" => false,
+            "needs_user" | "canceled" => return None,
+            _ => return None,
+        };
+        return Some(RankingOutcome { positive });
+    }
+
+    dispatch_outcome(event).map(|(_, _, succeeded)| RankingOutcome {
+        positive: succeeded,
+    })
 }
 
 #[derive(Debug, Clone)]
