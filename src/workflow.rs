@@ -11,6 +11,7 @@ use crate::handoff::{handoff_id, write_handoff_with_events, Handoff, WrittenHand
 use crate::inbox;
 use crate::llm;
 use crate::llm_review;
+use crate::memory::handoff_memory_context_for_issue;
 use crate::paths::IssueFinderPaths;
 use crate::prepare_events::PrepareEventLog;
 use crate::prepare_gate::default_prepare_allowed;
@@ -278,6 +279,8 @@ pub async fn prepare_value_issue_with_options(
             );
             handoff.probe_pack = probe_pack;
             handoff.readiness = readiness;
+            handoff.memory_context =
+                handoff_memory_context_for_issue(paths, &issue).unwrap_or_default();
             llm::enhance_handoff(config, &mut handoff).await;
             let written = match write_handoff_with_events(paths, &handoff, &issue, events.as_ref())
             {

@@ -1,12 +1,20 @@
 use anyhow::Result;
 use clap::Parser;
 use issue_finder::cli::{
-    Cli, Command, FeedbackCommand, InboxCommand, ProfileCommand, ToolsCommand,
+    Cli, Command, FeedbackCommand, InboxCommand, MemoryDreamsCommand, MemoryHintsCommand,
+    ProfileCommand, ToolsCommand,
 };
 use issue_finder::config::{initialize_interactive, Config};
 use issue_finder::dispatch::{handle_agents_cli, handle_dispatch_cli, handle_sessions_cli};
 use issue_finder::doctor;
 use issue_finder::inbox::{self, InboxStatus};
+use issue_finder::memory::{
+    memory_dream, memory_dream_show, memory_dreams_list, memory_events, memory_hint_update,
+    memory_hints_list, memory_recall, memory_status, memory_suppress_scope, memory_tombstone,
+    parse_query_kind, render_memory_dream_detail, render_memory_dreams, render_memory_events,
+    render_memory_hint, render_memory_hints, render_memory_recall, render_memory_status,
+    render_memory_tombstone, run_offline_eval as run_memory_offline_eval, MemoryHintStatus,
+};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::profile_bootstrap::{bootstrap_profile, render_profile_bootstrap_report};
 use issue_finder::recommendation::{
@@ -212,6 +220,145 @@ async fn main() -> Result<()> {
                         report.summary.total_visible
                     );
                 }
+            }
+        },
+        Command::Memory(args) => match args.command {
+            issue_finder::cli::MemoryCommand::Status => {
+                let output = memory_status(&paths)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", render_memory_status(&output));
+                }
+            }
+            issue_finder::cli::MemoryCommand::Events(events_args) => {
+                let output = memory_events(&paths, events_args.issue)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", render_memory_events(&output));
+                }
+            }
+            issue_finder::cli::MemoryCommand::Recall(recall_args) => {
+                let output = memory_recall(
+                    &paths,
+                    &recall_args.issue,
+                    parse_query_kind(&recall_args.kind)?,
+                    recall_args.limit,
+                )?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", render_memory_recall(&output));
+                }
+            }
+            issue_finder::cli::MemoryCommand::Dreams(dreams_args) => match dreams_args.command {
+                MemoryDreamsCommand::List => {
+                    let output = memory_dreams_list(&paths)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_dreams(&output));
+                    }
+                }
+                MemoryDreamsCommand::Show { dream_id } => {
+                    let output = memory_dream_show(&paths, &dream_id)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_dream_detail(&output));
+                    }
+                }
+            },
+            issue_finder::cli::MemoryCommand::Hints(hints_args) => match hints_args.command {
+                MemoryHintsCommand::List => {
+                    let output = memory_hints_list(&paths)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_hints(&output));
+                    }
+                }
+                MemoryHintsCommand::Approve { hint_id } => {
+                    let output =
+                        memory_hint_update(&paths, &hint_id, MemoryHintStatus::Approved, None)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_hint(&output));
+                    }
+                }
+                MemoryHintsCommand::Reject { hint_id } => {
+                    let output =
+                        memory_hint_update(&paths, &hint_id, MemoryHintStatus::Rejected, None)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_hint(&output));
+                    }
+                }
+                MemoryHintsCommand::Pin { hint_id } => {
+                    let output =
+                        memory_hint_update(&paths, &hint_id, MemoryHintStatus::Pinned, None)?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_hint(&output));
+                    }
+                }
+                MemoryHintsCommand::Deprioritize { hint_id } => {
+                    let output = memory_hint_update(
+                        &paths,
+                        &hint_id,
+                        MemoryHintStatus::Deprioritized,
+                        None,
+                    )?;
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        println!("{}", render_memory_hint(&output));
+                    }
+                }
+            },
+            issue_finder::cli::MemoryCommand::Suppress(suppress_args) => {
+                let output = memory_suppress_scope(&paths, &suppress_args.scope)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", render_memory_hint(&output));
+                }
+            }
+            issue_finder::cli::MemoryCommand::Tombstone { id } => {
+                let output = memory_tombstone(&paths, &id)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", render_memory_tombstone(&output));
+                }
+            }
+            issue_finder::cli::MemoryCommand::Dream(dream_args) => {
+                let output = memory_dream(&paths, &dream_args.scope)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!(
+                        "Dream run {}: {} dreams, {} hints.",
+                        output.run_id,
+                        output.dreams.len(),
+                        output.hints.len()
+                    );
+                }
+            }
+            issue_finder::cli::MemoryCommand::Eval(eval_args) => {
+                if !eval_args.offline {
+                    anyhow::bail!("memory eval currently requires --offline");
+                }
+                let report = run_memory_offline_eval(&eval_args.output)?;
+                println!(
+                    "Wrote offline memory eval to {} ({} samples).",
+                    eval_args.output.display(),
+                    report.metrics.total_samples
+                );
             }
         },
         Command::Tools(args) => match args.command {

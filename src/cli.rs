@@ -43,6 +43,8 @@ pub enum Command {
     Dispatch(DispatchArgs),
     /// Run recommendation evaluation workflows.
     Eval(EvalArgs),
+    /// Inspect and control contribution memory.
+    Memory(MemoryArgs),
     /// List and call Issue Finder's JSON tool contract.
     Tools(ToolsArgs),
     /// Check local readiness.
@@ -221,6 +223,115 @@ pub struct RecommendationEvalArgs {
     #[arg(long, default_value_t = 15)]
     pub limit: usize,
     /// Output directory for metrics.json, report.md, and visible.jsonl.
+    #[arg(long)]
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryArgs {
+    #[command(subcommand)]
+    pub command: MemoryCommand,
+    /// Print memory output as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryCommand {
+    /// Show memory store status.
+    Status,
+    /// List memory events without raw payloads.
+    Events(MemoryEventsArgs),
+    /// Recall memory for an issue.
+    Recall(MemoryRecallArgs),
+    /// List or inspect memory dreams.
+    Dreams(MemoryDreamsArgs),
+    /// List or review memory hints.
+    Hints(MemoryHintsArgs),
+    /// Suppress memory hints for a scope such as repo:owner/repo.
+    Suppress(MemorySuppressArgs),
+    /// Tombstone a raw event, node, or hint id.
+    Tombstone { id: String },
+    /// Run deterministic memory dreaming for a scope.
+    Dream(MemoryDreamArgs),
+    /// Run offline memory evaluation.
+    Eval(MemoryEvalArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryEventsArgs {
+    /// Optional issue reference in owner/repo#123 form.
+    #[arg(long)]
+    pub issue: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryRecallArgs {
+    /// Issue reference in owner/repo#123 form.
+    #[arg(long)]
+    pub issue: String,
+    /// Recall kind: scout-ranking, dispatch-planning, github-draft, or profile-review.
+    #[arg(long, default_value = "scout-ranking")]
+    pub kind: String,
+    /// Maximum recalled items.
+    #[arg(long, default_value_t = 10)]
+    pub limit: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryDreamsArgs {
+    #[command(subcommand)]
+    pub command: MemoryDreamsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryDreamsCommand {
+    /// List candidate and reviewed dreams.
+    List,
+    /// Show one dream and its hints.
+    Show { dream_id: String },
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryHintsArgs {
+    #[command(subcommand)]
+    pub command: MemoryHintsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryHintsCommand {
+    /// List memory hints.
+    List,
+    /// Approve a candidate hint.
+    Approve { hint_id: String },
+    /// Reject a candidate hint.
+    Reject { hint_id: String },
+    /// Pin an approved hint.
+    Pin { hint_id: String },
+    /// Deprioritize an approved hint.
+    Deprioritize { hint_id: String },
+}
+
+#[derive(Debug, Args)]
+pub struct MemorySuppressArgs {
+    /// Scope to suppress, for example repo:owner/repo or global.
+    #[arg(long)]
+    pub scope: String,
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryDreamArgs {
+    /// Dream scope, for example global or repo:owner/repo.
+    #[arg(long, default_value = "global")]
+    pub scope: String,
+}
+
+#[derive(Debug, Args)]
+pub struct MemoryEvalArgs {
+    /// Run deterministic offline fixture evaluation.
+    #[arg(long)]
+    pub offline: bool,
+    /// Output directory for metrics.json and report.md.
     #[arg(long)]
     pub output: PathBuf,
 }

@@ -323,6 +323,23 @@ fn render_value_md(handoff: &Handoff) -> String {
 
     lines.extend([
         String::new(),
+        "## Memory Context".to_string(),
+        String::new(),
+    ]);
+    let memory_refs = handoff
+        .memory_context
+        .approved_hints
+        .iter()
+        .map(|hint| format!("{} ({})", hint.id, hint.hint_type))
+        .collect::<Vec<_>>();
+    push_string_list(
+        &mut lines,
+        &memory_refs,
+        "No approved memory hints were attached.",
+    );
+
+    lines.extend([
+        String::new(),
         "## Value Explanation".to_string(),
         String::new(),
     ]);

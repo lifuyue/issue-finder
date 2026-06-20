@@ -14,6 +14,7 @@ use crate::discovery::{
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
 use crate::github_enrichment::{competition_timeline_missing, GitHubEnrichmentClient};
+use crate::memory::apply_ranking_hints_to_ranked;
 use crate::paths::IssueFinderPaths;
 use crate::value_scoring::{assess_issue, RankedValueIssue};
 
@@ -154,8 +155,10 @@ impl<'a> RecommendationEngine<'a> {
         if !refresh && !options.record_exposure {
             if let Some(cached) = load_cached_scout_result(self.paths, &scout_cache_key)? {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
+                let mut ranked = cached.ranked;
+                let _ = apply_ranking_hints_to_ranked(self.paths, &mut ranked);
                 return Ok(ScoutResult {
-                    ranked: cached.ranked,
+                    ranked,
                     discovery_count: cached.discovery_count,
                     filtered_count: cached.filtered_count,
                     diagnostics: cached.diagnostics,
@@ -166,7 +169,7 @@ impl<'a> RecommendationEngine<'a> {
 
         let github = GitHubClient::with_budget(self.config, api_budget.clone())?;
         let enrichment = GitHubEnrichmentClient::with_budget(self.config, api_budget.clone())?;
-        let run = match &scope {
+        let mut run = match &scope {
             DiscoveryScope::Global => {
                 self.run_global_scout(
                     &github,
@@ -205,6 +208,7 @@ impl<'a> RecommendationEngine<'a> {
                 },
             )?;
         }
+        let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
 
         Ok(ScoutResult {
             ranked: run.ranked,

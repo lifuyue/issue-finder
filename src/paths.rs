@@ -93,6 +93,10 @@ impl IssueFinderPaths {
         self.recommendation_dir().join("events.jsonl")
     }
 
+    pub fn state_db_path(&self) -> PathBuf {
+        self.home.join("state.sqlite3")
+    }
+
     pub fn dispatch_dir(&self) -> PathBuf {
         self.home.join("dispatch")
     }
