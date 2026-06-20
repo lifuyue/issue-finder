@@ -10,11 +10,13 @@ use crate::tool_specs::{
     TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE,
     TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
     TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_REJECT,
-    TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
-    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
-    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_SESSIONS_APPROVE_MUTATION,
-    TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
-    TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
+    TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT,
+    TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT,
+    TOOL_GITHUB_DRAFT_FINAL_COMMENT, TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS,
+    TOOL_GITHUB_POST_COMMENT, TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
+    TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST,
+    TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH,
+    TOOL_SESSIONS_SYNC,
 };
 
 use super::model::{ApprovalStatus, DispatchRunStatus};
@@ -70,6 +72,10 @@ pub fn is_dispatch_tool(tool_name: &str) -> bool {
             | TOOL_DISPATCH_EVENTS
             | TOOL_DISPATCH_ARTIFACTS
             | TOOL_DISPATCH_IMPORT_HANDOFF
+            | TOOL_DISPATCH_REVIEW_LIST
+            | TOOL_DISPATCH_REVIEW_SHOW
+            | TOOL_DISPATCH_REVIEW_APPROVE
+            | TOOL_DISPATCH_REVIEW_REJECT
             | TOOL_DISPATCH
             | TOOL_DISPATCH_PROPOSE
             | TOOL_DISPATCH_APPROVE
@@ -283,12 +289,61 @@ pub fn execute_dispatch_tool(
                 .import_handoff_from_inbox(&args.inbox_id)
                 .map_err(DispatchToolError::System)?;
             Ok(output(
-                "ok",
+                result.status.clone(),
                 format!(
-                    "Imported {}#{} into task package.",
-                    result.issue_task.repo_full_name, result.issue_task.issue_number
+                    "Imported {}#{} as issue review {}.",
+                    result.issue_task.repo_full_name,
+                    result.issue_task.issue_number,
+                    result.approval_request.id
                 ),
                 json!({ "packageImport": result }),
+            ))
+        }
+        TOOL_DISPATCH_REVIEW_LIST => {
+            let _: EmptyToolArgs = parse_arguments(arguments)?;
+            let reviews = runtime
+                .list_issue_reviews()
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!("Found {} issue review requests.", reviews.len()),
+                json!({ "issueReviews": reviews }),
+            ))
+        }
+        TOOL_DISPATCH_REVIEW_SHOW => {
+            let args: IssueReviewApprovalToolArgs = parse_arguments(arguments)?;
+            let review = runtime
+                .show_issue_review(&args.approval_request_id)
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!("Read issue review {}.", review.approval_request.id),
+                json!({ "issueReview": review }),
+            ))
+        }
+        TOOL_DISPATCH_REVIEW_APPROVE => {
+            let args: IssueReviewApprovalToolArgs = parse_arguments(arguments)?;
+            let result = runtime
+                .approve_issue_review(&args.approval_request_id)
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "approved",
+                format!(
+                    "Approved issue review {} and created package.",
+                    result.approval_request.id
+                ),
+                json!({ "issueReviewApproval": result }),
+            ))
+        }
+        TOOL_DISPATCH_REVIEW_REJECT => {
+            let args: IssueReviewRejectToolArgs = parse_arguments(arguments)?;
+            let result = runtime
+                .reject_issue_review(&args.approval_request_id, normalized_optional(args.reason))
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "rejected",
+                format!("Rejected issue review {}.", result.approval_request.id),
+                json!({ "issueReviewApproval": result }),
             ))
         }
         TOOL_DISPATCH | TOOL_DISPATCH_PROPOSE => {
@@ -628,6 +683,34 @@ fn business_block_output(message: &str) -> Option<DispatchToolOutput> {
         ));
     }
 
+    if let Some((issue_key, approval_request_id)) = pending_issue_review(message) {
+        return Some(output(
+            "pending_issue_review",
+            message.to_string(),
+            json!({
+                "blocked": true,
+                "reason": message,
+                "issueKey": issue_key,
+                "approvalRequestId": approval_request_id,
+                "reviewRequired": true
+            }),
+        ));
+    }
+
+    if let Some((issue_key, approval_request_id)) = rejected_issue_review(message) {
+        return Some(output(
+            "issue_review_rejected",
+            message.to_string(),
+            json!({
+                "blocked": true,
+                "reason": message,
+                "issueKey": issue_key,
+                "approvalRequestId": approval_request_id,
+                "reviewRejected": true
+            }),
+        ));
+    }
+
     None
 }
 
@@ -645,6 +728,25 @@ fn missing_task_package(message: &str) -> Option<&str> {
             value.strip_suffix(" has no task package artifact and no ready inbox handoff was found")
         })
         .filter(|issue_key| !issue_key.is_empty())
+}
+
+fn pending_issue_review(message: &str) -> Option<(&str, &str)> {
+    let rest = message.strip_prefix("issue task ")?;
+    let (issue_key, approval_request_id) = rest.split_once(" is pending issue review approval ")?;
+    if issue_key.is_empty() || approval_request_id.is_empty() {
+        return None;
+    }
+    Some((issue_key, approval_request_id))
+}
+
+fn rejected_issue_review(message: &str) -> Option<(&str, &str)> {
+    let rest = message.strip_prefix("issue task ")?;
+    let (issue_key, rest) = rest.split_once(" issue review ")?;
+    let approval_request_id = rest.strip_suffix(" was rejected")?;
+    if issue_key.is_empty() || approval_request_id.is_empty() {
+        return None;
+    }
+    Some((issue_key, approval_request_id))
 }
 
 #[derive(Debug, Deserialize)]
@@ -712,6 +814,20 @@ struct DispatchRunReadToolArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DispatchImportHandoffToolArgs {
     inbox_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IssueReviewApprovalToolArgs {
+    approval_request_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IssueReviewRejectToolArgs {
+    approval_request_id: String,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

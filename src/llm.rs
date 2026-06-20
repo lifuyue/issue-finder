@@ -124,7 +124,7 @@ mod tests {
         Handoff, HandoffContext, HandoffInstructions, HandoffIssue, HandoffMemoryContext,
         HandoffWorkspace, LlmEnhancement,
     };
-    use crate::llm_review::LlmReview;
+    use crate::llm_review::{LlmConfirmation, LlmReview};
     use crate::probe::ProbePack;
     use crate::readiness::ExecutionReadiness;
     use crate::value_scoring::{RecommendationCategory, ScoreBand, ValueAssessment};
@@ -182,6 +182,7 @@ mod tests {
             memory_context: HandoffMemoryContext::default(),
             instructions: HandoffInstructions::default(),
             llm_enhancement: LlmEnhancement::success("old"),
+            llm_confirmation: LlmConfirmation::disabled(),
             llm_review: LlmReview::disabled(),
         };
 

@@ -154,6 +154,8 @@ pub struct DispatchArgs {
 pub enum DispatchCommand {
     /// Import prepared handoffs into dispatch task packages.
     Package(DispatchPackageArgs),
+    /// Review imported handoffs before creating task packages.
+    Review(DispatchReviewArgs),
     /// Create an approval-gated dispatch proposal without starting an agent.
     Propose(DispatchProposeArgs),
     /// Approve a pending dispatch proposal.
@@ -209,6 +211,52 @@ pub struct DispatchImportHandoffArgs {
     /// Inbox item id.
     pub inbox_id: String,
     /// Print import result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewArgs {
+    #[command(subcommand)]
+    pub command: DispatchReviewCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DispatchReviewCommand {
+    /// List issue review requests.
+    List(DispatchReviewListArgs),
+    /// Show one issue review request.
+    Show(DispatchReviewReadArgs),
+    /// Approve one issue review and create a task package.
+    Approve(DispatchReviewReadArgs),
+    /// Reject one issue review without dismissing the recommendation.
+    Reject(DispatchReviewRejectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewListArgs {
+    /// Print reviews as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewReadArgs {
+    /// Issue review approval request id.
+    pub approval_request_id: String,
+    /// Print result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewRejectArgs {
+    /// Issue review approval request id.
+    pub approval_request_id: String,
+    /// Optional rejection reason for memory signal payload.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Print result as JSON.
     #[arg(long)]
     pub json: bool,
 }

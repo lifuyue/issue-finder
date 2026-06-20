@@ -492,13 +492,20 @@ fn render_issue_md(handoff: &Handoff, issue: &GitHubIssue) -> String {
             "- LLM enhancement status: {}",
             handoff.llm_enhancement.status
         ),
-        format!("- LLM review status: {}", handoff.llm_review.status),
+        format!(
+            "- LLM confirmation status: {}",
+            handoff.llm_confirmation.status
+        ),
+        format!("- Legacy LLM review status: {}", handoff.llm_review.status),
     ]);
     if let Some(summary) = &handoff.llm_enhancement.summary {
         lines.push(format!("- LLM summary: {}", single_line(summary)));
     }
+    if let Some(summary) = &handoff.llm_confirmation.summary {
+        lines.push(format!("- LLM confirmation: {}", single_line(summary)));
+    }
     if let Some(summary) = &handoff.llm_review.review_summary {
-        lines.push(format!("- LLM review: {}", single_line(summary)));
+        lines.push(format!("- Legacy LLM review: {}", single_line(summary)));
     }
 
     lines.join("\n")

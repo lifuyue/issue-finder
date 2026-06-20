@@ -4,7 +4,12 @@ use issue_finder::dispatch::{
     ApprovalStatus, DispatchProposalRequest, DispatchRuntime, IssueTaskPackage,
     IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType, NewIssueTask,
 };
+use issue_finder::github::GitHubIssue;
+use issue_finder::handoff::{write_handoff, Handoff};
+use issue_finder::inbox::upsert_ready;
 use issue_finder::paths::IssueFinderPaths;
+use issue_finder::repo_scan::{CandidateFile, RepoScan, ValidationCommand};
+use issue_finder::workspace::{PreparedWorkspace, WorkspaceInfo};
 use tempfile::tempdir;
 
 #[test]
@@ -58,6 +63,56 @@ fn dispatch_approval_resolution_records_memory_signals() {
     assert_eq!(memory[1].payload_json["signal"], "dispatch_rejected");
 }
 
+#[test]
+fn issue_review_rejection_records_memory_and_blocks_dispatch() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let issue = github_issue("owner/repo", 456);
+    let handoff = Handoff::build(&issue, &prepared_workspace(dir.path()));
+    let written = write_handoff(&paths, &handoff, &issue).unwrap();
+    upsert_ready(&paths, &issue, 90, &written).unwrap();
+    let runtime = DispatchRuntime::open(paths).unwrap();
+
+    let imported = runtime.import_handoff_from_inbox(&written.id).unwrap();
+    assert!(imported.package_artifact.is_none());
+    let rejected = runtime
+        .reject_issue_review(
+            &imported.approval_request.id,
+            Some("not worth dispatching".to_string()),
+        )
+        .unwrap();
+
+    assert_eq!(rejected.approval_request.status, ApprovalStatus::Rejected);
+    assert!(rejected.package_artifact.is_none());
+    let memory = runtime
+        .store()
+        .list_memory_events_for_issue_task(&imported.issue_task.id)
+        .unwrap();
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0].event_type, MemoryEventType::NegativeSignal);
+    assert_eq!(memory[0].source, "issue_review");
+    assert_eq!(memory[0].payload_json["signal"], "issue_review_rejected");
+    assert_eq!(memory[0].payload_json["reason"], "not worth dispatching");
+
+    let error = runtime
+        .propose_dispatch(DispatchProposalRequest {
+            issue: "owner/repo#456".to_string(),
+            agent_id: "codex".to_string(),
+            requested_by: "test".to_string(),
+            selected_session_link_id: None,
+            new_session: true,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("was rejected"));
+    assert!(runtime
+        .store()
+        .get_issue_task(&imported.issue_task.id)
+        .unwrap()
+        .current_package_artifact_id
+        .is_none());
+}
+
 fn create_packaged_task(
     runtime: &DispatchRuntime,
     number: u64,
@@ -95,5 +150,46 @@ fn test_paths(root: &Path) -> IssueFinderPaths {
         workspaces_dir: root.join("workspaces"),
         inbox_dir: root.join("inbox"),
         reports_dir: root.join("reports"),
+    }
+}
+
+fn github_issue(repo_full_name: &str, number: u64) -> GitHubIssue {
+    GitHubIssue {
+        id: number,
+        number,
+        title: "Fix parser panic".to_string(),
+        body: "Expected graceful behavior in src/lib.rs".to_string(),
+        labels: vec!["good first issue".to_string()],
+        url: format!("https://github.com/{repo_full_name}/issues/{number}"),
+        repo_full_name: repo_full_name.to_string(),
+        repo_name: repo_full_name.split('/').nth(1).unwrap().to_string(),
+        repo_description: "Rust CLI".to_string(),
+        repo_stars: 10,
+        created_at: "2026-06-20T00:00:00Z".to_string(),
+        updated_at: "2026-06-20T00:00:00Z".to_string(),
+    }
+}
+
+fn prepared_workspace(root: &Path) -> PreparedWorkspace {
+    PreparedWorkspace {
+        info: WorkspaceInfo {
+            path: root.join("repo").to_string_lossy().to_string(),
+            default_branch: "main".to_string(),
+            branch: "issue-finder/456-fix-parser-panic".to_string(),
+            dirty: false,
+        },
+        scan: RepoScan {
+            discovered_files: vec!["src/lib.rs".to_string()],
+            candidate_files: vec![CandidateFile {
+                path: "src/lib.rs".to_string(),
+                reason: "Mentioned by issue title".to_string(),
+            }],
+            validation_commands: vec![ValidationCommand {
+                command: "cargo test".to_string(),
+                reason: "Rust project".to_string(),
+            }],
+            warnings: Vec::new(),
+        },
+        warnings: Vec::new(),
     }
 }

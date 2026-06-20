@@ -31,7 +31,7 @@ pub use model::{
     NewApprovalRequest, NewArtifact, NewDispatchRun, NewGitHubInteraction, NewIssueTask,
     NewMemoryEvent,
 };
-pub use packaging::PackageImportResult;
+pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchProposalRequest,
     DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,

@@ -10,8 +10,9 @@ use anyhow::Result;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
     ApprovalStatus, DispatchRunStatus, DispatchRuntime, GitHubCommentWriter,
-    GitHubInteractionStatus, GitHubInteractionType, IssueTaskStatus, NewArtifact, NewDispatchRun,
-    NewIssueTask, PostedGitHubComment, ReqwestGitHubCommentWriter,
+    GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
+    IssueTaskStatus, NewArtifact, NewDispatchRun, NewIssueTask, PostedGitHubComment,
+    ReqwestGitHubCommentWriter,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -398,7 +399,7 @@ impl GitHubCommentWriter for FakeGitHubWriter {
 }
 
 fn imported_issue_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::IssueTask {
-    runtime
+    let task = runtime
         .store()
         .upsert_issue_task(NewIssueTask {
             repo_full_name: "owner/repo".to_string(),
@@ -409,7 +410,18 @@ fn imported_issue_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::Iss
             priority: Some(10),
             category: Some("high_value_ready".to_string()),
         })
-        .unwrap()
+        .unwrap();
+    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+        repo_full_name: "owner/repo".to_string(),
+        number: 123,
+        title: "Fix parser panic".to_string(),
+        url: "https://github.com/owner/repo/issues/123".to_string(),
+    });
+    runtime
+        .store()
+        .write_task_package_artifact(&task.id, &package)
+        .unwrap();
+    runtime.store().get_issue_task(&task.id).unwrap()
 }
 
 fn test_paths(root: &Path) -> IssueFinderPaths {
