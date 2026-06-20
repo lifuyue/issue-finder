@@ -10,6 +10,16 @@
 
 文档也是产品设计的一部分。发现过期文档时，应在同一次变更中更新它，或删除会误导后续贡献者的章节或文件。不要留下过时说明、待办式备注，或相互冲突的新旧描述让之后的贡献者和编码代理自行判断。
 
+## 多 Worktree 子线程协作规则
+
+当主线程把工作委派给独立 worktree 子线程时，先遵守 `docs/development/worktree-thread-orchestration.md`。在任何文件写入或提交前，子线程必须创建或切换到主线程分配的 `fuyue/<stream>` 分支；不得在 detached `HEAD` 或 `main` 上提交。子线程不得 merge 到 `main`，不得创建 PR，除非主线程明确要求。
+
+实现前必须先通过 brainstorming gate：探索当前项目上下文，提出 2-3 种方案和 trade-off，明确推荐方案，并说明 architecture、components、data flow、error handling、testing、non-goals、owner boundaries 和 open questions。即使隔离 worktree 缺少 brainstorming skill，也必须按该协议执行，不得把技能缺失当作豁免。完成计划后停止，等待主线程批准。
+
+默认有两道门：plan approval gate 和 implementation approval gate。同一条主线程消息可以显式同时批准计划和开始实现；否则子线程只能在计划批准后继续等待实现批准。批准实现后仍应保持改动在分配范围内，不得添加用于保留陈旧边界的胶水代码。
+
+共享规则留在 owner 模块：prepare gate 只由 `src/prepare_gate.rs` 实现；dispatch 行为归 `src/dispatch/*`；recommendation 行为和 eval 归 `src/recommendation/*` 及对应 fixtures；memory 行为归 `src/memory/*`；tool schema/runtime 委托给各自 owner 模块。文档流程可以描述这些边界，但不得复制 product policy 或在非 owner 模块重新实现规则。
+
 ## 构建、测试与开发命令
 
 - `cargo build`：编译调试版本二进制，输出到 `target/debug/issue-finder`。
