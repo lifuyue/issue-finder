@@ -40,7 +40,7 @@ pub enum Command {
     /// Inspect local links to native execution agent sessions.
     Sessions(SessionsArgs),
     /// Inspect local dispatch runs, events, and artifacts.
-    Dispatch(DispatchArgs),
+    Dispatch(Box<DispatchArgs>),
     /// Run recommendation evaluation workflows.
     Eval(EvalArgs),
     /// Inspect and control contribution memory.
@@ -388,6 +388,7 @@ mod tests {
         let Command::Dispatch(args) = cli.command else {
             panic!("expected dispatch command");
         };
+        let args = *args;
         assert!(args.command.is_none());
         assert_eq!(args.issue.as_deref(), Some("owner/repo#123"));
         assert_eq!(args.agent, "codex");
@@ -413,6 +414,7 @@ mod tests {
         let Command::Dispatch(args) = cli.command else {
             panic!("expected dispatch command");
         };
+        let args = *args;
         assert!(args.issue.is_none());
         let Some(DispatchCommand::Propose(propose)) = args.command else {
             panic!("expected dispatch propose subcommand");
@@ -429,6 +431,7 @@ mod tests {
         let Command::Dispatch(args) = cli.command else {
             panic!("expected dispatch command");
         };
+        let args = *args;
         assert!(args.issue.is_none());
         assert!(
             matches!(args.command, Some(DispatchCommand::Status(status)) if status.run_id == "run-1")

@@ -9,8 +9,8 @@ use issue_finder::recommendation::eval::{
 fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
     let report = evaluate_named_datasets(builtin_datasets());
 
-    assert_eq!(report.datasets.len(), 8);
-    assert_eq!(report.overall.samples, 93);
+    assert_eq!(report.datasets.len(), 9);
+    assert_eq!(report.overall.samples, 98);
     assert!(report.overall.visible <= report.overall.samples);
     assert!((0.0..=1.0).contains(&report.overall.precision_at5));
     assert!((0.0..=1.0).contains(&report.overall.precision_at10));
@@ -38,6 +38,10 @@ fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
         report.overall.feedback_cooldown_passes, report.overall.feedback_cooldown_total,
         "V2 feedback cooldown samples should all pass"
     );
+    assert_eq!(
+        report.overall.dispatch_outcome_passes, report.overall.dispatch_outcome_total,
+        "dispatch outcome replay samples should all pass"
+    );
 
     let dataset_names = report
         .datasets
@@ -48,6 +52,7 @@ fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
         dataset_names,
         BTreeSet::from([
             "core_quality",
+            "dispatch_outcome_replay",
             "feedback_replay",
             "profile_ai_agent_tools",
             "profile_backend_rust_go",

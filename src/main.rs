@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
             println!("{}", handle_sessions_cli(&paths, args)?);
         }
         Command::Dispatch(args) => {
-            println!("{}", handle_dispatch_cli(&paths, args)?);
+            println!("{}", handle_dispatch_cli(&paths, *args)?);
         }
         Command::Eval(args) => match args.command {
             issue_finder::cli::EvalCommand::Recommendation(eval_args) => {

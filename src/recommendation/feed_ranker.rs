@@ -107,6 +107,7 @@ pub fn recommendation_assessment(
         feedback_penalty: feedback.penalty,
         quality_penalty: quality.penalty,
         reactivation_boost: feedback.reactivation_boost,
+        memory_adjustment: 0,
         final_feed_score,
         visibility,
         reasons,

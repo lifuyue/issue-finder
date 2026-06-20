@@ -139,6 +139,7 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.dispatch_approve",
             "issue-finder.dispatch_reject",
             "issue-finder.dispatch_execute",
+            "issue-finder.dispatch_record_outcome",
             "issue-finder.a2a_export_task",
             "issue-finder.a2a_approve_send",
             "issue-finder.a2a_reject_send",
@@ -604,6 +605,21 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
         imported_result.structured_content["a2aResultImport"]["artifact"]["kind"],
         "fix_result"
     );
+    assert_eq!(
+        imported_result.structured_content["a2aResultImport"]["outcome"]["outcome_kind"],
+        "fix_ready"
+    );
+    let invalid_outcome = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_record_outcome",
+            r#"{"runId":"dispatch-run-missing","outcome":"not_real"}"#,
+            "dispatch_record_outcome",
+        ))
+        .await;
+    assert!(!invalid_outcome.success);
+    assert!(serde_json::to_string(&invalid_outcome.content_items)
+        .unwrap()
+        .contains("invalid dispatch outcome kind not_real"));
 }
 
 #[tokio::test(flavor = "current_thread")]

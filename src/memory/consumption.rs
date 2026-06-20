@@ -15,6 +15,9 @@ use crate::paths::IssueFinderPaths;
 use crate::value_scoring::RankedValueIssue;
 
 const MEMORY_HINT_REFS_PREFIX: &str = "Memory hint refs:";
+const MEMORY_ADJUSTMENT_PREFIX: &str = "Memory ranking adjustment";
+const MAX_MEMORY_BOOST: i32 = 60;
+const MAX_MEMORY_PENALTY: i32 = -80;
 
 pub fn apply_ranking_hints_to_ranked(
     paths: &IssueFinderPaths,
@@ -28,14 +31,32 @@ pub fn apply_ranking_hints_to_ranked(
         item.recommendation
             .reasons
             .retain(|reason| !reason.starts_with(MEMORY_HINT_REFS_PREFIX));
+        item.explanation
+            .retain(|reason| !reason.starts_with(MEMORY_ADJUSTMENT_PREFIX));
+        item.recommendation
+            .reasons
+            .retain(|reason| !reason.starts_with(MEMORY_ADJUSTMENT_PREFIX));
+        if item.recommendation.memory_adjustment != 0 {
+            item.recommendation.final_feed_score -= item.recommendation.memory_adjustment;
+            item.recommendation.memory_adjustment = 0;
+        }
 
-        let hints = decision_hints_for_scope(
+        let mut hints = decision_hints_for_scope(
             &store,
             MemoryHintType::Ranking,
             MemoryHintScopeType::Repo,
             item.issue.repo_full_name.as_str(),
             &now,
         )?;
+        let task_class = recommendation_task_class(item);
+        hints.extend(decision_hints_for_scope(
+            &store,
+            MemoryHintType::Ranking,
+            MemoryHintScopeType::IssueType,
+            task_class,
+            &now,
+        )?);
+        hints = dedupe_hints(hints);
         if hints.is_empty() {
             continue;
         }
@@ -49,6 +70,17 @@ pub fn apply_ranking_hints_to_ranked(
             item.explanation.push(reason.clone());
         }
         if !item.recommendation.reasons.contains(&reason) {
+            item.recommendation.reasons.push(reason);
+        }
+        let adjustment = memory_adjustment_for_hints(&hints);
+        if adjustment != 0 {
+            item.recommendation.memory_adjustment = adjustment;
+            item.recommendation.final_feed_score += adjustment;
+            item.score = item.recommendation.final_feed_score;
+            let sign = if adjustment > 0 { "+" } else { "" };
+            let reason =
+                format!("{MEMORY_ADJUSTMENT_PREFIX}: {sign}{adjustment} from approved hints");
+            item.explanation.push(reason.clone());
             item.recommendation.reasons.push(reason);
         }
     }
@@ -191,4 +223,60 @@ fn consumed_hint(decision: MemoryDecisionHint) -> ConsumedMemoryHint {
         summary: decision.hint.summary,
         effective_weight: decision.effective_weight,
     }
+}
+
+fn dedupe_hints(hints: Vec<ConsumedMemoryHint>) -> Vec<ConsumedMemoryHint> {
+    let mut by_id = BTreeMap::new();
+    for hint in hints {
+        by_id.entry(hint.id.clone()).or_insert(hint);
+    }
+    by_id.into_values().collect()
+}
+
+fn memory_adjustment_for_hints(hints: &[ConsumedMemoryHint]) -> i32 {
+    let raw = hints
+        .iter()
+        .map(|hint| (hint.effective_weight * 100.0).round() as i32)
+        .sum::<i32>();
+    raw.clamp(MAX_MEMORY_PENALTY, MAX_MEMORY_BOOST)
+}
+
+fn recommendation_task_class(item: &RankedValueIssue) -> &'static str {
+    let text = format!(
+        "{}\n{}\n{}",
+        item.issue.title,
+        item.issue.body,
+        item.issue.labels.join(" ")
+    )
+    .to_ascii_lowercase();
+    if text.contains("panic")
+        && (text.contains("cli")
+            || text.contains("cargo")
+            || item
+                .enriched_issue
+                .repository
+                .language
+                .as_deref()
+                .is_some_and(|language| language.eq_ignore_ascii_case("rust")))
+    {
+        return "rust_cli_panic";
+    }
+    if text.contains("react")
+        || text.contains("ui")
+        || text.contains("browser")
+        || text.contains("frontend")
+        || text.contains("component")
+    {
+        return "frontend_ui_bug";
+    }
+    if text.contains("doc") || text.contains("readme") {
+        return "docs_update";
+    }
+    if text.contains("test") || text.contains("coverage") || text.contains("regression") {
+        return "test_coverage";
+    }
+    if text.contains("dependency") || text.contains("upgrade") || text.contains("update") {
+        return "dependency_upgrade";
+    }
+    "unknown_task"
 }

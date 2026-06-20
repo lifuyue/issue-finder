@@ -36,6 +36,10 @@
         "activity": { "$ref": "#/$defs/activity" },
         "growth": { "$ref": "#/$defs/growth" },
         "feedback": { "$ref": "#/$defs/feedback" },
+        "dispatchOutcomes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dispatchOutcome" }
+        },
         "expected": { "$ref": "#/$defs/expected" }
       }
     },
@@ -129,6 +133,46 @@
         "feedbackAgeDays": { "type": "integer", "minimum": 0 }
       }
     },
+    "dispatchOutcome": {
+      "type": "object",
+      "required": ["outcomeKind"],
+      "additionalProperties": false,
+      "properties": {
+        "approved": { "type": "boolean" },
+        "repoFullName": { "type": "string" },
+        "outcomeKind": {
+          "type": "string",
+          "enum": ["fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"]
+        },
+        "failureClass": {
+          "type": "string",
+          "enum": [
+            "validation_failed",
+            "reproduction_failed",
+            "dependency_unavailable",
+            "workspace_unavailable",
+            "context_insufficient",
+            "agent_runtime_error",
+            "external_service_error",
+            "policy_blocked",
+            "user_canceled",
+            "unknown"
+          ]
+        },
+        "taskClass": {
+          "type": "string",
+          "enum": [
+            "rust_cli_panic",
+            "frontend_ui_bug",
+            "docs_update",
+            "test_coverage",
+            "dependency_upgrade",
+            "unknown_task"
+          ]
+        },
+        "weight": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
     "expected": {
       "type": "object",
       "required": ["quality", "behavior", "reasons"],
@@ -147,6 +191,8 @@
         "maxRankBucket": { "type": "integer", "minimum": 1 },
         "mustHaveRiskTags": { "type": "array", "items": { "type": "string" } },
         "mustNotHaveRiskTags": { "type": "array", "items": { "type": "string" } },
+        "minMemoryAdjustment": { "type": "integer", "minimum": -80, "maximum": 60 },
+        "maxMemoryAdjustment": { "type": "integer", "minimum": -80, "maximum": 60 },
         "reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } }
       }
     }

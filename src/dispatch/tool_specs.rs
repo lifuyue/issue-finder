@@ -22,6 +22,7 @@ pub const TOOL_DISPATCH_PROPOSE: &str = "issue-finder.dispatch_propose";
 pub const TOOL_DISPATCH_APPROVE: &str = "issue-finder.dispatch_approve";
 pub const TOOL_DISPATCH_REJECT: &str = "issue-finder.dispatch_reject";
 pub const TOOL_DISPATCH_EXECUTE: &str = "issue-finder.dispatch_execute";
+pub const TOOL_DISPATCH_RECORD_OUTCOME: &str = "issue-finder.dispatch_record_outcome";
 pub const TOOL_A2A_EXPORT_TASK: &str = "issue-finder.a2a_export_task";
 pub const TOOL_A2A_APPROVE_SEND: &str = "issue-finder.a2a_approve_send";
 pub const TOOL_A2A_REJECT_SEND: &str = "issue-finder.a2a_reject_send";
@@ -148,6 +149,12 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             "dispatch_execute",
             "Start or resume the native execution agent for an already approved dispatch run.",
             dispatch_run_read_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_record_outcome",
+            "Record a normalized dispatch outcome and best-effort memory signal for one dispatch run.",
+            dispatch_record_outcome_schema(),
             false,
         ),
         dispatch_tool_spec(
@@ -402,10 +409,81 @@ fn a2a_import_result_schema() -> Value {
                     "canceled"
                 ],
                 "default": null
-            }
+            },
+            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
+            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
+            "failureReason": { "type": ["string", "null"], "default": null },
+            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
+            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
+            "idempotencyKey": { "type": ["string", "null"], "default": null }
         },
         "required": ["runId", "path"],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": dispatch_outcome_defs()
+    })
+}
+
+fn dispatch_record_outcome_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "runId": { "type": "string" },
+            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
+            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
+            "failureReason": { "type": ["string", "null"], "default": null },
+            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
+            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
+            "resultArtifactId": { "type": ["string", "null"], "default": null },
+            "idempotencyKey": { "type": ["string", "null"], "default": null }
+        },
+        "required": ["runId", "outcome"],
+        "additionalProperties": false,
+        "$defs": dispatch_outcome_defs()
+    })
+}
+
+fn dispatch_outcome_defs() -> Value {
+    json!({
+        "dispatchOutcomeKind": {
+            "type": ["string", "null"],
+            "enum": [null, "fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"],
+            "default": null
+        },
+        "dispatchFailureClass": {
+            "type": ["string", "null"],
+            "enum": [
+                null,
+                "validation_failed",
+                "reproduction_failed",
+                "dependency_unavailable",
+                "workspace_unavailable",
+                "context_insufficient",
+                "agent_runtime_error",
+                "external_service_error",
+                "policy_blocked",
+                "user_canceled",
+                "unknown"
+            ],
+            "default": null
+        },
+        "dispatchTaskClass": {
+            "type": ["string", "null"],
+            "enum": [
+                null,
+                "rust_cli_panic",
+                "frontend_ui_bug",
+                "docs_update",
+                "test_coverage",
+                "dependency_upgrade",
+                "unknown_task"
+            ],
+            "default": null
+        },
+        "dispatchValidationOutcome": {
+            "type": ["string", "null"],
+            "enum": [null, "not_run", "passed", "failed", "unknown"],
+            "default": null
+        }
     })
 }
 

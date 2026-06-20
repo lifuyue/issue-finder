@@ -40,9 +40,12 @@ fn index_rebuild_supports_fts_rare_tokens_and_entity_recall_without_embeddings()
             id: "dispatch-run-1".to_string(),
             issue_key: IssueKey::new("owner/repo", 123),
             agent_id: "codex".to_string(),
+            outcome_kind: Some("failed".to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded: false,
+            failure_class: Some("validation_failed".to_string()),
             failure_reason: Some("unclear_validation".to_string()),
+            validation_outcome: Some("failed".to_string()),
             validation_paths: vec!["cargo test -p cli".to_string()],
             artifact_refs: Vec::new(),
             occurred_at: NOW.to_string(),
@@ -96,9 +99,12 @@ fn graph_rebuild_creates_coactivation_edges_and_excludes_tombstoned_events() {
         id: "dispatch-run-1".to_string(),
         issue_key: IssueKey::new("owner/repo", 42),
         agent_id: "codex".to_string(),
+        outcome_kind: Some("failed".to_string()),
         task_type: "rust_cli_panic".to_string(),
         succeeded: false,
+        failure_class: Some("validation_failed".to_string()),
         failure_reason: Some("unclear_validation".to_string()),
+        validation_outcome: Some("failed".to_string()),
         validation_paths: vec!["cargo test -p cli".to_string()],
         artifact_refs: Vec::new(),
         occurred_at: NOW.to_string(),
@@ -109,10 +115,10 @@ fn graph_rebuild_creates_coactivation_edges_and_excludes_tombstoned_events() {
     let report = MemoryGraphBuilder::rebuild_coactivation_edges(&store, LATER).unwrap();
     assert_eq!(report.raw_events_seen, 1);
     assert_eq!(report.raw_events_linked, 1);
-    assert_eq!(report.edges_written, 4);
+    assert_eq!(report.edges_written, 7);
 
     let edges = store.list_edges().unwrap();
-    assert_eq!(edges.len(), 4);
+    assert_eq!(edges.len(), 7);
     assert!(edges
         .iter()
         .all(|edge| edge.relation == MemoryEdgeRelation::CoActivated));

@@ -24,17 +24,19 @@ pub use github_projection::{
 pub use model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, AgentCapability,
     AgentCapabilityName, AgentEvent, AgentProfile, AgentSessionLink, AgentSessionStatus,
-    ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus, DispatchRun,
-    DispatchRunStatus, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
+    ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus, DispatchFailureClass,
+    DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchTaskClass,
+    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
     IssueTask, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEvent,
     MemoryEventType, NewAgentCapability, NewAgentEvent, NewAgentProfile, NewAgentSessionLink,
-    NewApprovalRequest, NewArtifact, NewDispatchRun, NewGitHubInteraction, NewIssueTask,
-    NewMemoryEvent,
+    NewApprovalRequest, NewArtifact, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
+    NewIssueTask, NewMemoryEvent,
 };
 pub use packaging::PackageImportResult;
 pub use runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchProposalRequest,
-    DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeMemoryIngestView,
+    DispatchOutcomeRecordRequest, DispatchOutcomeRecordResult, DispatchProposal,
+    DispatchProposalRequest, DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
 };
 pub use session_approvals::{
     PendingSessionMutation, SessionMutationApprovalResolution, SessionMutationProposal,

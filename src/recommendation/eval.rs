@@ -37,6 +37,8 @@ const SOURCE_TRUST: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/source_trust.json");
 const FEEDBACK_REPLAY: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/feedback_replay.json");
+const DISPATCH_OUTCOME_REPLAY: &str =
+    include_str!("../../tests/fixtures/recommendation_eval/datasets/dispatch_outcome_replay.json");
 
 const LIVE_PROFILE_NAMES: [&str; 6] = [
     "default_cli_devtools",
@@ -78,6 +80,8 @@ pub struct EvaluationSample {
     pub growth: SampleGrowth,
     #[serde(default)]
     pub feedback: SampleFeedback,
+    #[serde(default)]
+    pub dispatch_outcomes: Vec<SampleDispatchOutcome>,
     pub expected: ExpectedOutcome,
 }
 
@@ -201,6 +205,22 @@ pub struct SampleFeedback {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SampleDispatchOutcome {
+    #[serde(default)]
+    pub approved: bool,
+    #[serde(default)]
+    pub repo_full_name: Option<String>,
+    pub outcome_kind: String,
+    #[serde(default)]
+    pub failure_class: Option<String>,
+    #[serde(default)]
+    pub task_class: Option<String>,
+    #[serde(default)]
+    pub weight: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExpectedOutcome {
     pub quality: ExpectedQuality,
     pub behavior: ExpectedBehavior,
@@ -214,6 +234,10 @@ pub struct ExpectedOutcome {
     pub must_have_risk_tags: Vec<RiskTag>,
     #[serde(default)]
     pub must_not_have_risk_tags: Vec<RiskTag>,
+    #[serde(default)]
+    pub min_memory_adjustment: Option<i32>,
+    #[serde(default)]
+    pub max_memory_adjustment: Option<i32>,
     pub reasons: Vec<String>,
 }
 
@@ -271,6 +295,8 @@ pub struct Metrics {
     pub ranking_inversions: usize,
     pub feedback_cooldown_passes: usize,
     pub feedback_cooldown_total: usize,
+    pub dispatch_outcome_passes: usize,
+    pub dispatch_outcome_total: usize,
     pub fallback_fill_rate: f64,
 }
 
@@ -292,6 +318,7 @@ pub struct RankedSampleSummary {
     pub expected_behavior: ExpectedBehavior,
     pub final_feed_score: i32,
     pub freshness_boost: i32,
+    pub memory_adjustment: i32,
     pub profile_fit: i32,
     pub visibility: String,
     pub source_tier: String,
@@ -375,6 +402,7 @@ pub fn builtin_datasets() -> Vec<(&'static str, &'static str)> {
         ("profile_devops_infra", PROFILE_DEVOPS_INFRA),
         ("source_trust", SOURCE_TRUST),
         ("feedback_replay", FEEDBACK_REPLAY),
+        ("dispatch_outcome_replay", DISPATCH_OUTCOME_REPLAY),
     ]
 }
 
@@ -512,6 +540,7 @@ pub fn evaluate_dataset(dataset: &EvaluationDataset) -> DatasetReport {
             expected_behavior: item.sample.expected.behavior,
             final_feed_score: item.ranked.recommendation.final_feed_score,
             freshness_boost: item.ranked.recommendation.freshness_boost,
+            memory_adjustment: item.ranked.recommendation.memory_adjustment,
             profile_fit: item.ranked.value_assessment.profile_fit_score,
             visibility: item.ranked.recommendation.visibility.to_string(),
             source_tier: item.source_tier.clone(),
@@ -613,6 +642,7 @@ fn rank_sample<'a>(
     ranked.explanation = ranked.value_assessment.explanation.clone();
     let states = sample.feedback_state(&ranked.issue);
     apply_recommendation_assessments(std::slice::from_mut(&mut ranked), &states);
+    sample.apply_dispatch_outcome_replay(&mut ranked);
     RankedEvaluationSample {
         sample,
         ranked,
@@ -717,6 +747,14 @@ fn metrics_for_ranked(ranked: &[RankedEvaluationSample<'_>], limit: usize) -> Me
             }
         })
         .count();
+    let dispatch_outcome = ranked
+        .iter()
+        .filter(|item| !item.sample.dispatch_outcomes.is_empty())
+        .collect::<Vec<_>>();
+    let dispatch_outcome_passes = dispatch_outcome
+        .iter()
+        .filter(|item| memory_adjustment_matches_expectation(item))
+        .count();
 
     Metrics {
         samples: ranked.len(),
@@ -733,6 +771,8 @@ fn metrics_for_ranked(ranked: &[RankedEvaluationSample<'_>], limit: usize) -> Me
         ranking_inversions: ranking_inversions(&visible),
         feedback_cooldown_passes: cooldown_passes,
         feedback_cooldown_total: cooldown.len(),
+        dispatch_outcome_passes,
+        dispatch_outcome_total: dispatch_outcome.len(),
         fallback_fill_rate: if fallback_total == 0 {
             1.0
         } else {
@@ -793,6 +833,34 @@ fn failures_for_ranked(ranked: &[RankedEvaluationSample<'_>]) -> Vec<EvaluationF
                 reason: format!("rank {} exceeds expected maximum bucket", index + 1),
             });
         }
+        if item
+            .sample
+            .expected
+            .min_memory_adjustment
+            .is_some_and(|min| item.ranked.recommendation.memory_adjustment < min)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "memory adjustment {} below expected minimum",
+                    item.ranked.recommendation.memory_adjustment
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .max_memory_adjustment
+            .is_some_and(|max| item.ranked.recommendation.memory_adjustment > max)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "memory adjustment {} above expected maximum",
+                    item.ranked.recommendation.memory_adjustment
+                ),
+            });
+        }
         if item.sample.expected.reasons.is_empty() {
             failures.push(EvaluationFailure {
                 sample_id: item.sample.id.clone(),
@@ -817,6 +885,8 @@ fn aggregate_metrics<'a>(metrics: impl Iterator<Item = &'a Metrics>) -> Metrics 
         aggregate.ranking_inversions += item.ranking_inversions;
         aggregate.feedback_cooldown_passes += item.feedback_cooldown_passes;
         aggregate.feedback_cooldown_total += item.feedback_cooldown_total;
+        aggregate.dispatch_outcome_passes += item.dispatch_outcome_passes;
+        aggregate.dispatch_outcome_total += item.dispatch_outcome_total;
     }
     let count = metrics.len();
     if count > 0 {
@@ -871,6 +941,19 @@ fn ranking_inversions(visible: &[&RankedEvaluationSample<'_>]) -> usize {
         }
     }
     inversions
+}
+
+fn memory_adjustment_matches_expectation(item: &&RankedEvaluationSample<'_>) -> bool {
+    let adjustment = item.ranked.recommendation.memory_adjustment;
+    item.sample
+        .expected
+        .min_memory_adjustment
+        .is_none_or(|min| adjustment >= min)
+        && item
+            .sample
+            .expected
+            .max_memory_adjustment
+            .is_none_or(|max| adjustment <= max)
 }
 
 fn ratio(numerator: usize, denominator: usize) -> f64 {
@@ -1042,6 +1125,83 @@ impl EvaluationSample {
         states.insert(state.issue_key.clone(), state);
         states
     }
+
+    fn apply_dispatch_outcome_replay(&self, ranked: &mut RankedValueIssue) {
+        if self.dispatch_outcomes.is_empty() {
+            return;
+        }
+        let task_class = fixture_task_class(self);
+        let adjustment = self
+            .dispatch_outcomes
+            .iter()
+            .filter(|outcome| outcome.approved)
+            .filter(|outcome| {
+                outcome
+                    .repo_full_name
+                    .as_deref()
+                    .is_none_or(|repo| repo == ranked.issue.repo_full_name)
+            })
+            .filter(|outcome| {
+                outcome
+                    .task_class
+                    .as_deref()
+                    .is_none_or(|expected| expected == task_class)
+            })
+            .filter(|outcome| {
+                !matches!(
+                    outcome.failure_class.as_deref(),
+                    Some("policy_blocked" | "user_canceled")
+                )
+            })
+            .map(dispatch_outcome_weight)
+            .sum::<i32>()
+            .clamp(-80, 60);
+        if adjustment == 0 {
+            return;
+        }
+        ranked.recommendation.memory_adjustment = adjustment;
+        ranked.recommendation.final_feed_score += adjustment;
+        ranked.score = ranked.recommendation.final_feed_score;
+        let sign = if adjustment > 0 { "+" } else { "" };
+        ranked.recommendation.reasons.push(format!(
+            "Dispatch outcome replay adjustment: {sign}{adjustment}"
+        ));
+        ranked.explanation.push(format!(
+            "Dispatch outcome replay adjustment: {sign}{adjustment}"
+        ));
+    }
+}
+
+fn dispatch_outcome_weight(outcome: &SampleDispatchOutcome) -> i32 {
+    let default = match outcome.outcome_kind.as_str() {
+        "fix_ready" | "completed_no_change" => 0.35,
+        "failed" | "blocked" => -0.45,
+        _ => 0.0,
+    };
+    (outcome.weight.unwrap_or(default) * 100.0).round() as i32
+}
+
+fn fixture_task_class(sample: &EvaluationSample) -> &'static str {
+    let text = format!(
+        "{}\n{}\n{}",
+        sample.issue.title,
+        sample.issue.body,
+        sample.issue.labels.join(" ")
+    )
+    .to_ascii_lowercase();
+    if text.contains("panic") && (text.contains("cli") || sample.repository.language == "Rust") {
+        "rust_cli_panic"
+    } else if text.contains("react") || text.contains("ui") || text.contains("frontend") {
+        "frontend_ui_bug"
+    } else if text.contains("doc") || text.contains("readme") {
+        "docs_update"
+    } else if text.contains("test") || text.contains("coverage") {
+        "test_coverage"
+    } else if text.contains("dependency") || text.contains("upgrade") {
+        "dependency_upgrade"
+    } else {
+        "unknown_task"
+    }
 }
 
 impl ExpectedOutcome {
@@ -1105,7 +1265,7 @@ fn offline_markdown_report(report: &EvaluationReport) -> String {
     output.push_str("Generated by `issue-finder eval recommendation --offline` from deterministic offline fixtures. It records ranking pipeline behavior without network access.\n\n");
     output.push_str("## Overall Metrics\n\n");
     output.push_str(&format!(
-        "- samples: {}\n- visible: {}\n- precision@5: {:.2}\n- precision@10: {:.2}\n- visible fill rate: {:.2}\n- reject leakage: {}\n- profile mismatch leakage: {}\n- stale high-rank leakage: {}\n- competition leakage: {}\n- dashboard noise leakage: {}\n- ranking inversions: {}\n- feedback cooldown: {}/{}\n- fallback fill rate: {:.2}\n\n",
+        "- samples: {}\n- visible: {}\n- precision@5: {:.2}\n- precision@10: {:.2}\n- visible fill rate: {:.2}\n- reject leakage: {}\n- profile mismatch leakage: {}\n- stale high-rank leakage: {}\n- competition leakage: {}\n- dashboard noise leakage: {}\n- ranking inversions: {}\n- feedback cooldown: {}/{}\n- dispatch outcome replay: {}/{}\n- fallback fill rate: {:.2}\n\n",
         report.overall.samples,
         report.overall.visible,
         report.overall.precision_at5,
@@ -1119,6 +1279,8 @@ fn offline_markdown_report(report: &EvaluationReport) -> String {
         report.overall.ranking_inversions,
         report.overall.feedback_cooldown_passes,
         report.overall.feedback_cooldown_total,
+        report.overall.dispatch_outcome_passes,
+        report.overall.dispatch_outcome_total,
         report.overall.fallback_fill_rate
     ));
     output.push_str("## Dataset Metrics\n\n");
@@ -1172,6 +1334,7 @@ fn offline_visible_jsonl(report: &EvaluationReport) -> String {
                 "expectedBehavior": item.expected_behavior,
                 "finalFeedScore": item.final_feed_score,
                 "freshnessBoost": item.freshness_boost,
+                "memoryAdjustment": item.memory_adjustment,
                 "profileFit": item.profile_fit,
                 "sourceTier": item.source_tier,
             });

@@ -157,6 +157,7 @@ impl<'a> RecommendationEngine<'a> {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
                 let mut ranked = cached.ranked;
                 let _ = apply_ranking_hints_to_ranked(self.paths, &mut ranked);
+                sort_by_feed(&mut ranked);
                 return Ok(ScoutResult {
                     ranked,
                     discovery_count: cached.discovery_count,
@@ -209,6 +210,7 @@ impl<'a> RecommendationEngine<'a> {
             )?;
         }
         let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
+        sort_by_feed(&mut run.ranked);
 
         Ok(ScoutResult {
             ranked: run.ranked,
@@ -858,6 +860,7 @@ impl<'a> RecommendationEngine<'a> {
     fn apply_feed_ranking(&self, ranked: &mut [RankedValueIssue]) {
         let states = load_state_map(self.paths).unwrap_or_default();
         apply_recommendation_assessments(ranked, &states);
+        let _ = apply_ranking_hints_to_ranked(self.paths, ranked);
         sort_by_feed(ranked);
     }
 }

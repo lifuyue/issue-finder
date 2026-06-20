@@ -16,6 +16,7 @@ recommendation_eval/
     profile_devops_infra.json
     source_trust.json
     feedback_replay.json
+    dispatch_outcome_replay.json
 ```
 
 ## Sample Shape
@@ -31,6 +32,8 @@ Required fields:
 - `expected.behavior`: one of `visible_top`, `visible`, `visible_lower`, `hidden`, `fallback_candidate`.
 - `expected.reasons`: human-readable explanation for the expectation.
 
+Optional `dispatchOutcomes` entries model approved or candidate dispatch outcome hints for deterministic replay. Approved repo/task-class outcome trends may apply bounded `memoryAdjustment`; candidate entries must remain inert. Policy or user blocked outcomes should not penalize similar feed candidates.
+
 Prefer `createdAgeDays`, `updatedAgeDays`, and `pushedAgeDays` over fixed dates when the sample is not about an exact historical date. The evaluator converts these relative values to RFC3339 timestamps at runtime, keeping tests stable over time.
 
 ## Adding Samples
@@ -38,4 +41,3 @@ Prefer `createdAgeDays`, `updatedAgeDays`, and `pushedAgeDays` over fixed dates 
 Add a sample when a live run exposes a ranking failure, source trust failure, fallback failure, or feedback/cooldown regression. The sample should be small but specific enough that a reviewer can understand why it should pass or fail without reading external GitHub pages.
 
 Do not copy complete GitHub API payloads. Do not include tokens, private user data, generated local state, or temporary cache paths.
-

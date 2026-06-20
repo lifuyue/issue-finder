@@ -628,6 +628,7 @@ fn prepared_report_item(
         feedback_penalty: ranked.recommendation.feedback_penalty,
         quality_penalty: ranked.recommendation.quality_penalty,
         reactivation_boost: ranked.recommendation.reactivation_boost,
+        memory_adjustment: ranked.recommendation.memory_adjustment,
         recommendation_visibility: ranked.recommendation.visibility.to_string(),
         recommendation_reasons: ranked.recommendation.reasons.clone(),
         attention_score: ranked.value_assessment.attention_score,

@@ -81,6 +81,59 @@ string_enum!(DispatchRunStatus {
     Canceled => "canceled",
 });
 
+string_enum!(DispatchOutcomeKind {
+    FixReady => "fix_ready",
+    CompletedNoChange => "completed_no_change",
+    NeedsUser => "needs_user",
+    Blocked => "blocked",
+    Failed => "failed",
+    Canceled => "canceled",
+});
+
+impl DispatchOutcomeKind {
+    pub fn is_positive(self) -> bool {
+        matches!(self, Self::FixReady | Self::CompletedNoChange)
+    }
+
+    pub fn terminal_status(self) -> DispatchRunStatus {
+        match self {
+            Self::FixReady | Self::CompletedNoChange => DispatchRunStatus::Completed,
+            Self::NeedsUser => DispatchRunStatus::NeedsUser,
+            Self::Blocked | Self::Failed => DispatchRunStatus::Failed,
+            Self::Canceled => DispatchRunStatus::Canceled,
+        }
+    }
+}
+
+string_enum!(DispatchFailureClass {
+    ValidationFailed => "validation_failed",
+    ReproductionFailed => "reproduction_failed",
+    DependencyUnavailable => "dependency_unavailable",
+    WorkspaceUnavailable => "workspace_unavailable",
+    ContextInsufficient => "context_insufficient",
+    AgentRuntimeError => "agent_runtime_error",
+    ExternalServiceError => "external_service_error",
+    PolicyBlocked => "policy_blocked",
+    UserCanceled => "user_canceled",
+    Unknown => "unknown",
+});
+
+string_enum!(DispatchTaskClass {
+    RustCliPanic => "rust_cli_panic",
+    FrontendUiBug => "frontend_ui_bug",
+    DocsUpdate => "docs_update",
+    TestCoverage => "test_coverage",
+    DependencyUpgrade => "dependency_upgrade",
+    UnknownTask => "unknown_task",
+});
+
+string_enum!(DispatchValidationOutcome {
+    NotRun => "not_run",
+    Passed => "passed",
+    Failed => "failed",
+    Unknown => "unknown",
+});
+
 string_enum!(AgentSessionStatus {
     Linked => "linked",
     Active => "active",
@@ -215,6 +268,34 @@ pub struct NewDispatchRun {
     pub requested_by: String,
     pub approval_state: ApprovalStatus,
     pub selected_session_link_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DispatchRunOutcome {
+    pub id: String,
+    pub run_id: String,
+    pub idempotency_key: String,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: Value,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewDispatchRunOutcome {
+    pub run_id: String,
+    pub idempotency_key: String,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -8,8 +8,8 @@ use crate::github::IssueRef;
 
 use super::model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, ApprovalRequest,
-    ApprovalStatus, ApprovalType, DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus,
-    NewAgentEvent, NewApprovalRequest, NewArtifact,
+    ApprovalStatus, ApprovalType, DispatchRun, DispatchRunOutcome, DispatchRunStatus, IssueTask,
+    IssueTaskStatus, NewAgentEvent, NewApprovalRequest, NewArtifact,
 };
 use super::store::DispatchStore;
 
@@ -38,6 +38,7 @@ pub struct A2aApprovalResult {
 pub struct A2aResultImport {
     pub run: DispatchRun,
     pub artifact: AgentArtifact,
+    pub outcome: Option<DispatchRunOutcome>,
 }
 
 pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult> {
@@ -174,7 +175,11 @@ pub fn import_result(
         store.update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
     }
 
-    Ok(A2aResultImport { run, artifact })
+    Ok(A2aResultImport {
+        run,
+        artifact,
+        outcome: None,
+    })
 }
 
 fn resolve_send(
