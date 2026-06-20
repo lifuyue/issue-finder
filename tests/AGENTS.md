@@ -12,7 +12,7 @@
 
 ## Mock 指南
 
-GitHub 和 LLM 相关工作流优先使用进程内 TCP mock server。响应内容应保持小而稳定，并且只服务当前测试关注的行为。设置 `ISSUE_FINDER_GITHUB_API_BASE` 等环境变量时，必须用 guard 在测试结束后清理，避免影响后续测试。
+GitHub 和 LLM 相关工作流优先使用进程内 TCP mock server。响应内容应保持小而稳定，并且只服务当前测试关注的行为。设置 `ISSUE_FINDER_GITHUB_API_BASE` 等环境变量时，必须先获取 `tests/support/env_lock.rs` 中的跨进程锁，并用 guard 在测试结束后清理，避免影响后续测试。
 
 ## Tool Contract 测试
 

@@ -7,6 +7,18 @@ pub const TOOL_PREPARE: &str = "issue-finder.prepare";
 pub const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
 pub const TOOL_STATUS: &str = "issue-finder.status";
 
+pub use crate::dispatch::tool_specs::{
+    TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT, TOOL_A2A_REJECT_SEND,
+    TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE,
+    TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
+    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_REJECT,
+    TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
+    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_SESSIONS_APPROVE_MUTATION,
+    TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
+    TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
+};
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueFinderToolSpecsEnvelope {
@@ -56,43 +68,46 @@ pub struct IssueFinderToolSpec {
 }
 
 pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
+    let mut tools = vec![
+        tool_spec(
+            "status",
+            "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
+            status_schema(),
+            false,
+        ),
+        tool_spec(
+            "scout",
+            "Discover and rank candidate GitHub issues with gate-aware summaries.",
+            scout_schema(),
+            false,
+        ),
+        tool_spec(
+            "assess",
+            "Assess one GitHub issue without preparing workspace or handoff state.",
+            assess_schema(),
+            false,
+        ),
+        tool_spec(
+            "prepare",
+            "Prepare a workspace and handoff for one issue after the prepare gate passes.",
+            prepare_schema(),
+            false,
+        ),
+        tool_spec(
+            "read_context",
+            "Read one fixed section from a prepared Issue Finder handoff context pack.",
+            read_context_schema(),
+            true,
+        ),
+    ];
+    tools.extend(crate::dispatch::tool_specs::dispatch_tool_specs());
+
     IssueFinderToolSpecsEnvelope {
         kind: "issue_finder_tool_specs".to_string(),
         version: 1,
         quick_start: quick_start(),
         recommended_workflow: recommended_workflow(),
-        tools: vec![
-            tool_spec(
-                "status",
-                "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
-                status_schema(),
-                false,
-            ),
-            tool_spec(
-                "scout",
-                "Discover and rank candidate GitHub issues with gate-aware summaries.",
-                scout_schema(),
-                false,
-            ),
-            tool_spec(
-                "assess",
-                "Assess one GitHub issue without preparing workspace or handoff state.",
-                assess_schema(),
-                false,
-            ),
-            tool_spec(
-                "prepare",
-                "Prepare a workspace and handoff for one issue after the prepare gate passes.",
-                prepare_schema(),
-                false,
-            ),
-            tool_spec(
-                "read_context",
-                "Read one fixed section from a prepared Issue Finder handoff context pack.",
-                read_context_schema(),
-                true,
-            ),
-        ],
+        tools,
     }
 }
 
@@ -253,7 +268,16 @@ fn read_context_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_tool_specs, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+        list_tool_specs, TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT,
+        TOOL_A2A_REJECT_SEND, TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_ASSESS,
+        TOOL_DISPATCH, TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS,
+        TOOL_DISPATCH_EXECUTE, TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_REJECT,
+        TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+        TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
+        TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_PREPARE, TOOL_READ_CONTEXT,
+        TOOL_SCOUT, TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK,
+        TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION,
+        TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC, TOOL_STATUS,
     };
 
     #[test]
@@ -277,7 +301,37 @@ mod tests {
                 TOOL_SCOUT,
                 TOOL_ASSESS,
                 TOOL_PREPARE,
-                TOOL_READ_CONTEXT
+                TOOL_READ_CONTEXT,
+                TOOL_AGENTS_LIST,
+                TOOL_AGENT_CAPABILITIES,
+                TOOL_SESSIONS_LIST,
+                TOOL_SESSIONS_SYNC,
+                TOOL_SESSIONS_SEARCH,
+                TOOL_SESSIONS_READ,
+                TOOL_SESSIONS_RENAME,
+                TOOL_SESSIONS_FORK,
+                TOOL_SESSIONS_ARCHIVE,
+                TOOL_SESSIONS_APPROVE_MUTATION,
+                TOOL_SESSIONS_REJECT_MUTATION,
+                TOOL_DISPATCH_STATUS,
+                TOOL_DISPATCH_EVENTS,
+                TOOL_DISPATCH_ARTIFACTS,
+                TOOL_DISPATCH_IMPORT_HANDOFF,
+                TOOL_DISPATCH,
+                TOOL_DISPATCH_APPROVE,
+                TOOL_DISPATCH_REJECT,
+                TOOL_DISPATCH_EXECUTE,
+                TOOL_A2A_EXPORT_TASK,
+                TOOL_A2A_APPROVE_SEND,
+                TOOL_A2A_REJECT_SEND,
+                TOOL_A2A_IMPORT_RESULT,
+                TOOL_GITHUB_DRAFT_TRACKING_COMMENT,
+                TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+                TOOL_GITHUB_APPROVE_COMMENT,
+                TOOL_GITHUB_REJECT_COMMENT,
+                TOOL_GITHUB_POST_COMMENT,
+                TOOL_GITHUB_RETRY_COMMENT,
+                TOOL_GITHUB_INTERACTIONS
             ]
         );
 

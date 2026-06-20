@@ -10,10 +10,15 @@ use issue_finder::paths::IssueFinderPaths;
 use issue_finder::workflow;
 use tempfile::tempdir;
 
+#[path = "support/env_lock.rs"]
+mod env_lock;
+
 #[tokio::test]
 async fn scout_uses_mocked_github_search_responses() {
+    let _env_lock = env_lock::EnvLock::acquire();
     let (base_url, handle) = start_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
+    let _env_guard = EnvGuard;
 
     let dir = tempdir().unwrap();
     let paths = IssueFinderPaths {
@@ -28,7 +33,6 @@ async fn scout_uses_mocked_github_search_responses() {
 
     let ranked = workflow::scout(&paths, &config, 10, true).await.unwrap();
 
-    std::env::remove_var("ISSUE_FINDER_GITHUB_API_BASE");
     handle.join().unwrap();
 
     assert_eq!(ranked.len(), 1);
@@ -37,6 +41,14 @@ async fn scout_uses_mocked_github_search_responses() {
     assert!(ranked[0].score > 0);
     assert!(!ranked[0].value_assessment.signals.is_empty());
     assert!(!ranked[0].value_assessment.explanation.is_empty());
+}
+
+struct EnvGuard;
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("ISSUE_FINDER_GITHUB_API_BASE");
+    }
 }
 
 fn start_mock_github() -> (String, thread::JoinHandle<()>) {

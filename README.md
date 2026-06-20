@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Issue Finder</strong> finds GitHub issues worth handing to coding agents, prepares local context, and stops before code changes.
+  <strong>Issue Finder</strong> finds GitHub issues worth handing to coding agents, prepares local context, tracks dispatch state, and stops before code changes.
 </p>
 
 <p align="center">
@@ -48,6 +48,32 @@ issue-finder scout --repo owner/repo --limit 10
 issue-finder prepare owner/repo#123
 issue-finder handoff <inbox-id> --print
 ```
+
+Inspect the local dispatch control plane:
+
+```bash
+issue-finder agents list
+issue-finder agents capabilities codex
+issue-finder sessions list --agent codex
+issue-finder sessions sync --agent codex --limit 20
+issue-finder sessions search --issue owner/repo#123
+issue-finder sessions rename <session-link-id> --name "issue-finder: owner/repo#123 - short title"
+issue-finder sessions fork <session-link-id>
+issue-finder sessions approve <approval-request-id>
+issue-finder dispatch owner/repo#123 --agent codex --new-session
+issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
+issue-finder dispatch package import-handoff <inbox-id>
+issue-finder dispatch approve <run-id>
+issue-finder dispatch execute <run-id>
+issue-finder dispatch a2a export owner/repo#123
+issue-finder dispatch a2a approve <approval-request-id>
+issue-finder dispatch github draft-tracking owner/repo#123
+issue-finder dispatch github approve <interaction-id>
+issue-finder dispatch github post <interaction-id>
+issue-finder dispatch github retry <interaction-id>
+```
+
+Issue-based dispatch and projection commands import the matching ready inbox handoff into an `IssueTaskPackage` when needed. `dispatch package import-handoff` is the explicit inspection path.
 
 Issue Finder writes local state under `~/.issue-finder` by default. Use `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` for isolated runs.
 

@@ -113,6 +113,10 @@ pub fn assess_competition(
 }
 
 pub fn detect_comment_competition_markers(body: &str) -> CommentCompetitionMarkers {
+    if is_issue_finder_projection_comment(body) {
+        return CommentCompetitionMarkers::default();
+    }
+
     let normalized = normalize(body);
     CommentCompetitionMarkers {
         attempt: body.contains("/attempt") || has_phrase(&normalized, "attempt"),
@@ -250,6 +254,14 @@ pub fn detect_comment_competition_markers(body: &str) -> CommentCompetitionMarke
     }
 }
 
+pub fn is_issue_finder_projection_comment(body: &str) -> bool {
+    let normalized = normalize(body);
+    normalized.contains("issue finder projection")
+        || normalized.contains("issue finder tracking comment")
+        || body.contains("<!-- issue-finder:")
+        || normalized == "i am tracking this issue and preparing a fix attempt"
+}
+
 fn has_phrase(normalized: &str, phrase: &str) -> bool {
     normalized.split_whitespace().any(|word| word == phrase)
 }
@@ -283,8 +295,8 @@ impl fmt::Display for CompetitionBand {
 #[cfg(test)]
 mod tests {
     use super::{
-        assess_competition, detect_comment_competition_markers, CompetitionBand,
-        TimelineIssueReference,
+        assess_competition, detect_comment_competition_markers, CommentCompetitionMarkers,
+        CompetitionBand, TimelineIssueReference,
     };
 
     #[test]
@@ -353,6 +365,27 @@ mod tests {
             let markers = detect_comment_competition_markers(body);
             assert!(markers.claim, "{body}");
         }
+    }
+
+    #[test]
+    fn ignores_issue_finder_projection_comments_as_competition() {
+        for body in [
+            "<!-- issue-finder:tracking_comment -->\nI am tracking this issue and preparing a fix attempt.",
+            "I am tracking this issue and preparing a fix attempt.",
+        ] {
+            let markers = detect_comment_competition_markers(body);
+            assert_eq!(markers, CommentCompetitionMarkers::default());
+        }
+
+        let facts = assess_competition(
+            &[],
+            &[
+                "<!-- issue-finder:tracking_comment -->\nI am tracking this issue and preparing a fix attempt.".to_string(),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(facts.competition_points, 0);
+        assert_eq!(facts.competition_band, CompetitionBand::Clear);
     }
 
     #[test]
