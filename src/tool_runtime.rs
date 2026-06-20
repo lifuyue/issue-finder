@@ -5,6 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config::{Config, GitHubTokenSource};
+use crate::dispatch::tools::{execute_dispatch_tool, is_dispatch_tool, DispatchToolError};
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::memory::{
     memory_dream_show, memory_dreams_list, memory_hint_update, memory_hints_list, memory_recall,
@@ -83,6 +84,19 @@ impl From<ReadContextError> for RuntimeFailure {
         match error {
             ReadContextError::InvalidArguments(message) => Self::InvalidArguments(message),
             ReadContextError::System(error) => Self::System(error),
+        }
+    }
+}
+
+impl From<DispatchToolError> for RuntimeFailure {
+    fn from(error: DispatchToolError) -> Self {
+        match error {
+            DispatchToolError::InvalidArguments(message) => Self::InvalidArguments(message),
+            DispatchToolError::BusinessBlock(output) => Self::System(anyhow::anyhow!(
+                "unexpected dispatch business block escaped runtime: {}",
+                output.status
+            )),
+            DispatchToolError::System(error) => Self::System(error),
         }
     }
 }
@@ -225,6 +239,7 @@ impl IssueFinderToolRuntime {
             TOOL_MEMORY_HINTS_LIST => self.call_memory_hints_list(&invocation),
             TOOL_MEMORY_HINT_UPDATE => self.call_memory_hint_update(&invocation),
             TOOL_MEMORY_TOMBSTONE => self.call_memory_tombstone(&invocation),
+            tool_name if is_dispatch_tool(tool_name) => self.call_dispatch_tool(&invocation),
             _ => Err(RuntimeFailure::InvalidArguments(format!(
                 "unknown Issue Finder tool {}",
                 invocation.tool_name
@@ -603,6 +618,28 @@ impl IssueFinderToolRuntime {
             "ok",
             format!("Tombstoned {} {}.", output.target_type, output.target_id),
             to_value(output),
+        ))
+    }
+
+    fn call_dispatch_tool(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let output = match execute_dispatch_tool(
+            self.paths.clone(),
+            &self.config,
+            &invocation.tool_name,
+            &invocation.arguments,
+        ) {
+            Ok(output) | Err(DispatchToolError::BusinessBlock(output)) => output,
+            Err(error) => return Err(error.into()),
+        };
+        let structured_content = output.structured_content(&invocation.tool_name);
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            output.status,
+            output.content_text,
+            structured_content,
         ))
     }
 

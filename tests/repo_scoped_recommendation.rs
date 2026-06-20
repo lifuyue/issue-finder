@@ -1,8 +1,11 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::Utc;
 use issue_finder::config::Config;
@@ -13,8 +16,12 @@ use issue_finder::recommendation::{
 use issue_finder::workflow;
 use tempfile::tempdir;
 
+#[path = "support/env_lock.rs"]
+mod env_lock;
+
 #[tokio::test]
 async fn repo_scoped_scout_returns_same_repo_results_without_global_repo_cap() {
+    let _env_lock = env_lock::EnvLock::acquire();
     let server = start_repo_scoped_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", server.base_url.clone());
     let _env_guard = EnvGuard;
@@ -98,6 +105,7 @@ impl Drop for EnvGuard {
 struct MockGithubServer {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
+    shutdown: Arc<AtomicBool>,
     handle: thread::JoinHandle<()>,
 }
 
@@ -107,6 +115,7 @@ impl MockGithubServer {
     }
 
     fn join(self) {
+        self.shutdown.store(true, Ordering::SeqCst);
         self.handle.join().unwrap();
     }
 }
@@ -118,27 +127,24 @@ fn start_repo_scoped_mock_github() -> MockGithubServer {
     let base_url_for_thread = base_url.clone();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let requests_for_thread = Arc::clone(&requests);
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_for_thread = Arc::clone(&shutdown);
 
     let handle = thread::spawn(move || {
-        let started = Instant::now();
-        let mut last_request_at = Instant::now();
-        let mut served = 0usize;
-
-        while started.elapsed() < Duration::from_secs(10) {
-            if served > 0 && last_request_at.elapsed() > Duration::from_millis(700) {
-                break;
-            }
+        while !shutdown_for_thread.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    last_request_at = Instant::now();
-                    let mut buffer = [0u8; 4096];
-                    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                    let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-                    let first_line = request.lines().next().unwrap_or_default().to_string();
-                    requests_for_thread.lock().unwrap().push(first_line);
-                    let body = response_body(&request, &base_url_for_thread);
-                    write_response(&mut stream, &body);
-                    served += 1;
+                    let base_url = base_url_for_thread.clone();
+                    let requests = Arc::clone(&requests_for_thread);
+                    thread::spawn(move || {
+                        let mut buffer = [0u8; 4096];
+                        let bytes_read = stream.read(&mut buffer).unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                        let first_line = request.lines().next().unwrap_or_default().to_string();
+                        requests.lock().unwrap().push(first_line);
+                        let body = response_body(&request, &base_url);
+                        write_response(&mut stream, &body);
+                    });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
@@ -151,6 +157,7 @@ fn start_repo_scoped_mock_github() -> MockGithubServer {
     MockGithubServer {
         base_url,
         requests,
+        shutdown,
         handle,
     }
 }

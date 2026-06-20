@@ -10,8 +10,13 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use issue_finder::config::Config;
+use issue_finder::dispatch::{
+    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchRunStatus,
+    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability,
+    NewAgentEvent, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchRun, NewIssueTask,
+};
 use issue_finder::github::GitHubIssue;
-use issue_finder::handoff::WrittenHandoff;
+use issue_finder::handoff::{write_handoff, Handoff, WrittenHandoff};
 use issue_finder::inbox::{load_index, upsert_ready};
 use issue_finder::memory::{
     MemoryDreamRun, MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType,
@@ -25,15 +30,19 @@ use issue_finder::prepare_gate::{
 use issue_finder::recommendation::{
     load_events, RecommendationEventSource, RecommendationEventType,
 };
+use issue_finder::repo_scan::{CandidateFile, RepoScan, ValidationCommand};
 use issue_finder::tool_runtime::{IssueFinderToolInvocation, IssueFinderToolRuntime};
 use issue_finder::tool_specs::list_tool_specs;
 use issue_finder::value_scoring::{
     is_daily_prepare_candidate, RecommendationCategory, ValueAssessment,
 };
 use issue_finder::workflow::{self, PrepareOutcome};
-use issue_finder::workspace::git_available;
+use issue_finder::workspace::{git_available, PreparedWorkspace, WorkspaceInfo};
 use tempfile::tempdir;
 use tokio::sync::Mutex;
+
+#[path = "support/env_lock.rs"]
+mod env_lock;
 
 static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
@@ -110,7 +119,37 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.memory_dream_show",
             "issue-finder.memory_hints_list",
             "issue-finder.memory_hint_update",
-            "issue-finder.memory_tombstone"
+            "issue-finder.memory_tombstone",
+            "issue-finder.agents_list",
+            "issue-finder.agent_capabilities",
+            "issue-finder.sessions_list",
+            "issue-finder.sessions_sync",
+            "issue-finder.sessions_search",
+            "issue-finder.sessions_read",
+            "issue-finder.sessions_rename",
+            "issue-finder.sessions_fork",
+            "issue-finder.sessions_archive",
+            "issue-finder.sessions_approve_mutation",
+            "issue-finder.sessions_reject_mutation",
+            "issue-finder.dispatch_status",
+            "issue-finder.dispatch_events",
+            "issue-finder.dispatch_artifacts",
+            "issue-finder.dispatch_import_handoff",
+            "issue-finder.dispatch",
+            "issue-finder.dispatch_approve",
+            "issue-finder.dispatch_reject",
+            "issue-finder.dispatch_execute",
+            "issue-finder.a2a_export_task",
+            "issue-finder.a2a_approve_send",
+            "issue-finder.a2a_reject_send",
+            "issue-finder.a2a_import_result",
+            "issue-finder.github_draft_tracking_comment",
+            "issue-finder.github_draft_final_comment",
+            "issue-finder.github_approve_comment",
+            "issue-finder.github_reject_comment",
+            "issue-finder.github_post_comment",
+            "issue-finder.github_retry_comment",
+            "issue-finder.github_interactions"
         ]
     );
     assert!(tools.iter().all(|tool| tool["inputSchema"].is_object()));
@@ -142,6 +181,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         memory_recall["inputSchema"]["required"],
         serde_json::json!(["issue"])
     );
+    let agents_list = tools
+        .iter()
+        .find(|tool| tool["name"] == "agents_list")
+        .expect("agents_list tool spec");
+    assert_eq!(agents_list["inputSchema"]["additionalProperties"], false);
 }
 
 #[test]
@@ -161,6 +205,669 @@ fn tools_list_cli_outputs_single_json_workflow_entry_object() {
     );
     assert!(value["recommendedWorkflow"].is_array());
     assert!(value["tools"].is_array());
+}
+
+#[test]
+fn agents_list_cli_outputs_builtin_codex_profile() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+        .env("ISSUE_FINDER_HOME", &paths.home)
+        .args(["agents", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap();
+    let agents = value.as_array().unwrap();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0]["id"], "codex");
+    assert_eq!(agents[0]["adapter"], "codex_app_server");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_read_tools_use_local_state_only() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
+    let task = runtime
+        .store()
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 123,
+            title: "Fix parser panic".to_string(),
+            url: "https://github.com/owner/repo/issues/123".to_string(),
+            status: IssueTaskStatus::Discovered,
+            priority: Some(10),
+            category: Some("high_value_ready".to_string()),
+        })
+        .unwrap();
+    let session = runtime
+        .store()
+        .create_session_link(NewAgentSessionLink {
+            agent_id: "codex".to_string(),
+            native_session_id: "thread_123".to_string(),
+            issue_task_id: Some(task.id.clone()),
+            display_name: "issue-finder: owner/repo#123 - Fix parser panic".to_string(),
+            goal: Some("Fix owner/repo#123".to_string()),
+            status: AgentSessionStatus::Linked,
+            metadata_json: serde_json::json!({ "threadId": "thread_123" }),
+        })
+        .unwrap();
+    let run = runtime
+        .store()
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id.clone(),
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Proposed,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Pending,
+            selected_session_link_id: Some(session.id.clone()),
+        })
+        .unwrap();
+    runtime
+        .store()
+        .append_agent_event(NewAgentEvent {
+            run_id: Some(run.id.clone()),
+            session_link_id: Some(session.id),
+            event_type: "thread_linked".to_string(),
+            native_event_id: Some("event_1".to_string()),
+            payload_json: serde_json::json!({ "source": "test" }),
+        })
+        .unwrap();
+    runtime
+        .store()
+        .write_artifact(
+            NewArtifact {
+                issue_task_id: Some(task.id),
+                run_id: Some(run.id.clone()),
+                kind: "fix_result".to_string(),
+                content_type: "application/json".to_string(),
+                metadata_json: serde_json::json!({}),
+            },
+            br#"{"summary":"not executed"}"#,
+        )
+        .unwrap();
+
+    let tool_runtime = IssueFinderToolRuntime::new(paths, Config::default());
+
+    let agents = tool_runtime
+        .execute(invocation("issue-finder.agents_list", "{}", "agents_list"))
+        .await;
+    assert!(agents.success, "{agents:?}");
+    assert_eq!(agents.structured_content["agents"][0]["id"], "codex");
+
+    let capabilities = tool_runtime
+        .execute(invocation(
+            "issue-finder.agent_capabilities",
+            r#"{"agent":"codex"}"#,
+            "agent_capabilities",
+        ))
+        .await;
+    assert!(capabilities.success, "{capabilities:?}");
+    let capability_items = capabilities.structured_content["agentCapabilities"]["capabilities"]
+        .as_array()
+        .unwrap();
+    assert!(capability_items
+        .iter()
+        .any(|item| { item["capability"] == "open_pr" && item["status"] == "unsupported" }));
+    let start_session = capability_items
+        .iter()
+        .find(|item| item["capability"] == "start_session")
+        .expect("start_session capability");
+    assert_eq!(start_session["details_json"]["binary"]["name"], "codex");
+    assert!(start_session["details_json"]["binary"]["available"].is_boolean());
+    let startup = &start_session["details_json"]["startup"];
+    assert!(startup["supportedMethods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|method| method == "thread/start"));
+    match startup["probe"]["status"].as_str() {
+        Some("local_cli_probe") => {
+            assert_eq!(
+                startup["probe"]["source"],
+                "codex_cli_help_and_adapter_method_mapping"
+            );
+            assert_eq!(startup["connectionModes"][0]["mode"], "daemon_proxy");
+        }
+        Some("binary_unavailable") => {
+            assert_eq!(startup["connectionModes"], serde_json::json!([]));
+        }
+        other => panic!("unexpected Codex startup probe status: {other:?}"),
+    }
+    for unsupported_capability in ["interrupt_run", "review_mode", "stream_events"] {
+        assert!(
+            capability_items.iter().any(|item| {
+                item["capability"] == unsupported_capability && item["status"] == "unsupported"
+            }),
+            "{unsupported_capability} should not be advertised as usable before it is wired into the dispatch runtime"
+        );
+    }
+    for experimental_capability in [
+        "start_session",
+        "resume_session",
+        "fork_session",
+        "rename_session",
+        "list_sessions",
+        "search_sessions",
+        "read_transcript",
+        "set_goal",
+        "set_metadata",
+        "archive_session",
+    ] {
+        assert!(
+            capability_items.iter().any(|item| {
+                item["capability"] == experimental_capability
+                    && item["status"] == "experimental"
+            }),
+            "{experimental_capability} should stay visible as a wired Codex app-server runtime capability"
+        );
+    }
+
+    let session_search = tool_runtime
+        .execute(invocation(
+            "issue-finder.sessions_search",
+            r#"{"issue":"owner/repo#123","agent":"codex"}"#,
+            "sessions_search",
+        ))
+        .await;
+    assert!(session_search.success, "{session_search:?}");
+    assert_eq!(
+        session_search.structured_content["sessionSearch"]["sessions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let status_args = format!(r#"{{"runId":"{}"}}"#, run.id);
+    let dispatch_status = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_status",
+            &status_args,
+            "dispatch_status",
+        ))
+        .await;
+    assert!(dispatch_status.success, "{dispatch_status:?}");
+    assert_eq!(
+        dispatch_status.structured_content["dispatchStatus"]["run"]["id"],
+        run.id
+    );
+
+    let dispatch_events = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_events",
+            &status_args,
+            "dispatch_events",
+        ))
+        .await;
+    assert!(dispatch_events.success, "{dispatch_events:?}");
+    assert_eq!(
+        dispatch_events.structured_content["events"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let dispatch_artifacts = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_artifacts",
+            &status_args,
+            "dispatch_artifacts",
+        ))
+        .await;
+    assert!(dispatch_artifacts.success, "{dispatch_artifacts:?}");
+    assert_eq!(
+        dispatch_artifacts.structured_content["artifacts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let issue = issue("owner/repo", 321);
+    let workspace = PreparedWorkspace {
+        info: WorkspaceInfo {
+            path: dir.path().join("repo").to_string_lossy().to_string(),
+            default_branch: "main".to_string(),
+            branch: "issue-finder/321-fix-rust-cli-parser-regression".to_string(),
+            dirty: false,
+        },
+        scan: RepoScan {
+            discovered_files: vec!["src/main.rs".to_string()],
+            candidate_files: vec![CandidateFile {
+                path: "src/main.rs".to_string(),
+                reason: "Mentioned by issue title".to_string(),
+            }],
+            validation_commands: vec![ValidationCommand {
+                command: "cargo test".to_string(),
+                reason: "Rust project".to_string(),
+            }],
+            warnings: Vec::new(),
+        },
+        warnings: Vec::new(),
+    };
+    let handoff = Handoff::build(&issue, &workspace);
+    let written = write_handoff(&paths, &handoff, &issue).unwrap();
+    upsert_ready(&paths, &issue, 88, &written).unwrap();
+
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+
+    let import_args = serde_json::json!({ "inboxId": written.id }).to_string();
+    let imported = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_import_handoff",
+            &import_args,
+            "dispatch_import_handoff",
+        ))
+        .await;
+    assert!(imported.success, "{imported:?}");
+    assert_eq!(
+        imported.structured_content["packageImport"]["package"]["kind"],
+        "issue_finder_task_package"
+    );
+    assert_eq!(
+        imported.structured_content["packageImport"]["issueTask"]["issue_key"],
+        "owner/repo#321"
+    );
+    assert_eq!(
+        imported.structured_content["packageImport"]["package"]["user_profile_snapshot"]
+            ["snapshot"]["profile"]["techStack"],
+        serde_json::json!(["Rust", "TypeScript"])
+    );
+    let profile_snapshot_id = imported.structured_content["packageImport"]["package"]
+        ["user_profile_snapshot"]["artifactId"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        imported.structured_content["packageImport"]["issueTask"]["profile_snapshot_artifact_id"],
+        profile_snapshot_id
+    );
+
+    let proposal = runtime
+        .execute(invocation(
+            "issue-finder.dispatch",
+            r#"{"issue":"owner/repo#321","agent":"codex","newSession":true}"#,
+            "dispatch",
+        ))
+        .await;
+    assert!(proposal.success, "{proposal:?}");
+    assert_eq!(proposal.status, "pending_approval");
+    assert_eq!(
+        proposal.structured_content["dispatchProposal"]["approvalRequest"]["status"],
+        "pending"
+    );
+    let run_id = proposal.structured_content["dispatchProposal"]["run"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let execute_args = serde_json::json!({ "runId": run_id }).to_string();
+    let pending_execution = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_execute",
+            &execute_args,
+            "dispatch_execute",
+        ))
+        .await;
+    assert!(pending_execution.success, "{pending_execution:?}");
+    assert_eq!(pending_execution.status, "pending_approval");
+    assert_eq!(
+        pending_execution.structured_content["approvalRequired"],
+        true
+    );
+
+    let approve_args = serde_json::json!({ "runId": run_id }).to_string();
+    let approval = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_approve",
+            &approve_args,
+            "dispatch_approve",
+        ))
+        .await;
+    assert!(approval.success, "{approval:?}");
+    assert_eq!(approval.status, "approved");
+    assert_eq!(
+        approval.structured_content["dispatchApproval"]["run"]["approval_state"],
+        "approved"
+    );
+
+    let a2a_export = runtime
+        .execute(invocation(
+            "issue-finder.a2a_export_task",
+            r#"{"issue":"owner/repo#321"}"#,
+            "a2a_export_task",
+        ))
+        .await;
+    assert!(a2a_export.success, "{a2a_export:?}");
+    assert_eq!(a2a_export.status, "pending_approval");
+    assert_eq!(
+        a2a_export.structured_content["a2aExport"]["task"]["task"]["taskType"],
+        "fix_github_issue"
+    );
+    assert_eq!(
+        a2a_export.structured_content["a2aExport"]["task"]["callback"]["importMode"],
+        "local_artifact_only"
+    );
+    assert_eq!(
+        a2a_export.structured_content["a2aExport"]["approvalRequest"]["approval_type"],
+        "a2a_send"
+    );
+    let a2a_approval_id = a2a_export.structured_content["a2aExport"]["approvalRequest"]["id"]
+        .as_str()
+        .unwrap();
+    let a2a_approve_args = serde_json::json!({ "approvalRequestId": a2a_approval_id }).to_string();
+    let a2a_approval = runtime
+        .execute(invocation(
+            "issue-finder.a2a_approve_send",
+            &a2a_approve_args,
+            "a2a_approve_send",
+        ))
+        .await;
+    assert!(a2a_approval.success, "{a2a_approval:?}");
+    assert_eq!(a2a_approval.status, "approved");
+    assert_eq!(
+        a2a_approval.structured_content["a2aApproval"]["approvalRequest"]["status"],
+        "approved"
+    );
+
+    let result_path = dir.path().join("fix_result.json");
+    fs::write(&result_path, r#"{"summary":"fixed in local artifact"}"#).unwrap();
+    let import_result_args = serde_json::json!({
+        "runId": run_id,
+        "path": result_path,
+        "kind": "fix_result",
+        "contentType": "application/json",
+        "status": "completed"
+    })
+    .to_string();
+    let imported_result = runtime
+        .execute(invocation(
+            "issue-finder.a2a_import_result",
+            &import_result_args,
+            "a2a_import_result",
+        ))
+        .await;
+    assert!(imported_result.success, "{imported_result:?}");
+    assert_eq!(
+        imported_result.structured_content["a2aResultImport"]["run"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        imported_result.structured_content["a2aResultImport"]["artifact"]["kind"],
+        "fix_result"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_tool_auto_imports_ready_handoff_for_direct_proposal() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let issue = issue("owner/auto", 654);
+    let workspace = PreparedWorkspace {
+        info: WorkspaceInfo {
+            path: dir.path().join("repo").to_string_lossy().to_string(),
+            default_branch: "main".to_string(),
+            branch: "issue-finder/654-fix-parser-panic".to_string(),
+            dirty: false,
+        },
+        scan: RepoScan {
+            discovered_files: vec!["src/lib.rs".to_string()],
+            candidate_files: vec![CandidateFile {
+                path: "src/lib.rs".to_string(),
+                reason: "Mentioned by issue title".to_string(),
+            }],
+            validation_commands: vec![ValidationCommand {
+                command: "cargo test".to_string(),
+                reason: "Rust project".to_string(),
+            }],
+            warnings: Vec::new(),
+        },
+        warnings: Vec::new(),
+    };
+    let handoff = Handoff::build(&issue, &workspace);
+    let written = write_handoff(&paths, &handoff, &issue).unwrap();
+    upsert_ready(&paths, &issue, 87, &written).unwrap();
+
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+    let proposal = runtime
+        .execute(invocation(
+            "issue-finder.dispatch",
+            r#"{"issue":"owner/auto#654","agent":"codex","newSession":true}"#,
+            "dispatch",
+        ))
+        .await;
+
+    assert!(proposal.success, "{proposal:?}");
+    assert_eq!(proposal.status, "pending_approval");
+    assert_eq!(
+        proposal.structured_content["dispatchProposal"]["issueTask"]["issue_key"],
+        "owner/auto#654"
+    );
+    assert!(proposal.structured_content["dispatchProposal"]["issueTask"]
+        ["current_package_artifact_id"]
+        .is_string());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn projection_tools_auto_import_ready_handoff_when_needed() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let a2a_issue = issue("owner/a2a", 655);
+    let github_issue = issue("owner/track", 656);
+    let workspace = PreparedWorkspace {
+        info: WorkspaceInfo {
+            path: dir.path().join("repo").to_string_lossy().to_string(),
+            default_branch: "main".to_string(),
+            branch: "issue-finder/655-fix-parser-panic".to_string(),
+            dirty: false,
+        },
+        scan: RepoScan {
+            discovered_files: vec!["src/lib.rs".to_string()],
+            candidate_files: vec![CandidateFile {
+                path: "src/lib.rs".to_string(),
+                reason: "Mentioned by issue title".to_string(),
+            }],
+            validation_commands: vec![ValidationCommand {
+                command: "cargo test".to_string(),
+                reason: "Rust project".to_string(),
+            }],
+            warnings: Vec::new(),
+        },
+        warnings: Vec::new(),
+    };
+    let a2a_handoff = Handoff::build(&a2a_issue, &workspace);
+    let a2a_written = write_handoff(&paths, &a2a_handoff, &a2a_issue).unwrap();
+    upsert_ready(&paths, &a2a_issue, 86, &a2a_written).unwrap();
+    let github_handoff = Handoff::build(&github_issue, &workspace);
+    let github_written = write_handoff(&paths, &github_handoff, &github_issue).unwrap();
+    upsert_ready(&paths, &github_issue, 85, &github_written).unwrap();
+
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+    let a2a_export = runtime
+        .execute(invocation(
+            "issue-finder.a2a_export_task",
+            r#"{"issue":"owner/a2a#655"}"#,
+            "a2a_export_task",
+        ))
+        .await;
+    assert!(a2a_export.success, "{a2a_export:?}");
+    assert_eq!(a2a_export.status, "pending_approval");
+    assert_eq!(
+        a2a_export.structured_content["a2aExport"]["issueTask"]["issue_key"],
+        "owner/a2a#655"
+    );
+    assert!(
+        a2a_export.structured_content["a2aExport"]["issueTask"]["current_package_artifact_id"]
+            .is_string()
+    );
+
+    let github_draft = runtime
+        .execute(invocation(
+            "issue-finder.github_draft_tracking_comment",
+            r#"{"issue":"owner/track#656"}"#,
+            "github_draft_tracking_comment",
+        ))
+        .await;
+    assert!(github_draft.success, "{github_draft:?}");
+    assert_eq!(github_draft.status, "pending_approval");
+    assert_eq!(
+        github_draft.structured_content["githubDraft"]["issueTask"]["issue_key"],
+        "owner/track#656"
+    );
+    assert_eq!(
+        github_draft.structured_content["githubDraft"]["approvalRequest"]["approval_type"],
+        "github_post"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_projection_tools_report_missing_task_package_as_structured_block() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = IssueFinderToolRuntime::new(paths, Config::default());
+
+    for (tool, args) in [
+        (
+            "issue-finder.dispatch",
+            r#"{"issue":"owner/missing#909","agent":"codex","newSession":true}"#,
+        ),
+        (
+            "issue-finder.a2a_export_task",
+            r#"{"issue":"owner/missing#909"}"#,
+        ),
+        (
+            "issue-finder.github_draft_tracking_comment",
+            r#"{"issue":"owner/missing#909"}"#,
+        ),
+    ] {
+        let result = runtime.execute(invocation(tool, args, tool)).await;
+
+        assert!(result.success, "{tool}: {result:?}");
+        assert_eq!(result.status, "missing_task_package", "{tool}");
+        assert_eq!(result.structured_content["blocked"], true, "{tool}");
+        assert_eq!(
+            result.structured_content["issueKey"], "owner/missing#909",
+            "{tool}"
+        );
+        assert_eq!(
+            result.structured_content["missingTaskPackage"], true,
+            "{tool}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_tool_reports_missing_capability_as_structured_block() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
+    runtime
+        .store()
+        .create_agent_profile(NewAgentProfile {
+            id: Some("limited".to_string()),
+            kind: "test".to_string(),
+            display_name: "Limited".to_string(),
+            adapter: "codex_app_server".to_string(),
+            config_json: serde_json::json!({}),
+            enabled: true,
+        })
+        .unwrap();
+    runtime
+        .store()
+        .upsert_agent_capability(NewAgentCapability {
+            agent_id: "limited".to_string(),
+            capability: AgentCapabilityName::StartSession,
+            status: CapabilityStatus::Unsupported,
+            details_json: serde_json::json!({ "reason": "test disabled" }),
+        })
+        .unwrap();
+    runtime
+        .store()
+        .upsert_agent_capability(NewAgentCapability {
+            agent_id: "limited".to_string(),
+            capability: AgentCapabilityName::ReadTranscript,
+            status: CapabilityStatus::Unsupported,
+            details_json: serde_json::json!({ "reason": "test disabled" }),
+        })
+        .unwrap();
+    let task = runtime
+        .store()
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 777,
+            title: "Fix parser panic".to_string(),
+            url: "https://github.com/owner/repo/issues/777".to_string(),
+            status: IssueTaskStatus::UserApproved,
+            priority: Some(10),
+            category: Some("high_value_ready".to_string()),
+        })
+        .unwrap();
+    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+        repo_full_name: "owner/repo".to_string(),
+        number: 777,
+        title: "Fix parser panic".to_string(),
+        url: "https://github.com/owner/repo/issues/777".to_string(),
+    });
+    runtime
+        .store()
+        .write_task_package_artifact(&task.id, &package)
+        .unwrap();
+    let tool_runtime = IssueFinderToolRuntime::new(paths, Config::default());
+
+    let result = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch",
+            r#"{"issue":"owner/repo#777","agent":"limited","newSession":true}"#,
+            "dispatch_limited",
+        ))
+        .await;
+
+    assert!(result.success, "{result:?}");
+    assert_eq!(result.status, "unsupported_capability");
+    assert_eq!(result.structured_content["blocked"], true);
+    assert_eq!(
+        result.structured_content["unsupportedCapability"],
+        "start_session"
+    );
+    assert!(result.structured_content["reason"]
+        .as_str()
+        .unwrap()
+        .contains("does not support capability start_session"));
+
+    let session = runtime
+        .store()
+        .create_session_link(NewAgentSessionLink {
+            agent_id: "limited".to_string(),
+            native_session_id: "native_limited".to_string(),
+            issue_task_id: Some(task.id),
+            display_name: "limited session".to_string(),
+            goal: None,
+            status: AgentSessionStatus::Idle,
+            metadata_json: serde_json::json!({}),
+        })
+        .unwrap();
+    let read_args = serde_json::json!({ "sessionLinkId": session.id }).to_string();
+    let read_result = tool_runtime
+        .execute(invocation(
+            "issue-finder.sessions_read",
+            &read_args,
+            "sessions_read_limited",
+        ))
+        .await;
+    assert!(read_result.success, "{read_result:?}");
+    assert_eq!(read_result.status, "unsupported_capability");
+    assert_eq!(
+        read_result.structured_content["unsupportedCapability"],
+        "read_transcript"
+    );
 }
 
 #[test]
@@ -372,6 +1079,7 @@ async fn tool_status_reports_config_token_without_auth_check() {
 #[tokio::test(flavor = "current_thread")]
 async fn tool_status_prefers_env_token_and_reports_auth_login() {
     let _env_lock = ENV_LOCK.lock().await;
+    let _file_env_lock = env_lock::EnvLock::acquire();
     let _token_guard = EnvVarGuard::set("GITHUB_TOKEN", "env-token");
     let mock_github = start_mock_tool_github();
     let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
@@ -432,6 +1140,7 @@ fn daily_and_tool_prepare_gate_share_allowed_category_policy() {
 #[tokio::test(flavor = "current_thread")]
 async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
     let _env_lock = ENV_LOCK.lock().await;
+    let _file_env_lock = env_lock::EnvLock::acquire();
     if !git_available() {
         return;
     }

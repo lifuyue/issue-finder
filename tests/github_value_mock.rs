@@ -13,8 +13,12 @@ use issue_finder::value_signals::ValueSignalKind;
 use issue_finder::workflow;
 use tempfile::tempdir;
 
+#[path = "support/env_lock.rs"]
+mod env_lock;
+
 #[tokio::test]
 async fn scout_reorders_candidates_after_value_enrichment() {
+    let _env_lock = env_lock::EnvLock::acquire();
     let (base_url, handle) = start_mock_value_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
     let _env_guard = EnvGuard;

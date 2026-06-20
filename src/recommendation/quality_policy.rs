@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::competition::CompetitionBand;
+use crate::competition::{is_issue_finder_projection_comment, CompetitionBand};
 use crate::github_enrichment::EnrichedIssue;
 use crate::scoring::normalize;
 use crate::value_scoring::{GateStatus, RecommendationCategory, RiskTag, ValueAssessment};
@@ -620,6 +620,7 @@ fn normalized_issue_and_comments(enriched: &EnrichedIssue) -> String {
         enriched
             .comments
             .iter()
+            .filter(|comment| !is_issue_finder_projection_comment(&comment.body_excerpt))
             .map(|comment| comment.body_excerpt.as_str())
             .collect::<Vec<_>>()
             .join(" ")

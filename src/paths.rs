@@ -97,6 +97,18 @@ impl IssueFinderPaths {
         self.home.join("state.sqlite3")
     }
 
+    pub fn dispatch_dir(&self) -> PathBuf {
+        self.home.join("dispatch")
+    }
+
+    pub fn dispatch_db_path(&self) -> PathBuf {
+        self.dispatch_dir().join("dispatch.sqlite3")
+    }
+
+    pub fn dispatch_artifacts_dir(&self) -> PathBuf {
+        self.dispatch_dir().join("artifacts")
+    }
+
     pub fn workspace_path_for(&self, repo_full_name: &str) -> PathBuf {
         self.workspaces_dir.join(sanitize_repo_name(repo_full_name))
     }

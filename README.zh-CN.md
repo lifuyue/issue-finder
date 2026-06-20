@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Issue Finder</strong> 会发现值得交给编码代理处理的 GitHub issue，准备本地上下文，并在代码变更前停止。
+  <strong>Issue Finder</strong> 会发现值得交给编码代理处理的 GitHub issue，准备本地上下文，跟踪分派状态，并在代码变更前停止。
 </p>
 
 <p align="center">
@@ -48,6 +48,32 @@ issue-finder scout --repo owner/repo --limit 10
 issue-finder prepare owner/repo#123
 issue-finder handoff <inbox-id> --print
 ```
+
+查看本地分派控制面：
+
+```bash
+issue-finder agents list
+issue-finder agents capabilities codex
+issue-finder sessions list --agent codex
+issue-finder sessions sync --agent codex --limit 20
+issue-finder sessions search --issue owner/repo#123
+issue-finder sessions rename <session-link-id> --name "issue-finder: owner/repo#123 - short title"
+issue-finder sessions fork <session-link-id>
+issue-finder sessions approve <approval-request-id>
+issue-finder dispatch owner/repo#123 --agent codex --new-session
+issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
+issue-finder dispatch package import-handoff <inbox-id>
+issue-finder dispatch approve <run-id>
+issue-finder dispatch execute <run-id>
+issue-finder dispatch a2a export owner/repo#123
+issue-finder dispatch a2a approve <approval-request-id>
+issue-finder dispatch github draft-tracking owner/repo#123
+issue-finder dispatch github approve <interaction-id>
+issue-finder dispatch github post <interaction-id>
+issue-finder dispatch github retry <interaction-id>
+```
+
+基于 issue 的 dispatch 和 projection 命令会在需要时把匹配的 ready inbox handoff 导入为 `IssueTaskPackage`。`dispatch package import-handoff` 是显式检查路径。
 
 Issue Finder 默认将本地状态写入 `~/.issue-finder`。使用 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` 进行隔离运行。
 

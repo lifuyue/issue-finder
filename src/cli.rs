@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::dispatch::cli_args::{AgentsArgs, DispatchArgs, SessionsArgs};
+
 #[derive(Debug, Parser)]
 #[command(name = "issue-finder")]
 #[command(about = "Local-first handoff prep for developers using coding agents")]
@@ -33,6 +35,12 @@ pub enum Command {
     Report(ReportArgs),
     /// Bootstrap or inspect the local recommendation profile.
     Profile(ProfileArgs),
+    /// Inspect configured execution agents and their capabilities.
+    Agents(AgentsArgs),
+    /// Inspect local links to native execution agent sessions.
+    Sessions(SessionsArgs),
+    /// Inspect local dispatch runs, events, and artifacts.
+    Dispatch(DispatchArgs),
     /// Run recommendation evaluation workflows.
     Eval(EvalArgs),
     /// Inspect and control contribution memory.
@@ -355,4 +363,75 @@ pub struct ToolsCallArgs {
     /// Optional model turn id to echo in the output envelope.
     #[arg(long)]
     pub turn_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+    use crate::dispatch::cli_args::DispatchCommand;
+
+    #[test]
+    fn dispatch_direct_issue_parses_as_proposal_entrypoint() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "dispatch",
+            "owner/repo#123",
+            "--agent",
+            "codex",
+            "--new-session",
+            "--json",
+        ])
+        .unwrap();
+
+        let Command::Dispatch(args) = cli.command else {
+            panic!("expected dispatch command");
+        };
+        assert!(args.command.is_none());
+        assert_eq!(args.issue.as_deref(), Some("owner/repo#123"));
+        assert_eq!(args.agent, "codex");
+        assert!(args.new_session);
+        assert!(args.session.is_none());
+        assert!(args.json);
+    }
+
+    #[test]
+    fn dispatch_propose_subcommand_remains_supported() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "dispatch",
+            "propose",
+            "owner/repo#123",
+            "--agent",
+            "codex",
+            "--session",
+            "thread-1",
+        ])
+        .unwrap();
+
+        let Command::Dispatch(args) = cli.command else {
+            panic!("expected dispatch command");
+        };
+        assert!(args.issue.is_none());
+        let Some(DispatchCommand::Propose(propose)) = args.command else {
+            panic!("expected dispatch propose subcommand");
+        };
+        assert_eq!(propose.issue, "owner/repo#123");
+        assert_eq!(propose.agent, "codex");
+        assert_eq!(propose.session.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn dispatch_status_subcommand_is_not_captured_as_direct_issue() {
+        let cli = Cli::try_parse_from(["issue-finder", "dispatch", "status", "run-1"]).unwrap();
+
+        let Command::Dispatch(args) = cli.command else {
+            panic!("expected dispatch command");
+        };
+        assert!(args.issue.is_none());
+        assert!(
+            matches!(args.command, Some(DispatchCommand::Status(status)) if status.run_id == "run-1")
+        );
+    }
 }

@@ -7,7 +7,10 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::competition::{assess_competition, CompetitionFacts, TimelineIssueReference};
+use crate::competition::{
+    assess_competition, is_issue_finder_projection_comment, CompetitionFacts,
+    TimelineIssueReference,
+};
 use crate::config::Config;
 use crate::github::GitHubIssue;
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
@@ -1054,6 +1057,7 @@ fn competition_texts(enriched: &EnrichedIssue) -> Vec<String> {
             enriched
                 .comments
                 .iter()
+                .filter(|comment| !is_issue_finder_projection_comment(&comment.body_excerpt))
                 .map(|comment| comment.body_excerpt.clone()),
         )
         .collect()

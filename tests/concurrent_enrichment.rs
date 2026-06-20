@@ -13,11 +13,15 @@ use issue_finder::paths::IssueFinderPaths;
 use issue_finder::workflow;
 use tempfile::tempdir;
 
+#[path = "support/env_lock.rs"]
+mod env_lock;
+
 const SLOW_TOP_DELAY: Duration = Duration::from_millis(800);
 const OTHER_DETAIL_DELAY: Duration = Duration::from_millis(350);
 
 #[tokio::test]
 async fn scout_enriches_candidates_concurrently_and_keeps_feed_order() {
+    let _env_lock = env_lock::EnvLock::acquire();
     let (base_url, server) = start_concurrent_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
     let _env_guard = EnvGuard;
@@ -71,8 +75,10 @@ fn start_concurrent_mock_github() -> (String, MockGithubServer) {
     let base_url_for_thread = base_url.clone();
     let active_detail_requests = Arc::new(AtomicUsize::new(0));
     let max_detail_concurrency = Arc::new(AtomicUsize::new(0));
+    let search_count = Arc::new(AtomicUsize::new(0));
     let active_detail_requests_for_thread = Arc::clone(&active_detail_requests);
     let max_detail_concurrency_for_thread = Arc::clone(&max_detail_concurrency);
+    let search_count_for_thread = Arc::clone(&search_count);
 
     let handle = thread::spawn(move || {
         let started = Instant::now();
@@ -91,9 +97,15 @@ fn start_concurrent_mock_github() -> (String, MockGithubServer) {
                     let base_url = base_url_for_thread.clone();
                     let active_detail_requests = Arc::clone(&active_detail_requests_for_thread);
                     let max_detail_concurrency = Arc::clone(&max_detail_concurrency_for_thread);
+                    let search_count = Arc::clone(&search_count_for_thread);
                     thread::spawn(move || {
                         let request = read_request(&mut stream);
-                        let response = response_for(&request, &base_url);
+                        let search_index = if request.starts_with("GET /search/issues") {
+                            search_count.fetch_add(1, Ordering::SeqCst)
+                        } else {
+                            search_count.load(Ordering::SeqCst)
+                        };
+                        let response = response_for(&request, &base_url, search_index);
                         if response.tracks_detail_concurrency {
                             let in_flight =
                                 active_detail_requests.fetch_add(1, Ordering::SeqCst) + 1;
@@ -132,8 +144,11 @@ struct MockResponse {
     tracks_detail_concurrency: bool,
 }
 
-fn response_for(request: &str, base_url: &str) -> MockResponse {
+fn response_for(request: &str, base_url: &str, search_index: usize) -> MockResponse {
     if request.starts_with("GET /search/issues") {
+        if search_index > 0 {
+            return ok(r#"{"items":[]}"#.to_string());
+        }
         return ok(search_body(base_url));
     }
 

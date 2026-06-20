@@ -4,6 +4,7 @@ pub mod competition;
 pub mod config;
 pub mod context_pack;
 pub mod discovery;
+pub mod dispatch;
 pub mod doctor;
 pub mod errors;
 pub mod evidence_pack;

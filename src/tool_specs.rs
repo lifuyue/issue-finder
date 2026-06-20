@@ -14,6 +14,18 @@ pub const TOOL_MEMORY_HINTS_LIST: &str = "issue-finder.memory_hints_list";
 pub const TOOL_MEMORY_HINT_UPDATE: &str = "issue-finder.memory_hint_update";
 pub const TOOL_MEMORY_TOMBSTONE: &str = "issue-finder.memory_tombstone";
 
+pub use crate::dispatch::tool_specs::{
+    TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT, TOOL_A2A_REJECT_SEND,
+    TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE,
+    TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
+    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_REJECT,
+    TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
+    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_SESSIONS_APPROVE_MUTATION,
+    TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
+    TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
+};
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueFinderToolSpecsEnvelope {
@@ -63,85 +75,88 @@ pub struct IssueFinderToolSpec {
 }
 
 pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
+    let mut tools = vec![
+        tool_spec(
+            "status",
+            "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
+            status_schema(),
+            false,
+        ),
+        tool_spec(
+            "scout",
+            "Discover and rank candidate GitHub issues with gate-aware summaries.",
+            scout_schema(),
+            false,
+        ),
+        tool_spec(
+            "assess",
+            "Assess one GitHub issue without preparing workspace or handoff state.",
+            assess_schema(),
+            false,
+        ),
+        tool_spec(
+            "prepare",
+            "Prepare a workspace and handoff for one issue after the prepare gate passes.",
+            prepare_schema(),
+            false,
+        ),
+        tool_spec(
+            "read_context",
+            "Read one fixed section from a prepared Issue Finder handoff context pack.",
+            read_context_schema(),
+            true,
+        ),
+        tool_spec(
+            "memory_status",
+            "Report local contribution memory status without exposing raw payloads.",
+            memory_status_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_recall",
+            "Recall memory for an issue and return compact evidence references.",
+            memory_recall_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_dreams_list",
+            "List reviewable memory dreams.",
+            empty_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_dream_show",
+            "Show one memory dream and its candidate hints.",
+            memory_dream_show_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_hints_list",
+            "List memory hints and decision eligibility metadata.",
+            empty_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_hint_update",
+            "Review or control one memory hint using a structured state transition.",
+            memory_hint_update_schema(),
+            false,
+        ),
+        tool_spec(
+            "memory_tombstone",
+            "Tombstone a memory raw event, node, or hint id.",
+            memory_tombstone_schema(),
+            false,
+        ),
+    ];
+    tools.extend(crate::dispatch::tool_specs::dispatch_tool_specs());
+
     IssueFinderToolSpecsEnvelope {
         kind: "issue_finder_tool_specs".to_string(),
         version: 1,
         quick_start: quick_start(),
         recommended_workflow: recommended_workflow(),
-        tools: vec![
-            tool_spec(
-                "status",
-                "Report Issue Finder config, GitHub token source, and auth readiness without exposing tokens.",
-                status_schema(),
-                false,
-            ),
-            tool_spec(
-                "scout",
-                "Discover and rank candidate GitHub issues with gate-aware summaries.",
-                scout_schema(),
-                false,
-            ),
-            tool_spec(
-                "assess",
-                "Assess one GitHub issue without preparing workspace or handoff state.",
-                assess_schema(),
-                false,
-            ),
-            tool_spec(
-                "prepare",
-                "Prepare a workspace and handoff for one issue after the prepare gate passes.",
-                prepare_schema(),
-                false,
-            ),
-            tool_spec(
-                "read_context",
-                "Read one fixed section from a prepared Issue Finder handoff context pack.",
-                read_context_schema(),
-                true,
-            ),
-            tool_spec(
-                "memory_status",
-                "Report local contribution memory status without exposing raw payloads.",
-                memory_status_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_recall",
-                "Recall memory for an issue and return compact evidence references.",
-                memory_recall_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_dreams_list",
-                "List reviewable memory dreams.",
-                empty_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_dream_show",
-                "Show one memory dream and its candidate hints.",
-                memory_dream_show_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_hints_list",
-                "List memory hints and decision eligibility metadata.",
-                empty_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_hint_update",
-                "Review or control one memory hint using a structured state transition.",
-                memory_hint_update_schema(),
-                false,
-            ),
-            tool_spec(
-                "memory_tombstone",
-                "Tombstone a memory raw event, node, or hint id.",
-                memory_tombstone_schema(),
-                false,
-            ),
-        ],
+        tools,
     }
 }
 
@@ -369,9 +384,18 @@ fn memory_tombstone_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_tool_specs, TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW,
-        TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS,
-        TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+        list_tool_specs, TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT,
+        TOOL_A2A_REJECT_SEND, TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_ASSESS,
+        TOOL_DISPATCH, TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS,
+        TOOL_DISPATCH_EXECUTE, TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_REJECT,
+        TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+        TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
+        TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_MEMORY_DREAMS_LIST,
+        TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE,
+        TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS, TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE,
+        TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE,
+        TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION,
+        TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC, TOOL_STATUS,
     };
 
     #[test]
@@ -402,7 +426,37 @@ mod tests {
                 TOOL_MEMORY_DREAM_SHOW,
                 TOOL_MEMORY_HINTS_LIST,
                 TOOL_MEMORY_HINT_UPDATE,
-                TOOL_MEMORY_TOMBSTONE
+                TOOL_MEMORY_TOMBSTONE,
+                TOOL_AGENTS_LIST,
+                TOOL_AGENT_CAPABILITIES,
+                TOOL_SESSIONS_LIST,
+                TOOL_SESSIONS_SYNC,
+                TOOL_SESSIONS_SEARCH,
+                TOOL_SESSIONS_READ,
+                TOOL_SESSIONS_RENAME,
+                TOOL_SESSIONS_FORK,
+                TOOL_SESSIONS_ARCHIVE,
+                TOOL_SESSIONS_APPROVE_MUTATION,
+                TOOL_SESSIONS_REJECT_MUTATION,
+                TOOL_DISPATCH_STATUS,
+                TOOL_DISPATCH_EVENTS,
+                TOOL_DISPATCH_ARTIFACTS,
+                TOOL_DISPATCH_IMPORT_HANDOFF,
+                TOOL_DISPATCH,
+                TOOL_DISPATCH_APPROVE,
+                TOOL_DISPATCH_REJECT,
+                TOOL_DISPATCH_EXECUTE,
+                TOOL_A2A_EXPORT_TASK,
+                TOOL_A2A_APPROVE_SEND,
+                TOOL_A2A_REJECT_SEND,
+                TOOL_A2A_IMPORT_RESULT,
+                TOOL_GITHUB_DRAFT_TRACKING_COMMENT,
+                TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+                TOOL_GITHUB_APPROVE_COMMENT,
+                TOOL_GITHUB_REJECT_COMMENT,
+                TOOL_GITHUB_POST_COMMENT,
+                TOOL_GITHUB_RETRY_COMMENT,
+                TOOL_GITHUB_INTERACTIONS
             ]
         );
 

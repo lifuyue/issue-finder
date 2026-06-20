@@ -1,0 +1,655 @@
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+use serde_json::json;
+
+use crate::config::Config;
+use crate::github::IssueRef;
+use crate::paths::IssueFinderPaths;
+
+use super::a2a_gateway::{self, A2aApprovalResult, A2aExportResult, A2aResultImport};
+use super::adapters::codex_app_server::{
+    codex_capability_mappings, default_codex_app_server_startup_metadata,
+};
+use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
+use super::github_projection::{
+    self, GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
+    ReqwestGitHubCommentWriter,
+};
+use super::memory::record_dispatch_approval_signal;
+use super::model::{
+    AgentArtifact, AgentCapability, AgentCapabilityName, AgentEvent, AgentProfile,
+    AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
+    CapabilityStatus, DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus,
+    NewAgentCapability, NewAgentEvent, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
+};
+use super::packaging::{self, PackageImportResult};
+use super::session_approvals::{
+    approve_session_mutation_with_adapter, pending_session_mutation, reject_session_mutation,
+    request_session_archive, request_session_fork, request_session_rename, PendingSessionMutation,
+    SessionMutationApprovalResolution, SessionMutationProposal,
+};
+use super::session_ops::{
+    read_codex_session_transcript, sync_codex_sessions, SessionTranscriptResult,
+    SessionsSyncRequest, SessionsSyncResult,
+};
+use super::store::DispatchStore;
+
+pub struct DispatchRuntime {
+    store: DispatchStore,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapabilitiesView {
+    pub agent: AgentProfile,
+    pub capabilities: Vec<AgentCapability>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSearchResult {
+    pub issue_key: String,
+    pub issue_task_found: bool,
+    pub sessions: Vec<AgentSessionLink>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchStatusSnapshot {
+    pub run: DispatchRun,
+    pub issue_task: super::model::IssueTask,
+    pub agent: AgentProfile,
+    pub selected_session: Option<AgentSessionLink>,
+    pub approval_requests: Vec<ApprovalRequest>,
+    pub artifacts: Vec<AgentArtifact>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchProposal {
+    pub status: String,
+    pub run: DispatchRun,
+    pub approval_request: ApprovalRequest,
+    pub issue_task: super::model::IssueTask,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchApprovalResolution {
+    pub run: DispatchRun,
+    pub approval_request: ApprovalRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchProposalRequest {
+    pub issue: String,
+    pub agent_id: String,
+    pub requested_by: String,
+    pub selected_session_link_id: Option<String>,
+    pub new_session: bool,
+}
+
+impl DispatchRuntime {
+    pub fn open(paths: IssueFinderPaths) -> Result<Self> {
+        let store = DispatchStore::open(paths)?;
+        ensure_builtin_agents(&store)?;
+        Ok(Self { store })
+    }
+
+    pub fn store(&self) -> &DispatchStore {
+        &self.store
+    }
+
+    pub fn list_agents(&self) -> Result<Vec<AgentProfile>> {
+        self.store.list_agent_profiles()
+    }
+
+    pub fn agent_capabilities(&self, agent_id: &str) -> Result<AgentCapabilitiesView> {
+        Ok(AgentCapabilitiesView {
+            agent: self.store.get_agent_profile(agent_id)?,
+            capabilities: self.store.list_agent_capabilities(agent_id)?,
+        })
+    }
+
+    pub fn list_sessions(&self, agent_id: Option<&str>) -> Result<Vec<AgentSessionLink>> {
+        self.store.list_session_links(agent_id)
+    }
+
+    pub fn search_sessions(
+        &self,
+        issue: &str,
+        agent_id: Option<&str>,
+    ) -> Result<SessionSearchResult> {
+        let issue_ref = IssueRef::parse(issue)?;
+        let issue_key = format!("{}#{}", issue_ref.repo_full_name(), issue_ref.number);
+        let Some(issue_task) = self.store.find_issue_task_by_key(&issue_key)? else {
+            return Ok(SessionSearchResult {
+                issue_key,
+                issue_task_found: false,
+                sessions: Vec::new(),
+            });
+        };
+
+        let mut sessions = self
+            .store
+            .list_session_links_for_issue_task(&issue_task.id)?;
+        if let Some(agent_id) = agent_id {
+            sessions.retain(|session| session.agent_id == agent_id);
+        }
+
+        Ok(SessionSearchResult {
+            issue_key,
+            issue_task_found: true,
+            sessions,
+        })
+    }
+
+    pub fn sync_sessions(&self, request: SessionsSyncRequest) -> Result<SessionsSyncResult> {
+        let agent = self.store.get_agent_profile(&request.agent_id)?;
+        if agent.adapter != "codex_app_server" {
+            anyhow::bail!(
+                "agent {} uses adapter {}, not codex_app_server",
+                agent.id,
+                agent.adapter
+            );
+        }
+        let capability = if request
+            .search
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            AgentCapabilityName::SearchSessions
+        } else {
+            AgentCapabilityName::ListSessions
+        };
+        self.ensure_agent_capability(&agent.id, capability)?;
+        sync_codex_sessions(&self.store, request)
+    }
+
+    pub fn read_session_transcript(
+        &self,
+        session_link_id: &str,
+    ) -> Result<SessionTranscriptResult> {
+        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ReadTranscript)?;
+        read_codex_session_transcript(&self.store, session_link_id)
+    }
+
+    pub fn rename_session(
+        &self,
+        session_link_id: &str,
+        display_name: &str,
+    ) -> Result<SessionMutationProposal> {
+        if display_name.trim().is_empty() {
+            anyhow::bail!("session display name cannot be empty");
+        }
+        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::RenameSession)?;
+        request_session_rename(&self.store, session_link_id, display_name)
+    }
+
+    pub fn archive_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
+        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ArchiveSession)?;
+        request_session_archive(&self.store, session_link_id)
+    }
+
+    pub fn fork_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
+        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?;
+        request_session_fork(&self.store, session_link_id)
+    }
+
+    pub fn approve_session_mutation(
+        &self,
+        approval_request_id: &str,
+    ) -> Result<SessionMutationApprovalResolution> {
+        let mutation = pending_session_mutation(&self.store, approval_request_id)?;
+        match &mutation {
+            PendingSessionMutation::Rename {
+                session_link_id, ..
+            } => self.ensure_codex_session_adapter(
+                session_link_id,
+                AgentCapabilityName::RenameSession,
+            )?,
+            PendingSessionMutation::Fork { session_link_id } => self
+                .ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?,
+            PendingSessionMutation::Archive { session_link_id } => self
+                .ensure_codex_session_adapter(
+                    session_link_id,
+                    AgentCapabilityName::ArchiveSession,
+                )?,
+        }
+        let session = self.store.get_session_link(mutation.session_link_id())?;
+        let agent = self.store.get_agent_profile(&session.agent_id)?;
+        if agent.adapter != "codex_app_server" {
+            anyhow::bail!(
+                "session link {} uses adapter {}, not codex_app_server",
+                session.id,
+                agent.adapter
+            );
+        }
+        let transport = super::adapters::codex_app_server::CodexAppServerStdioTransport::connect()?;
+        let mut adapter = super::adapters::codex_app_server::CodexAppServerAdapter::new(transport);
+        approve_session_mutation_with_adapter(&self.store, &mut adapter, approval_request_id)
+    }
+
+    pub fn reject_session_mutation(
+        &self,
+        approval_request_id: &str,
+    ) -> Result<SessionMutationApprovalResolution> {
+        reject_session_mutation(&self.store, approval_request_id)
+    }
+
+    pub fn dispatch_status(&self, run_id: &str) -> Result<DispatchStatusSnapshot> {
+        let run = self.store.get_dispatch_run(run_id)?;
+        let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+        let agent = self.store.get_agent_profile(&run.agent_id)?;
+        let selected_session = run
+            .selected_session_link_id
+            .as_deref()
+            .map(|session_id| self.store.get_session_link(session_id))
+            .transpose()?;
+        let approval_requests = self.store.list_approval_requests_for_run(run_id)?;
+        let artifacts = self.store.list_artifacts_for_run(run_id)?;
+
+        Ok(DispatchStatusSnapshot {
+            run,
+            issue_task,
+            agent,
+            selected_session,
+            approval_requests,
+            artifacts,
+        })
+    }
+
+    pub fn dispatch_events(&self, run_id: &str) -> Result<Vec<AgentEvent>> {
+        self.store.list_agent_events_for_run(run_id)
+    }
+
+    pub fn dispatch_artifacts(&self, run_id: &str) -> Result<Vec<AgentArtifact>> {
+        self.store.list_artifacts_for_run(run_id)
+    }
+
+    pub fn import_handoff_from_inbox(&self, inbox_id: &str) -> Result<PackageImportResult> {
+        packaging::import_handoff_from_inbox(&self.store, inbox_id)
+    }
+
+    pub fn export_a2a_task(&self, issue: &str) -> Result<A2aExportResult> {
+        packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
+        a2a_gateway::export_task(&self.store, issue)
+    }
+
+    pub fn approve_a2a_send(&self, approval_request_id: &str) -> Result<A2aApprovalResult> {
+        a2a_gateway::approve_send(&self.store, approval_request_id)
+    }
+
+    pub fn reject_a2a_send(&self, approval_request_id: &str) -> Result<A2aApprovalResult> {
+        a2a_gateway::reject_send(&self.store, approval_request_id)
+    }
+
+    pub fn import_a2a_result(
+        &self,
+        run_id: &str,
+        path: &Path,
+        kind: &str,
+        content_type: &str,
+        status: Option<DispatchRunStatus>,
+    ) -> Result<A2aResultImport> {
+        a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)
+    }
+
+    pub fn propose_dispatch(&self, request: DispatchProposalRequest) -> Result<DispatchProposal> {
+        if request.new_session && request.selected_session_link_id.is_some() {
+            anyhow::bail!("new_session cannot be combined with selected_session_link_id");
+        }
+
+        let agent = self.store.get_agent_profile(&request.agent_id)?;
+        let issue_task =
+            packaging::ensure_packaged_issue_task_for_issue(&self.store, &request.issue)?;
+        let issue_key = issue_task.issue_key.clone();
+        let selected_session_link_id = match request.selected_session_link_id {
+            Some(selector) => Some(self.resolve_dispatch_session_selector(&agent.id, &selector)?),
+            None => None,
+        };
+        let selected_session = selected_session_link_id
+            .as_deref()
+            .map(|session_link_id| self.store.get_session_link(session_link_id))
+            .transpose()?;
+        let dispatch_capability = if selected_session_link_id.is_some() {
+            AgentCapabilityName::ResumeSession
+        } else {
+            AgentCapabilityName::StartSession
+        };
+        self.ensure_agent_capability(&agent.id, dispatch_capability)?;
+        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetGoal)?;
+        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetMetadata)?;
+
+        let run = self.store.create_dispatch_run(NewDispatchRun {
+            issue_task_id: issue_task.id.clone(),
+            agent_id: agent.id,
+            status: DispatchRunStatus::Proposed,
+            requested_by: request.requested_by,
+            approval_state: ApprovalStatus::Pending,
+            selected_session_link_id,
+        })?;
+        let approval_request = self.store.create_approval_request(NewApprovalRequest {
+            run_id: Some(run.id.clone()),
+            approval_type: ApprovalType::Dispatch,
+            status: ApprovalStatus::Pending,
+            prompt: dispatch_approval_prompt(&issue_key, &run.agent_id, selected_session.as_ref()),
+            details_json: json!({
+                "issueKey": issue_key,
+                "agentId": run.agent_id,
+                "executionMode": if selected_session.is_some() { "resume_session" } else { "start_session" },
+                "newSession": selected_session.is_none(),
+                "requestedNewSession": request.new_session,
+                "selectedSessionLinkId": run.selected_session_link_id,
+                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str())
+            }),
+        })?;
+
+        Ok(DispatchProposal {
+            status: "pending_approval".to_string(),
+            run,
+            approval_request,
+            issue_task,
+        })
+    }
+
+    pub fn resolve_dispatch_approval(
+        &self,
+        run_id: &str,
+        status: ApprovalStatus,
+    ) -> Result<DispatchApprovalResolution> {
+        if status == ApprovalStatus::Pending {
+            anyhow::bail!("dispatch approval cannot be resolved to pending");
+        }
+
+        let run = self.store.get_dispatch_run(run_id)?;
+        let approval_request = self
+            .store
+            .list_approval_requests_for_run(run_id)?
+            .into_iter()
+            .rev()
+            .find(|approval| {
+                approval.approval_type == ApprovalType::Dispatch
+                    && approval.status == ApprovalStatus::Pending
+            })
+            .with_context(|| format!("dispatch run {run_id} has no pending dispatch approval"))?;
+        let approval_request = self
+            .store
+            .resolve_approval_request(&approval_request.id, status)?;
+        let run = self
+            .store
+            .update_dispatch_run_approval_state(&run.id, status)?;
+        let run = match status {
+            ApprovalStatus::Approved => {
+                let run = self.store.update_dispatch_run_status(
+                    &run.id,
+                    DispatchRunStatus::Approved,
+                    None,
+                )?;
+                self.store
+                    .update_issue_task_status(&run.issue_task_id, IssueTaskStatus::Dispatched)?;
+                run
+            }
+            ApprovalStatus::Rejected | ApprovalStatus::Canceled => self
+                .store
+                .update_dispatch_run_status(&run.id, DispatchRunStatus::Canceled, None)?,
+            ApprovalStatus::Pending => unreachable!(),
+        };
+        self.store.append_agent_event(NewAgentEvent {
+            run_id: Some(run.id.clone()),
+            session_link_id: run.selected_session_link_id.clone(),
+            event_type: "dispatch_approval_resolved".to_string(),
+            native_event_id: None,
+            payload_json: json!({
+                "approvalRequestId": approval_request.id,
+                "approvalStatus": status.as_str(),
+                "runStatus": run.status.as_str()
+            }),
+        })?;
+        record_dispatch_approval_signal(&self.store, &run, &approval_request)?;
+
+        Ok(DispatchApprovalResolution {
+            run,
+            approval_request,
+        })
+    }
+
+    pub fn execute_dispatch(&self, run_id: &str) -> Result<DispatchExecutionResult> {
+        execute_approved_codex_app_server_dispatch(&self.store, run_id)
+    }
+
+    pub fn draft_github_tracking_comment(
+        &self,
+        issue: &str,
+        body_override: Option<String>,
+    ) -> Result<GitHubCommentDraftResult> {
+        packaging::ensure_issue_task_for_issue(&self.store, issue)?;
+        github_projection::draft_tracking_comment(&self.store, issue, body_override)
+    }
+
+    pub fn draft_github_final_comment(
+        &self,
+        run_id: &str,
+        body_override: Option<String>,
+    ) -> Result<GitHubCommentDraftResult> {
+        github_projection::draft_final_comment(&self.store, run_id, body_override)
+    }
+
+    pub fn approve_github_interaction(&self, interaction_id: &str) -> Result<GitHubApprovalResult> {
+        github_projection::approve_github_interaction(&self.store, interaction_id)
+    }
+
+    pub fn reject_github_interaction(&self, interaction_id: &str) -> Result<GitHubApprovalResult> {
+        github_projection::reject_github_interaction(&self.store, interaction_id)
+    }
+
+    pub fn post_github_interaction(
+        &self,
+        config: &Config,
+        interaction_id: &str,
+    ) -> Result<GitHubPostResult> {
+        let mut writer = ReqwestGitHubCommentWriter::from_config(config)?;
+        self.post_github_interaction_with_writer(&mut writer, interaction_id)
+    }
+
+    pub fn post_github_interaction_with_writer<W>(
+        &self,
+        writer: &mut W,
+        interaction_id: &str,
+    ) -> Result<GitHubPostResult>
+    where
+        W: GitHubCommentWriter,
+    {
+        github_projection::post_github_interaction(&self.store, writer, interaction_id)
+    }
+
+    pub fn retry_github_interaction(
+        &self,
+        config: &Config,
+        interaction_id: &str,
+    ) -> Result<GitHubPostResult> {
+        let mut writer = ReqwestGitHubCommentWriter::from_config(config)?;
+        self.retry_github_interaction_with_writer(&mut writer, interaction_id)
+    }
+
+    pub fn retry_github_interaction_with_writer<W>(
+        &self,
+        writer: &mut W,
+        interaction_id: &str,
+    ) -> Result<GitHubPostResult>
+    where
+        W: GitHubCommentWriter,
+    {
+        github_projection::retry_github_interaction(&self.store, writer, interaction_id)
+    }
+
+    pub fn list_github_interactions(&self, issue: &str) -> Result<Vec<GitHubInteraction>> {
+        github_projection::list_github_interactions(&self.store, issue)
+    }
+
+    fn resolve_dispatch_session_selector(&self, agent_id: &str, selector: &str) -> Result<String> {
+        let session = match self.store.get_session_link(selector) {
+            Ok(session) => session,
+            Err(link_error) => self
+                .store
+                .find_session_link_by_native_id_opt(agent_id, selector)?
+                .with_context(|| {
+                    format!(
+                        "session selector {selector} is neither a local session link id nor a native session id for agent {agent_id}: {link_error}"
+                    )
+                })?,
+        };
+        if session.agent_id != agent_id {
+            anyhow::bail!(
+                "session link {} belongs to agent {}, not {}",
+                session.id,
+                session.agent_id,
+                agent_id
+            );
+        }
+        if session.status == AgentSessionStatus::Archived {
+            anyhow::bail!("session link {} is archived", session.id);
+        }
+        Ok(session.id)
+    }
+
+    fn ensure_codex_session_adapter(
+        &self,
+        session_link_id: &str,
+        capability: AgentCapabilityName,
+    ) -> Result<()> {
+        let session = self.store.get_session_link(session_link_id)?;
+        let agent = self.store.get_agent_profile(&session.agent_id)?;
+        if agent.adapter != "codex_app_server" {
+            anyhow::bail!(
+                "session link {session_link_id} uses adapter {}, not codex_app_server",
+                agent.adapter
+            );
+        }
+        let capability = self.store.get_agent_capability(&agent.id, capability)?;
+        if capability.status == CapabilityStatus::Unsupported {
+            anyhow::bail!(
+                "agent {} does not support capability {}",
+                agent.id,
+                capability.capability.as_str()
+            );
+        }
+        Ok(())
+    }
+
+    fn ensure_agent_capability(
+        &self,
+        agent_id: &str,
+        capability: AgentCapabilityName,
+    ) -> Result<()> {
+        let capability = self.store.get_agent_capability(agent_id, capability)?;
+        if capability.status == CapabilityStatus::Unsupported {
+            anyhow::bail!(
+                "agent {agent_id} does not support capability {}",
+                capability.capability.as_str()
+            );
+        }
+        Ok(())
+    }
+}
+
+fn ensure_builtin_agents(store: &DispatchStore) -> Result<()> {
+    store.ensure_agent_profile(NewAgentProfile {
+        id: Some("codex".to_string()),
+        kind: "codex".to_string(),
+        display_name: "Codex".to_string(),
+        adapter: "codex_app_server".to_string(),
+        config_json: json!({
+            "source": "builtin",
+            "adapterBoundary": "experimental_codex_app_server"
+        }),
+        enabled: true,
+    })?;
+
+    for (capability, status, details) in codex_capabilities() {
+        store.upsert_agent_capability(NewAgentCapability {
+            agent_id: "codex".to_string(),
+            capability,
+            status,
+            details_json: details,
+        })?;
+    }
+
+    Ok(())
+}
+
+fn dispatch_approval_prompt(
+    issue_key: &str,
+    agent_id: &str,
+    selected_session: Option<&AgentSessionLink>,
+) -> String {
+    match selected_session {
+        Some(session) => format!(
+            "Dispatch {issue_key} to {agent_id} by resuming native session {} ({})?",
+            session.native_session_id, session.id
+        ),
+        None => format!("Dispatch {issue_key} to {agent_id} by starting a new native session?"),
+    }
+}
+
+fn codex_capabilities() -> Vec<(AgentCapabilityName, CapabilityStatus, serde_json::Value)> {
+    let startup = default_codex_app_server_startup_metadata();
+    let binary = startup
+        .get("binary")
+        .cloned()
+        .unwrap_or_else(|| json!({ "name": "codex", "available": false }));
+    let mut capabilities = codex_capability_mappings()
+        .into_iter()
+        .map(|mapping| {
+            let wired_to_runtime = matches!(
+                mapping.capability,
+                AgentCapabilityName::StartSession
+                    | AgentCapabilityName::ResumeSession
+                    | AgentCapabilityName::ForkSession
+                    | AgentCapabilityName::RenameSession
+                    | AgentCapabilityName::ListSessions
+                    | AgentCapabilityName::SearchSessions
+                    | AgentCapabilityName::ReadTranscript
+                    | AgentCapabilityName::SetGoal
+                    | AgentCapabilityName::SetMetadata
+                    | AgentCapabilityName::ArchiveSession
+            );
+            if wired_to_runtime {
+                (
+                    mapping.capability,
+                    CapabilityStatus::Experimental,
+                    json!({
+                        "protocol": "codex_app_server_json_rpc",
+                        "method": mapping.method,
+                        "status": "wired_to_dispatch_runtime",
+                        "binary": binary.clone(),
+                        "startup": startup.clone()
+                    }),
+                )
+            } else {
+                (
+                    mapping.capability,
+                    CapabilityStatus::Unsupported,
+                    json!({
+                        "protocol": "codex_app_server_json_rpc",
+                        "method": mapping.method,
+                        "reason": "Codex exposes this native method, but Issue Finder does not wire this capability in the first dispatch runtime implementation",
+                        "binary": binary.clone(),
+                        "startup": startup.clone()
+                    }),
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+    capabilities.push((
+        AgentCapabilityName::OpenPr,
+        CapabilityStatus::Unsupported,
+        json!({
+            "reason": "Issue Finder must not create pull requests in the first implementation",
+            "startup": startup
+        }),
+    ));
+    capabilities
+}

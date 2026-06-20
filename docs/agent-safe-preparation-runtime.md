@@ -31,7 +31,7 @@ inbox/<id>/
         refs.json
 ```
 
-`handoff.json` remains canonical. The new runtime fields are additive:
+`handoff.json` remains canonical for prepared inbox items. The dispatch control plane can also persist the same handoff as an `IssueTaskPackage` artifact alongside dispatch runs, session links, approvals, events, and result artifacts. The preparation runtime fields are additive:
 
 - `agent_policy`: same content as `agent-policy.json`
 - `probe_pack`: same content as `probe.json`

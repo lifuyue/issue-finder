@@ -6,7 +6,7 @@ Issue Finder is a Rust rewrite inspired by the current OpenMeta project, but it 
 
 The command name is `issue-finder`. The repository and package name should be `issue-finder`.
 
-Current implementation note: the original handoff model described here has been extended by the agent-safe preparation runtime. See [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md) for the current artifact structure, policy manifest, safe probes, and readiness output.
+Current implementation note: this document records the first Rust product boundary. The original handoff model has since been extended by the agent-safe preparation runtime and the staged agent dispatch control plane. See [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md) for the current prepared artifact structure and [`superpowers/specs/2026-06-18-agent-dispatch-control-plane-design.md`](./superpowers/specs/2026-06-18-agent-dispatch-control-plane-design.md) for the dispatch architecture.
 
 ## Product Positioning
 
@@ -23,7 +23,7 @@ Discover good first issues
   -> Generate a daily report.md
 ```
 
-`handoff.json` is the canonical output. `handoff.md` is a lightweight human-readable summary. Newer prepared items also include `codex.md`, `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, generated context files, and a local `issue-finder` skill.
+`handoff.json` is the canonical prepared inbox artifact. `handoff.md` is a lightweight human-readable summary. Newer prepared items also include `codex.md`, `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, generated context files, and a local `issue-finder` skill. Dispatch state stores handoff and task package payloads as durable artifacts rather than replacing the inbox format in the first migration.
 
 ## Goals
 
@@ -37,11 +37,10 @@ Discover good first issues
 - Support optional OpenAI-compatible LLM enhancement without making LLMs required.
 - Keep the first version safe by avoiding code edits, test execution, commits, pushes, and PR creation.
 
-## Non-Goals
+## Historical Non-Goals
 
 - Do not implement a general coding agent.
-- Do not implement agent adapters in the first version.
-- Do not start Codex, Cursor, Claude Code, Cline, or other coding agents.
+- The original handoff-only version did not start Codex, Cursor, Claude Code, Cline, or other coding agents. The later dispatch control plane adds approval-gated native Codex session dispatch as a separate runtime boundary.
 - Do not generate or apply patches.
 - Do not modify target repository source files.
 - Do not run validation commands automatically.
