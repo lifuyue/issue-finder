@@ -6,10 +6,11 @@ use serde_json::{json, Value};
 
 use crate::github::IssueRef;
 
+use super::events::dispatch_run_event;
 use super::model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, ApprovalRequest,
-    ApprovalStatus, ApprovalType, DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus,
-    NewAgentEvent, NewApprovalRequest, NewArtifact,
+    ApprovalStatus, ApprovalType, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
+    DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus, NewApprovalRequest, NewArtifact,
 };
 use super::store::DispatchStore;
 
@@ -151,17 +152,17 @@ pub fn import_result(
         },
         contents,
     )?;
-    store.append_agent_event(NewAgentEvent {
-        run_id: Some(run.id.clone()),
-        session_link_id: run.selected_session_link_id.clone(),
-        event_type: "a2a_result_imported".to_string(),
-        native_event_id: None,
-        payload_json: json!({
+    store.append_dispatch_event(dispatch_run_event(
+        &run,
+        DispatchEventKind::A2aResultImported,
+        DispatchEventSource::A2a,
+        DispatchEventSeverity::Info,
+        json!({
             "artifactId": artifact.id,
             "kind": kind,
             "sourcePath": path.to_string_lossy()
         }),
-    })?;
+    ))?;
 
     if kind == "fix_result" {
         store.set_dispatch_run_result_artifact(&run.id, &artifact.id)?;

@@ -25,6 +25,10 @@ pub fn handle_agents_cli(paths: &IssueFinderPaths, args: AgentsArgs) -> Result<S
                 render_agent_capabilities(&capabilities)
             })
         }
+        AgentsCommand::Probe(args) => {
+            let result = runtime.probe_agent(&args.agent, args.refresh)?;
+            render_cli_output(args.json, &result, || render_agent_probe(&result))
+        }
     }
 }
 
@@ -50,6 +54,10 @@ pub fn handle_sessions_cli(paths: &IssueFinderPaths, args: SessionsArgs) -> Resu
         SessionsCommand::Read(args) => {
             let result = runtime.read_session_transcript(&args.session_link_id)?;
             render_cli_output(args.json, &result, || render_session_transcript(&result))
+        }
+        SessionsCommand::Replay(args) => {
+            let result = runtime.session_replay(&args.session_link_id)?;
+            render_cli_output(args.json, &result, || render_session_replay(&result))
         }
         SessionsCommand::Rename(args) => {
             let result = runtime.rename_session(&args.session_link_id, &args.name)?;
@@ -206,6 +214,14 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
         Some(DispatchCommand::Events(args)) => {
             let events = runtime.dispatch_events(&args.run_id)?;
             render_cli_output(args.json, &events, || render_dispatch_events(&events))
+        }
+        Some(DispatchCommand::Timeline(args)) => {
+            let timeline = runtime.dispatch_timeline(&args.run_id)?;
+            render_cli_output(args.json, &timeline, || render_dispatch_timeline(&timeline))
+        }
+        Some(DispatchCommand::Trace(args)) => {
+            let trace = runtime.dispatch_trace(&args.run_id)?;
+            render_cli_output(args.json, &trace, || render_dispatch_trace(&trace))
         }
         Some(DispatchCommand::Artifacts(args)) => {
             let artifacts = runtime.dispatch_artifacts(&args.run_id)?;

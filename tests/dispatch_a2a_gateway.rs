@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    ApprovalStatus, ApprovalType, DispatchRunStatus, DispatchRuntime, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, NewDispatchRun, NewIssueTask,
+    ApprovalStatus, ApprovalType, DispatchEventKind, DispatchRunStatus, DispatchRuntime,
+    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewDispatchRun, NewIssueTask,
 };
 use issue_finder::paths::IssueFinderPaths;
 use tempfile::tempdir;
@@ -97,9 +97,12 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
         runtime.store().get_issue_task(&task.id).unwrap().status,
         IssueTaskStatus::FixReady
     );
-    let events = runtime.store().list_agent_events_for_run(&run.id).unwrap();
+    let events = runtime
+        .store()
+        .list_dispatch_events_for_run(&run.id)
+        .unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_type, "a2a_result_imported");
+    assert_eq!(events[0].event_kind, DispatchEventKind::A2aResultImported);
     assert_eq!(
         events[0].payload_json["artifactId"].as_str(),
         Some(imported.artifact.id.as_str())

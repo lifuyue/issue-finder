@@ -6,10 +6,12 @@ use super::adapters::{
     codex_app_server::{CodexAppServerAdapter, CodexAppServerStdioTransport},
     AdapterSession, AdapterStartSessionRequest, AdapterTurn, NativeExecutionAdapter,
 };
+use super::events::{dispatch_run_event, run_session_event};
+use super::failure::execution_failure;
 use super::model::{
-    AgentArtifact, AgentCapabilityName, AgentEvent, AgentSessionLink, AgentSessionStatus,
-    ApprovalStatus, CapabilityStatus, DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus,
-    NewAgentEvent, NewAgentSessionLink, NewArtifact,
+    AgentArtifact, AgentCapabilityName, AgentSessionLink, AgentSessionStatus, ApprovalStatus,
+    CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
+    DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus, NewAgentSessionLink, NewArtifact,
 };
 use super::store::DispatchStore;
 
@@ -20,7 +22,7 @@ pub struct DispatchExecutionResult {
     pub session: AgentSessionLink,
     pub turn: AdapterTurn,
     pub prompt_artifact: AgentArtifact,
-    pub events: Vec<AgentEvent>,
+    pub events: Vec<DispatchEvent>,
 }
 
 pub fn execute_approved_dispatch<A>(
@@ -42,13 +44,16 @@ where
                 DispatchRunStatus::Failed,
                 Some(error.to_string()),
             );
-            let _ = store.append_agent_event(NewAgentEvent {
-                run_id: Some(run_id.to_string()),
-                session_link_id: None,
-                event_type: "dispatch_failed".to_string(),
-                native_event_id: None,
-                payload_json: json!({ "error": error.to_string() }),
-            });
+            let _ = store.record_dispatch_failure(execution_failure(run_id, "execute", &error));
+            if let Ok(run) = store.get_dispatch_run(run_id) {
+                let _ = store.append_dispatch_event(dispatch_run_event(
+                    &run,
+                    DispatchEventKind::DispatchFailed,
+                    DispatchEventSource::Runtime,
+                    DispatchEventSeverity::Error,
+                    json!({ "error": error.to_string() }),
+                ));
+            }
             Err(error)
         }
     }
@@ -134,17 +139,17 @@ where
     );
 
     let mut events = Vec::new();
-    events.push(store.append_agent_event(NewAgentEvent {
-        run_id: Some(starting_run.id.clone()),
-        session_link_id: starting_run.selected_session_link_id.clone(),
-        event_type: "dispatch_starting".to_string(),
-        native_event_id: None,
-        payload_json: json!({
+    events.push(store.append_dispatch_event(dispatch_run_event(
+        &starting_run,
+        DispatchEventKind::DispatchStarting,
+        DispatchEventSource::Runtime,
+        DispatchEventSeverity::Info,
+        json!({
             "agentId": starting_run.agent_id,
             "issueKey": context.issue_task.issue_key,
             "packageArtifactId": context.package_artifact.id
         }),
-    })?);
+    ))?);
 
     let (session_link, native_session, session_event_type) =
         match starting_run.selected_session_link_id.as_deref() {
@@ -168,17 +173,18 @@ where
             )?,
         };
 
-    events.push(store.append_agent_event(NewAgentEvent {
-        run_id: Some(starting_run.id.clone()),
-        session_link_id: Some(session_link.id.clone()),
-        event_type: session_event_type.to_string(),
-        native_event_id: Some(native_session.native_session_id.clone()),
-        payload_json: json!({
+    events.push(store.append_dispatch_event(run_session_event(
+        &starting_run,
+        &session_link.id,
+        session_event_type,
+        DispatchEventSource::Adapter,
+        Some(native_session.native_session_id.clone()),
+        json!({
             "nativeSessionId": native_session.native_session_id,
             "displayName": native_session.display_name,
             "goal": native_session.goal
         }),
-    })?);
+    ))?);
 
     let run = store.set_dispatch_run_session(&starting_run.id, &session_link.id)?;
     let prompt = dispatch_turn_prompt(&context.issue_task, &context.package_artifact);
@@ -196,17 +202,18 @@ where
         prompt.as_bytes(),
     )?;
     let turn = adapter.adapter_start_turn(&session_link.native_session_id, &prompt)?;
-    events.push(store.append_agent_event(NewAgentEvent {
-        run_id: Some(run.id.clone()),
-        session_link_id: Some(session_link.id.clone()),
-        event_type: "turn_started".to_string(),
-        native_event_id: Some(turn.native_turn_id.clone()),
-        payload_json: json!({
+    events.push(store.append_dispatch_event(run_session_event(
+        &run,
+        &session_link.id,
+        DispatchEventKind::TurnStarted,
+        DispatchEventSource::Adapter,
+        Some(turn.native_turn_id.clone()),
+        json!({
             "nativeTurnId": turn.native_turn_id,
             "status": turn.status,
             "promptArtifactId": prompt_artifact.id
         }),
-    })?);
+    ))?);
 
     store.update_issue_task_status(&context.issue_task.id, IssueTaskStatus::InProgress)?;
     store.update_session_link_status(&session_link.id, AgentSessionStatus::Active)?;
@@ -244,7 +251,7 @@ fn start_session<A>(
     display_name: &str,
     goal: &str,
     metadata_json: Value,
-) -> Result<(AgentSessionLink, AdapterSession, &'static str)>
+) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
 {
@@ -268,7 +275,11 @@ where
         status: AgentSessionStatus::Active,
         metadata_json,
     })?;
-    Ok((session_link, native_session, "session_started"))
+    Ok((
+        session_link,
+        native_session,
+        DispatchEventKind::SessionStarted,
+    ))
 }
 
 fn resume_session<A>(
@@ -279,7 +290,7 @@ fn resume_session<A>(
     display_name: &str,
     goal: &str,
     metadata_json: Value,
-) -> Result<(AgentSessionLink, AdapterSession, &'static str)>
+) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
 {
@@ -301,7 +312,11 @@ where
         adapter.adapter_set_metadata(&native_session.native_session_id, metadata_json)?;
     let session_link =
         store.update_session_link_status(&session_link.id, AgentSessionStatus::Active)?;
-    Ok((session_link, native_session, "session_resumed"))
+    Ok((
+        session_link,
+        native_session,
+        DispatchEventKind::SessionResumed,
+    ))
 }
 
 fn ensure_capability(

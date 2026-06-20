@@ -14,6 +14,8 @@ pub enum AgentsCommand {
     List(AgentsListArgs),
     /// List one agent's declared native capabilities.
     Capabilities(AgentCapabilitiesArgs),
+    /// Probe and cache one agent's adapter capabilities.
+    Probe(AgentProbeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -28,6 +30,18 @@ pub struct AgentCapabilitiesArgs {
     /// Agent id, for example codex.
     pub agent: String,
     /// Print capabilities as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentProbeArgs {
+    /// Agent id, for example codex.
+    pub agent: String,
+    /// Force a fresh probe instead of using a successful cache entry.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Print probe result as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -48,6 +62,8 @@ pub enum SessionsCommand {
     Search(SessionsSearchArgs),
     /// Read a native session transcript into a local artifact.
     Read(SessionReadArgs),
+    /// List normalized replay items for a local session link.
+    Replay(SessionReadArgs),
     /// Create an approval request to rename a native session.
     Rename(SessionRenameArgs),
     /// Create an approval request to fork a native session.
@@ -170,6 +186,10 @@ pub enum DispatchCommand {
     Status(DispatchStatusArgs),
     /// List persisted events for a dispatch run.
     Events(DispatchRunReadArgs),
+    /// Show merged dispatch timeline for a run.
+    Timeline(DispatchRunReadArgs),
+    /// Show diagnostic dispatch trace for a run.
+    Trace(DispatchRunReadArgs),
     /// List persisted artifacts for a dispatch run.
     Artifacts(DispatchRunReadArgs),
 }

@@ -4,10 +4,12 @@ use crate::tool_specs::IssueFinderToolSpec;
 
 pub const TOOL_AGENTS_LIST: &str = "issue-finder.agents_list";
 pub const TOOL_AGENT_CAPABILITIES: &str = "issue-finder.agent_capabilities";
+pub const TOOL_AGENT_PROBE: &str = "issue-finder.agent_probe";
 pub const TOOL_SESSIONS_LIST: &str = "issue-finder.sessions_list";
 pub const TOOL_SESSIONS_SYNC: &str = "issue-finder.sessions_sync";
 pub const TOOL_SESSIONS_SEARCH: &str = "issue-finder.sessions_search";
 pub const TOOL_SESSIONS_READ: &str = "issue-finder.sessions_read";
+pub const TOOL_SESSIONS_REPLAY: &str = "issue-finder.sessions_replay";
 pub const TOOL_SESSIONS_RENAME: &str = "issue-finder.sessions_rename";
 pub const TOOL_SESSIONS_FORK: &str = "issue-finder.sessions_fork";
 pub const TOOL_SESSIONS_ARCHIVE: &str = "issue-finder.sessions_archive";
@@ -15,6 +17,8 @@ pub const TOOL_SESSIONS_APPROVE_MUTATION: &str = "issue-finder.sessions_approve_
 pub const TOOL_SESSIONS_REJECT_MUTATION: &str = "issue-finder.sessions_reject_mutation";
 pub const TOOL_DISPATCH_STATUS: &str = "issue-finder.dispatch_status";
 pub const TOOL_DISPATCH_EVENTS: &str = "issue-finder.dispatch_events";
+pub const TOOL_DISPATCH_TIMELINE: &str = "issue-finder.dispatch_timeline";
+pub const TOOL_DISPATCH_TRACE: &str = "issue-finder.dispatch_trace";
 pub const TOOL_DISPATCH_ARTIFACTS: &str = "issue-finder.dispatch_artifacts";
 pub const TOOL_DISPATCH_IMPORT_HANDOFF: &str = "issue-finder.dispatch_import_handoff";
 pub const TOOL_DISPATCH: &str = "issue-finder.dispatch";
@@ -49,6 +53,12 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             false,
         ),
         dispatch_tool_spec(
+            "agent_probe",
+            "Probe one execution agent's adapter capabilities and cache the result.",
+            agent_probe_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "sessions_list",
             "List local links to native execution agent sessions.",
             sessions_list_schema(),
@@ -71,6 +81,12 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             "Read one native session transcript into a local dispatch artifact.",
             session_link_read_schema(),
             true,
+        ),
+        dispatch_tool_spec(
+            "sessions_replay",
+            "List normalized replay items for one local session link.",
+            session_link_read_schema(),
+            false,
         ),
         dispatch_tool_spec(
             "sessions_rename",
@@ -111,6 +127,18 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         dispatch_tool_spec(
             "dispatch_events",
             "List persisted events for a local dispatch run.",
+            dispatch_run_read_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_timeline",
+            "List a merged chronological timeline for a local dispatch run.",
+            dispatch_run_read_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_trace",
+            "Read diagnostic trace records for a local dispatch run.",
             dispatch_run_read_schema(),
             false,
         ),
@@ -247,6 +275,18 @@ fn agent_capabilities_schema() -> Value {
         "type": "object",
         "properties": {
             "agent": { "type": "string" }
+        },
+        "required": ["agent"],
+        "additionalProperties": false
+    })
+}
+
+fn agent_probe_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "agent": { "type": "string" },
+            "refresh": { "type": "boolean", "default": false }
         },
         "required": ["agent"],
         "additionalProperties": false
