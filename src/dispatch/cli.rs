@@ -2,7 +2,8 @@ use anyhow::Result;
 
 use super::cli_args::{
     AgentsArgs, AgentsCommand, DispatchA2aCommand, DispatchArgs, DispatchCommand,
-    DispatchGithubCommand, DispatchPackageCommand, SessionsArgs, SessionsCommand,
+    DispatchGithubCommand, DispatchPackageCommand, DispatchReviewCommand, SessionsArgs,
+    SessionsCommand,
 };
 use crate::config::Config;
 use crate::paths::IssueFinderPaths;
@@ -112,6 +113,28 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
             DispatchPackageCommand::ImportHandoff(args) => {
                 let result = runtime.import_handoff_from_inbox(&args.inbox_id)?;
                 render_cli_output(args.json, &result, || render_package_import(&result))
+            }
+        },
+        Some(DispatchCommand::Review(args)) => match args.command {
+            DispatchReviewCommand::List(args) => {
+                let result = runtime.list_issue_reviews()?;
+                render_cli_output(args.json, &result, || render_issue_reviews(&result))
+            }
+            DispatchReviewCommand::Show(args) => {
+                let result = runtime.show_issue_review(&args.approval_request_id)?;
+                render_cli_output(args.json, &result, || render_issue_review(&result))
+            }
+            DispatchReviewCommand::Approve(args) => {
+                let result = runtime.approve_issue_review(&args.approval_request_id)?;
+                render_cli_output(args.json, &result, || {
+                    render_issue_review_resolution("approved", &result)
+                })
+            }
+            DispatchReviewCommand::Reject(args) => {
+                let result = runtime.reject_issue_review(&args.approval_request_id, args.reason)?;
+                render_cli_output(args.json, &result, || {
+                    render_issue_review_resolution("rejected", &result)
+                })
             }
         },
         Some(DispatchCommand::Propose(args)) => propose_dispatch_cli(

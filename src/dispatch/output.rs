@@ -8,7 +8,7 @@ use super::model::{
     AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
     SessionTranscriptItem,
 };
-use super::packaging::PackageImportResult;
+use super::packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchStatusSnapshot,
     SessionSearchResult,
@@ -272,13 +272,76 @@ pub(crate) fn render_dispatch_artifacts(artifacts: &[AgentArtifact]) -> String {
 }
 
 pub(crate) fn render_package_import(result: &PackageImportResult) -> String {
+    let package_text = result
+        .package_artifact
+        .as_ref()
+        .map(|artifact| format!("\nPackage artifact: {}", artifact.path))
+        .unwrap_or_default();
     format!(
-        "Imported {}#{} into task package {}.\nHandoff artifact: {}\nPackage artifact: {}",
+        "Imported {}#{} as issue review candidate.\nReview: {} ({})\nHandoff artifact: {}{}",
         result.issue_task.repo_full_name,
         result.issue_task.issue_number,
-        result.package.issue.title,
+        result.approval_request.id,
+        result.approval_request.status,
         result.handoff_artifact.path,
-        result.package_artifact.path
+        package_text
+    )
+}
+
+pub(crate) fn render_issue_reviews(reviews: &[IssueReviewDetail]) -> String {
+    if reviews.is_empty() {
+        return "No issue review requests found.".to_string();
+    }
+    let mut lines = vec!["Issue reviews:".to_string()];
+    for review in reviews {
+        lines.push(format!(
+            "- {} {} {} package={}",
+            review.approval_request.id,
+            review.approval_request.status,
+            review.issue_task.issue_key,
+            review
+                .package_artifact
+                .as_ref()
+                .map(|artifact| artifact.id.as_str())
+                .unwrap_or("-")
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_issue_review(review: &IssueReviewDetail) -> String {
+    format!(
+        "Issue review {}: {}\nIssue: {}\nHandoff artifact: {}\nPackage artifact: {}",
+        review.approval_request.id,
+        review.approval_request.status,
+        review.issue_task.issue_key,
+        review
+            .handoff_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-"),
+        review
+            .package_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-")
+    )
+}
+
+pub(crate) fn render_issue_review_resolution(
+    action: &str,
+    result: &IssueReviewResolution,
+) -> String {
+    format!(
+        "Issue review {} is {}.\nIssue: {}\nPackage artifact: {}",
+        result.approval_request.id,
+        action,
+        result.issue_task.issue_key,
+        result
+            .package_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-")
     )
 }
 

@@ -9,7 +9,7 @@ use crate::agent_policy::{build_agent_policy, AgentPolicyManifest};
 use crate::context_pack::{default_context_pack, write_context_pack, ContextPack};
 use crate::evidence_pack::EvidencePack;
 use crate::github::GitHubIssue;
-use crate::llm_review::LlmReview;
+use crate::llm_review::{LlmConfirmation, LlmReview};
 use crate::paths::{atomic_write, sanitize_repo_name, IssueFinderPaths};
 use crate::prepare_events::PrepareEventLog;
 use crate::probe::ProbePack;
@@ -44,6 +44,9 @@ pub struct Handoff {
     pub memory_context: HandoffMemoryContext,
     pub instructions: HandoffInstructions,
     pub llm_enhancement: LlmEnhancement,
+    #[serde(default)]
+    pub llm_confirmation: LlmConfirmation,
+    #[serde(default)]
     pub llm_review: LlmReview,
 }
 
@@ -126,7 +129,7 @@ impl Handoff {
             workspace,
             fallback_assessment(issue),
             EvidencePack::empty(),
-            LlmReview::disabled(),
+            LlmConfirmation::disabled(),
         )
     }
 
@@ -135,7 +138,7 @@ impl Handoff {
         workspace: &PreparedWorkspace,
         value_assessment: ValueAssessment,
         evidence_pack: EvidencePack,
-        llm_review: LlmReview,
+        llm_confirmation: LlmConfirmation,
     ) -> Self {
         let recommendation = RecommendationAssessment::from_value_assessment(&value_assessment);
         Self::build_with_recommendation(
@@ -144,7 +147,7 @@ impl Handoff {
             value_assessment,
             recommendation,
             evidence_pack,
-            llm_review,
+            llm_confirmation,
         )
     }
 
@@ -154,7 +157,7 @@ impl Handoff {
         value_assessment: ValueAssessment,
         recommendation: RecommendationAssessment,
         evidence_pack: EvidencePack,
-        llm_review: LlmReview,
+        llm_confirmation: LlmConfirmation,
     ) -> Self {
         let id = handoff_id(issue);
         let mut warnings = workspace.warnings.clone();
@@ -206,7 +209,8 @@ impl Handoff {
             memory_context: HandoffMemoryContext::default(),
             instructions: HandoffInstructions::default(),
             llm_enhancement: LlmEnhancement::disabled(),
-            llm_review,
+            llm_review: llm_confirmation.legacy_review(),
+            llm_confirmation,
         }
     }
 
@@ -316,6 +320,7 @@ impl Handoff {
                 self.value_assessment.gates.profile_fit.reasons.join("; ")
             ),
             format!("- Risk penalty: {}", self.value_assessment.risk_penalty),
+            format!("- LLM confirmation: {}", self.llm_confirmation.status),
             format!(
                 "- Risk tags: {}",
                 if self.value_assessment.risk_tags.is_empty() {
@@ -389,6 +394,31 @@ impl Handoff {
                 summary.clone(),
                 String::new(),
             ]);
+        }
+
+        if self.llm_confirmation.status == "success" {
+            lines.extend([
+                "## LLM Confirmation".to_string(),
+                String::new(),
+                format!("- Decision: {}", self.llm_confirmation.decision),
+                format!(
+                    "- Confidence: {}",
+                    self.llm_confirmation
+                        .confidence
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                ),
+            ]);
+            if let Some(summary) = &self.llm_confirmation.summary {
+                lines.push(format!("- Summary: {summary}"));
+            }
+            if !self.llm_confirmation.risk_flags.is_empty() {
+                lines.push(format!(
+                    "- Risk flags: {}",
+                    self.llm_confirmation.risk_flags.join("; ")
+                ));
+            }
+            lines.push(String::new());
         }
 
         if !self.context.warnings.is_empty() {

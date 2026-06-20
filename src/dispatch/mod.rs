@@ -40,7 +40,7 @@ pub use model::{
     NewMemoryEvent, NewSessionTranscriptItem, PolicyAction, PolicyRequirement,
     SessionTranscriptItem, TranscriptPayloadStorage,
 };
-pub use packaging::PackageImportResult;
+pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
 pub use runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchProposalRequest,

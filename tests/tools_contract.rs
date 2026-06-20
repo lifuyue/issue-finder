@@ -141,6 +141,10 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.dispatch_trace",
             "issue-finder.dispatch_artifacts",
             "issue-finder.dispatch_import_handoff",
+            "issue-finder.dispatch_review_list",
+            "issue-finder.dispatch_review_show",
+            "issue-finder.dispatch_review_approve",
+            "issue-finder.dispatch_review_reject",
             "issue-finder.dispatch",
             "issue-finder.dispatch_approve",
             "issue-finder.dispatch_reject",
@@ -529,26 +533,81 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
         ))
         .await;
     assert!(imported.success, "{imported:?}");
+    assert_eq!(imported.status, "pending_issue_review");
     assert_eq!(
-        imported.structured_content["packageImport"]["package"]["kind"],
-        "issue_finder_task_package"
+        imported.structured_content["packageImport"]["approvalRequest"]["approval_type"],
+        "issue_review"
     );
     assert_eq!(
         imported.structured_content["packageImport"]["issueTask"]["issue_key"],
         "owner/repo#321"
     );
-    assert_eq!(
-        imported.structured_content["packageImport"]["package"]["user_profile_snapshot"]
-            ["snapshot"]["profile"]["techStack"],
-        serde_json::json!(["Rust", "TypeScript"])
-    );
-    let profile_snapshot_id = imported.structured_content["packageImport"]["package"]
-        ["user_profile_snapshot"]["artifactId"]
+    assert!(imported.structured_content["packageImport"]["package"].is_null());
+    let profile_snapshot_id = imported.structured_content["packageImport"]
+        ["profileSnapshotArtifact"]["id"]
         .as_str()
         .unwrap();
     assert_eq!(
         imported.structured_content["packageImport"]["issueTask"]["profile_snapshot_artifact_id"],
         profile_snapshot_id
+    );
+    let review_id = imported.structured_content["packageImport"]["approvalRequest"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let review_list = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_list",
+            "{}",
+            "dispatch_review_list",
+        ))
+        .await;
+    assert!(review_list.success, "{review_list:?}");
+    assert_eq!(
+        review_list.structured_content["issueReviews"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let review_show_args = serde_json::json!({ "approvalRequestId": review_id }).to_string();
+    let review_show = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_show",
+            &review_show_args,
+            "dispatch_review_show",
+        ))
+        .await;
+    assert!(review_show.success, "{review_show:?}");
+    assert_eq!(
+        review_show.structured_content["issueReview"]["approvalRequest"]["status"],
+        "pending"
+    );
+    let review_approve = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_approve",
+            &review_show_args,
+            "dispatch_review_approve",
+        ))
+        .await;
+    assert!(review_approve.success, "{review_approve:?}");
+    assert_eq!(review_approve.status, "approved");
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]["kind"],
+        "issue_finder_task_package"
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]["version"],
+        2
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]
+            ["user_profile_snapshot"]["snapshot"]["profile"]["techStack"],
+        serde_json::json!(["Rust", "TypeScript"])
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["issueTask"]["status"],
+        "user_approved"
     );
 
     let proposal = runtime
@@ -705,14 +764,11 @@ async fn dispatch_tool_auto_imports_ready_handoff_for_direct_proposal() {
         .await;
 
     assert!(proposal.success, "{proposal:?}");
-    assert_eq!(proposal.status, "pending_approval");
-    assert_eq!(
-        proposal.structured_content["dispatchProposal"]["issueTask"]["issue_key"],
-        "owner/auto#654"
-    );
-    assert!(proposal.structured_content["dispatchProposal"]["issueTask"]
-        ["current_package_artifact_id"]
-        .is_string());
+    assert_eq!(proposal.status, "pending_issue_review");
+    assert_eq!(proposal.structured_content["blocked"], true);
+    assert_eq!(proposal.structured_content["reviewRequired"], true);
+    assert_eq!(proposal.structured_content["issueKey"], "owner/auto#654");
+    assert!(proposal.structured_content["approvalRequestId"].is_string());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -758,15 +814,10 @@ async fn projection_tools_auto_import_ready_handoff_when_needed() {
         ))
         .await;
     assert!(a2a_export.success, "{a2a_export:?}");
-    assert_eq!(a2a_export.status, "pending_approval");
-    assert_eq!(
-        a2a_export.structured_content["a2aExport"]["issueTask"]["issue_key"],
-        "owner/a2a#655"
-    );
-    assert!(
-        a2a_export.structured_content["a2aExport"]["issueTask"]["current_package_artifact_id"]
-            .is_string()
-    );
+    assert_eq!(a2a_export.status, "pending_issue_review");
+    assert_eq!(a2a_export.structured_content["issueKey"], "owner/a2a#655");
+    assert_eq!(a2a_export.structured_content["reviewRequired"], true);
+    assert!(a2a_export.structured_content["approvalRequestId"].is_string());
 
     let github_draft = runtime
         .execute(invocation(
@@ -776,15 +827,13 @@ async fn projection_tools_auto_import_ready_handoff_when_needed() {
         ))
         .await;
     assert!(github_draft.success, "{github_draft:?}");
-    assert_eq!(github_draft.status, "pending_approval");
+    assert_eq!(github_draft.status, "pending_issue_review");
     assert_eq!(
-        github_draft.structured_content["githubDraft"]["issueTask"]["issue_key"],
+        github_draft.structured_content["issueKey"],
         "owner/track#656"
     );
-    assert_eq!(
-        github_draft.structured_content["githubDraft"]["approvalRequest"]["approval_type"],
-        "github_post"
-    );
+    assert_eq!(github_draft.structured_content["reviewRequired"], true);
+    assert!(github_draft.structured_content["approvalRequestId"].is_string());
 }
 
 #[tokio::test(flavor = "current_thread")]

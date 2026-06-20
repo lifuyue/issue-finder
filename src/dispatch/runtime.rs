@@ -27,7 +27,7 @@ use super::model::{
     DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus, NewAgentCapability,
     NewAgentProfile, NewApprovalRequest, NewDispatchRun, PolicyAction, SessionTranscriptItem,
 };
-use super::packaging::{self, PackageImportResult};
+use super::packaging::{self, IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::policy::{classify_action, ensure_capability_preconditions};
 use super::session_approvals::{
     approve_session_mutation_with_adapter, pending_session_mutation, reject_session_mutation,
@@ -299,6 +299,26 @@ impl DispatchRuntime {
         packaging::import_handoff_from_inbox(&self.store, inbox_id)
     }
 
+    pub fn list_issue_reviews(&self) -> Result<Vec<IssueReviewDetail>> {
+        packaging::list_issue_reviews(&self.store)
+    }
+
+    pub fn show_issue_review(&self, approval_request_id: &str) -> Result<IssueReviewDetail> {
+        packaging::show_issue_review(&self.store, approval_request_id)
+    }
+
+    pub fn approve_issue_review(&self, approval_request_id: &str) -> Result<IssueReviewResolution> {
+        packaging::approve_issue_review(&self.store, approval_request_id)
+    }
+
+    pub fn reject_issue_review(
+        &self,
+        approval_request_id: &str,
+        reason: Option<String>,
+    ) -> Result<IssueReviewResolution> {
+        packaging::reject_issue_review(&self.store, approval_request_id, reason)
+    }
+
     pub fn export_a2a_task(&self, issue: &str) -> Result<A2aExportResult> {
         packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
         a2a_gateway::export_task(&self.store, issue)
@@ -451,7 +471,7 @@ impl DispatchRuntime {
         issue: &str,
         body_override: Option<String>,
     ) -> Result<GitHubCommentDraftResult> {
-        packaging::ensure_issue_task_for_issue(&self.store, issue)?;
+        packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
         github_projection::draft_tracking_comment(&self.store, issue, body_override)
     }
 

@@ -235,7 +235,7 @@ fn dispatch_proposal_auto_imports_ready_handoff_from_inbox() {
     upsert_ready(&paths, &issue, 91, &written).unwrap();
 
     let runtime = DispatchRuntime::open(paths).unwrap();
-    let proposal = runtime
+    let error = runtime
         .propose_dispatch(DispatchProposalRequest {
             issue: "owner/repo#458".to_string(),
             agent_id: "codex".to_string(),
@@ -243,20 +243,26 @@ fn dispatch_proposal_auto_imports_ready_handoff_from_inbox() {
             selected_session_link_id: None,
             new_session: true,
         })
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(proposal.status, "pending_approval");
-    assert_eq!(proposal.issue_task.issue_key, "owner/repo#458");
-    assert!(proposal.issue_task.current_package_artifact_id.is_some());
+    assert!(error
+        .to_string()
+        .contains("is pending issue review approval"));
+    let issue_task = runtime
+        .store()
+        .get_issue_task_by_key("owner/repo#458")
+        .unwrap();
+    assert_eq!(issue_task.issue_key, "owner/repo#458");
+    assert!(issue_task.current_package_artifact_id.is_none());
     let artifact_kinds = runtime
         .store()
-        .list_artifacts_for_issue_task(&proposal.issue_task.id)
+        .list_artifacts_for_issue_task(&issue_task.id)
         .unwrap()
         .into_iter()
         .map(|artifact| artifact.kind)
         .collect::<Vec<_>>();
     assert!(artifact_kinds.contains(&"handoff_json".to_string()));
-    assert!(artifact_kinds.contains(&"issue_task_package".to_string()));
+    assert!(!artifact_kinds.contains(&"issue_task_package".to_string()));
     assert!(artifact_kinds.contains(&"user_profile_snapshot".to_string()));
 }
 
@@ -284,8 +290,9 @@ fn handoff_import_is_idempotent_for_same_inbox_item() {
 
     assert_eq!(second.issue_task.id, first.issue_task.id);
     assert_eq!(second.handoff_artifact.id, first.handoff_artifact.id);
-    assert_eq!(second.package_artifact.id, first.package_artifact.id);
-    assert_eq!(second.package, first.package);
+    assert_eq!(second.approval_request.id, first.approval_request.id);
+    assert_eq!(second.package_artifact, None);
+    assert_eq!(second.package, None);
     assert_eq!(artifacts_after_second.len(), artifacts_after_first.len());
 }
 

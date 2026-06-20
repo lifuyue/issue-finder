@@ -21,6 +21,10 @@ pub const TOOL_DISPATCH_TIMELINE: &str = "issue-finder.dispatch_timeline";
 pub const TOOL_DISPATCH_TRACE: &str = "issue-finder.dispatch_trace";
 pub const TOOL_DISPATCH_ARTIFACTS: &str = "issue-finder.dispatch_artifacts";
 pub const TOOL_DISPATCH_IMPORT_HANDOFF: &str = "issue-finder.dispatch_import_handoff";
+pub const TOOL_DISPATCH_REVIEW_LIST: &str = "issue-finder.dispatch_review_list";
+pub const TOOL_DISPATCH_REVIEW_SHOW: &str = "issue-finder.dispatch_review_show";
+pub const TOOL_DISPATCH_REVIEW_APPROVE: &str = "issue-finder.dispatch_review_approve";
+pub const TOOL_DISPATCH_REVIEW_REJECT: &str = "issue-finder.dispatch_review_reject";
 pub const TOOL_DISPATCH: &str = "issue-finder.dispatch";
 pub const TOOL_DISPATCH_PROPOSE: &str = "issue-finder.dispatch_propose";
 pub const TOOL_DISPATCH_APPROVE: &str = "issue-finder.dispatch_approve";
@@ -150,13 +154,37 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_import_handoff",
-            "Import an existing inbox handoff as a local IssueTaskPackage artifact.",
+            "Import an existing inbox handoff as a review-gated local issue task candidate.",
             dispatch_import_handoff_schema(),
             false,
         ),
         dispatch_tool_spec(
+            "dispatch_review_list",
+            "List issue review approval requests created from imported handoffs.",
+            empty_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_show",
+            "Show one issue review approval request and its local artifacts.",
+            issue_review_approval_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_approve",
+            "Approve an issue review and create an IssueTaskPackage v2 artifact.",
+            issue_review_approval_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_reject",
+            "Reject an issue review without dismissing the recommendation.",
+            issue_review_reject_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "dispatch",
-            "Create a pending dispatch approval without starting a native agent session; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Create a pending dispatch approval without starting a native agent session; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             dispatch_propose_schema(),
             false,
         ),
@@ -180,7 +208,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "a2a_export_task",
-            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             a2a_export_task_schema(),
             false,
         ),
@@ -204,7 +232,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "github_draft_tracking_comment",
-            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             github_draft_tracking_comment_schema(),
             false,
         ),
@@ -379,6 +407,29 @@ fn dispatch_import_handoff_schema() -> Value {
             "inboxId": { "type": "string" }
         },
         "required": ["inboxId"],
+        "additionalProperties": false
+    })
+}
+
+fn issue_review_approval_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "approvalRequestId": { "type": "string" }
+        },
+        "required": ["approvalRequestId"],
+        "additionalProperties": false
+    })
+}
+
+fn issue_review_reject_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "approvalRequestId": { "type": "string" },
+            "reason": { "type": ["string", "null"], "default": null }
+        },
+        "required": ["approvalRequestId"],
         "additionalProperties": false
     })
 }
