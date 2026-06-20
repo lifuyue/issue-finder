@@ -11,8 +11,8 @@ use issue_finder::dispatch::session_ops::{
     SessionsSyncRequest,
 };
 use issue_finder::dispatch::{
-    AgentSessionStatus, ApprovalStatus, ApprovalType, DispatchRuntime, IssueTaskStatus,
-    NewAgentSessionLink, NewIssueTask,
+    AgentSessionStatus, ApprovalStatus, ApprovalType, DispatchEventKind, DispatchRuntime,
+    IssueTaskStatus, NewAgentSessionLink, NewIssueTask, TranscriptPayloadStorage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::{json, Value};
@@ -60,6 +60,19 @@ fn session_ops_read_rename_and_archive_native_session_links() {
     )
     .unwrap();
     assert!(payload.contains("native_session_1"));
+    assert_eq!(transcript.replay_items.len(), 1);
+    assert_eq!(
+        transcript.replay_items[0].payload_storage,
+        TranscriptPayloadStorage::Inline
+    );
+    assert_eq!(
+        runtime
+            .store()
+            .list_session_transcript_items(&session.id)
+            .unwrap()
+            .len(),
+        1
+    );
 
     let renamed = rename_session(
         runtime.store(),
@@ -123,7 +136,7 @@ fn session_ops_forks_native_session_into_new_local_link() {
     );
     assert_eq!(forked.session.status, AgentSessionStatus::Idle);
     assert_eq!(forked.session.goal.as_deref(), Some("Forked goal"));
-    assert_eq!(forked.event.event_type, "session_forked");
+    assert_eq!(forked.event.event_kind, DispatchEventKind::SessionForked);
     assert_eq!(
         forked.event.payload_json["sourceSessionLinkId"].as_str(),
         Some(session.id.as_str())
@@ -186,6 +199,61 @@ fn session_ops_syncs_native_sessions_into_local_links() {
         2
     );
     assert_eq!(second.synced[0].display_name, "parser search result");
+}
+
+#[test]
+fn session_transcript_replay_spills_large_items_to_artifacts() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths).unwrap();
+    let task = runtime
+        .store()
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 124,
+            title: "Fix parser panic".to_string(),
+            url: "https://github.com/owner/repo/issues/124".to_string(),
+            status: IssueTaskStatus::UserApproved,
+            priority: Some(10),
+            category: Some("high_value_ready".to_string()),
+        })
+        .unwrap();
+    let session = runtime
+        .store()
+        .create_session_link(NewAgentSessionLink {
+            agent_id: "codex".to_string(),
+            native_session_id: "native_large".to_string(),
+            issue_task_id: Some(task.id),
+            display_name: "large transcript".to_string(),
+            goal: None,
+            status: AgentSessionStatus::Active,
+            metadata_json: json!({}),
+        })
+        .unwrap();
+    let mut adapter = FakeSessionAdapter {
+        transcript_text: Some("x".repeat((16 * 1024) + 1)),
+        ..FakeSessionAdapter::default()
+    };
+
+    let transcript = read_session_transcript(runtime.store(), &mut adapter, &session.id).unwrap();
+
+    assert_eq!(transcript.replay_items.len(), 1);
+    assert_eq!(
+        transcript.replay_items[0].payload_storage,
+        TranscriptPayloadStorage::Artifact
+    );
+    let artifact_id = transcript.replay_items[0]
+        .payload_artifact_id
+        .as_deref()
+        .expect("spilled artifact id");
+    assert_eq!(
+        runtime
+            .store()
+            .read_artifact_bytes(artifact_id)
+            .unwrap()
+            .len(),
+        (16 * 1024) + 1
+    );
 }
 
 #[test]
@@ -284,6 +352,7 @@ fn test_paths(root: &std::path::Path) -> IssueFinderPaths {
 #[derive(Default)]
 struct FakeSessionAdapter {
     calls: Vec<String>,
+    transcript_text: Option<String>,
 }
 
 impl NativeExecutionAdapter for FakeSessionAdapter {
@@ -356,10 +425,14 @@ impl NativeExecutionAdapter for FakeSessionAdapter {
 
     fn adapter_read_transcript(&mut self, native_session_id: &str) -> Result<Value> {
         self.calls.push(format!("read:{native_session_id}"));
+        let text = self
+            .transcript_text
+            .clone()
+            .unwrap_or_else(|| "done".to_string());
         Ok(json!({
             "thread": { "id": native_session_id },
             "turns": [{ "id": "turn_1" }],
-            "items": [{ "turnId": "turn_1", "type": "assistant_message", "text": "done" }]
+            "items": [{ "turnId": "turn_1", "type": "assistant_message", "text": text }]
         }))
     }
 

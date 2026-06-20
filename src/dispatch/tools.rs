@@ -7,14 +7,15 @@ use crate::config::Config;
 use crate::paths::IssueFinderPaths;
 use crate::tool_specs::{
     TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT, TOOL_A2A_REJECT_SEND,
-    TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE,
-    TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
+    TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_AGENT_PROBE, TOOL_DISPATCH,
+    TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
     TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_REJECT,
-    TOOL_DISPATCH_STATUS, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
-    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
-    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_SESSIONS_APPROVE_MUTATION,
-    TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
-    TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
+    TOOL_DISPATCH_STATUS, TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT,
+    TOOL_GITHUB_DRAFT_FINAL_COMMENT, TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS,
+    TOOL_GITHUB_POST_COMMENT, TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
+    TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST,
+    TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY,
+    TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
 };
 
 use super::model::{ApprovalStatus, DispatchRunStatus};
@@ -57,10 +58,12 @@ pub fn is_dispatch_tool(tool_name: &str) -> bool {
         tool_name,
         TOOL_AGENTS_LIST
             | TOOL_AGENT_CAPABILITIES
+            | TOOL_AGENT_PROBE
             | TOOL_SESSIONS_LIST
             | TOOL_SESSIONS_SYNC
             | TOOL_SESSIONS_SEARCH
             | TOOL_SESSIONS_READ
+            | TOOL_SESSIONS_REPLAY
             | TOOL_SESSIONS_RENAME
             | TOOL_SESSIONS_FORK
             | TOOL_SESSIONS_ARCHIVE
@@ -68,6 +71,8 @@ pub fn is_dispatch_tool(tool_name: &str) -> bool {
             | TOOL_SESSIONS_REJECT_MUTATION
             | TOOL_DISPATCH_STATUS
             | TOOL_DISPATCH_EVENTS
+            | TOOL_DISPATCH_TIMELINE
+            | TOOL_DISPATCH_TRACE
             | TOOL_DISPATCH_ARTIFACTS
             | TOOL_DISPATCH_IMPORT_HANDOFF
             | TOOL_DISPATCH
@@ -119,6 +124,21 @@ pub fn execute_dispatch_tool(
                     capabilities.agent.id
                 ),
                 json!({ "agentCapabilities": capabilities }),
+            ))
+        }
+        TOOL_AGENT_PROBE => {
+            let args: AgentProbeToolArgs = parse_arguments(arguments)?;
+            let result = runtime
+                .probe_agent(&args.agent, args.refresh.unwrap_or(false))
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!(
+                    "Recorded {} probe results for {}.",
+                    result.probes.len(),
+                    result.agent_id
+                ),
+                json!({ "agentProbe": result }),
             ))
         }
         TOOL_SESSIONS_LIST => {
@@ -178,6 +198,17 @@ pub fn execute_dispatch_tool(
                     result.session.id, result.transcript_artifact.id
                 ),
                 json!({ "sessionTranscript": result }),
+            ))
+        }
+        TOOL_SESSIONS_REPLAY => {
+            let args: SessionLinkReadToolArgs = parse_arguments(arguments)?;
+            let result = runtime
+                .session_replay(&args.session_link_id)
+                .map_err(map_runtime_error)?;
+            Ok(output(
+                "ok",
+                format!("Found {} replay items.", result.len()),
+                json!({ "sessionReplay": result }),
             ))
         }
         TOOL_SESSIONS_RENAME => {
@@ -264,6 +295,28 @@ pub fn execute_dispatch_tool(
                 "ok",
                 format!("Found {} dispatch events.", events.len()),
                 json!({ "events": events }),
+            ))
+        }
+        TOOL_DISPATCH_TIMELINE => {
+            let args: DispatchRunReadToolArgs = parse_arguments(arguments)?;
+            let timeline = runtime
+                .dispatch_timeline(&args.run_id)
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!("Found {} timeline items.", timeline.items.len()),
+                json!({ "dispatchTimeline": timeline }),
+            ))
+        }
+        TOOL_DISPATCH_TRACE => {
+            let args: DispatchRunReadToolArgs = parse_arguments(arguments)?;
+            let trace = runtime
+                .dispatch_trace(&args.run_id)
+                .map_err(DispatchToolError::System)?;
+            Ok(output(
+                "ok",
+                format!("Read dispatch trace for {}.", trace.run.id),
+                json!({ "dispatchTrace": trace }),
             ))
         }
         TOOL_DISPATCH_ARTIFACTS => {
@@ -655,6 +708,14 @@ struct EmptyToolArgs {}
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AgentCapabilitiesToolArgs {
     agent: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentProbeToolArgs {
+    agent: String,
+    #[serde(default)]
+    refresh: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

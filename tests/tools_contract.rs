@@ -11,9 +11,11 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchRunStatus,
-    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability,
-    NewAgentEvent, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchRun, NewIssueTask,
+    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchEventKind,
+    DispatchEventSeverity, DispatchEventSource, DispatchRunStatus, DispatchRuntime,
+    DispatchSubjectType, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus,
+    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchEvent,
+    NewDispatchRun, NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff, WrittenHandoff};
@@ -122,10 +124,12 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.memory_tombstone",
             "issue-finder.agents_list",
             "issue-finder.agent_capabilities",
+            "issue-finder.agent_probe",
             "issue-finder.sessions_list",
             "issue-finder.sessions_sync",
             "issue-finder.sessions_search",
             "issue-finder.sessions_read",
+            "issue-finder.sessions_replay",
             "issue-finder.sessions_rename",
             "issue-finder.sessions_fork",
             "issue-finder.sessions_archive",
@@ -133,6 +137,8 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.sessions_reject_mutation",
             "issue-finder.dispatch_status",
             "issue-finder.dispatch_events",
+            "issue-finder.dispatch_timeline",
+            "issue-finder.dispatch_trace",
             "issue-finder.dispatch_artifacts",
             "issue-finder.dispatch_import_handoff",
             "issue-finder.dispatch",
@@ -268,10 +274,17 @@ async fn dispatch_read_tools_use_local_state_only() {
         .unwrap();
     runtime
         .store()
-        .append_agent_event(NewAgentEvent {
+        .append_dispatch_event(NewDispatchEvent {
             run_id: Some(run.id.clone()),
             session_link_id: Some(session.id),
-            event_type: "thread_linked".to_string(),
+            issue_task_id: Some(task.id.clone()),
+            event_kind: DispatchEventKind::Legacy,
+            subject_type: DispatchSubjectType::Session,
+            subject_id: run.selected_session_link_id.clone(),
+            source: DispatchEventSource::Runtime,
+            severity: DispatchEventSeverity::Info,
+            correlation_id: Some(run.id.clone()),
+            causation_id: None,
             native_event_id: Some("event_1".to_string()),
             payload_json: serde_json::json!({ "source": "test" }),
         })
@@ -366,6 +379,20 @@ async fn dispatch_read_tools_use_local_state_only() {
         );
     }
 
+    let probe = tool_runtime
+        .execute(invocation(
+            "issue-finder.agent_probe",
+            r#"{"agent":"codex","refresh":true}"#,
+            "agent_probe",
+        ))
+        .await;
+    assert!(probe.success, "{probe:?}");
+    assert!(probe.structured_content["agentProbe"]["probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["capability"] == "start_session"));
+
     let session_search = tool_runtime
         .execute(invocation(
             "issue-finder.sessions_search",
@@ -406,6 +433,38 @@ async fn dispatch_read_tools_use_local_state_only() {
     assert!(dispatch_events.success, "{dispatch_events:?}");
     assert_eq!(
         dispatch_events.structured_content["events"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let dispatch_timeline = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_timeline",
+            &status_args,
+            "dispatch_timeline",
+        ))
+        .await;
+    assert!(dispatch_timeline.success, "{dispatch_timeline:?}");
+    assert!(
+        dispatch_timeline.structured_content["dispatchTimeline"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["kind"] == "event")
+    );
+
+    let dispatch_trace = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_trace",
+            &status_args,
+            "dispatch_trace",
+        ))
+        .await;
+    assert!(dispatch_trace.success, "{dispatch_trace:?}");
+    assert_eq!(
+        dispatch_trace.structured_content["dispatchTrace"]["events"]
             .as_array()
             .unwrap()
             .len(),

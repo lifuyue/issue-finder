@@ -10,13 +10,16 @@ use sha2::{Digest, Sha256};
 use crate::paths::{atomic_write, sanitize_repo_name, IssueFinderPaths};
 
 use super::model::{
-    AgentArtifact, AgentCapability, AgentCapabilityName, AgentEvent, AgentProfile,
-    AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
-    CapabilityStatus, DispatchRun, DispatchRunStatus, GitHubInteraction, GitHubInteractionStatus,
-    GitHubInteractionType, IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent,
-    MemoryEventType, NewAgentCapability, NewAgentEvent, NewAgentProfile, NewAgentSessionLink,
-    NewApprovalRequest, NewArtifact, NewDispatchRun, NewGitHubInteraction, NewIssueTask,
-    NewMemoryEvent,
+    AdapterProbeResult, AdapterProbeStatus, AgentArtifact, AgentCapability, AgentCapabilityName,
+    AgentProfile, AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus,
+    ApprovalType, CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity,
+    DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchRun, DispatchRunStatus,
+    DispatchSubjectType, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
+    IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent, MemoryEventType,
+    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewAgentSessionLink,
+    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
+    NewGitHubInteraction, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
+    SessionTranscriptItem, TranscriptPayloadStorage,
 };
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -547,50 +550,77 @@ impl DispatchStore {
             .map_err(Into::into)
     }
 
-    pub fn append_agent_event(&self, input: NewAgentEvent) -> Result<AgentEvent> {
-        let id = next_id("agent-event");
+    pub fn append_dispatch_event(&self, input: NewDispatchEvent) -> Result<DispatchEvent> {
+        let id = next_id("dispatch-event");
         let created_at = now();
         self.conn.execute(
-            "INSERT INTO agent_events (
-                id, run_id, session_link_id, event_type, native_event_id, payload_json, created_at
+            "INSERT INTO dispatch_events (
+                id, run_id, session_link_id, issue_task_id, event_kind,
+                subject_type, subject_id, source, severity, correlation_id,
+                causation_id, native_event_id, payload_json, created_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 input.run_id,
                 input.session_link_id,
-                input.event_type,
+                input.issue_task_id,
+                input.event_kind.as_str(),
+                input.subject_type.as_str(),
+                input.subject_id,
+                input.source.as_str(),
+                input.severity.as_str(),
+                input.correlation_id,
+                input.causation_id,
                 input.native_event_id,
                 json_text(&input.payload_json)?,
                 created_at
             ],
         )?;
-        self.get_agent_event(&id)
-            .with_context(|| format!("agent event {id} was not persisted"))
+        self.get_dispatch_event(&id)
+            .with_context(|| format!("dispatch event {id} was not persisted"))
     }
 
-    pub fn get_agent_event(&self, id: &str) -> Result<AgentEvent> {
+    pub fn get_dispatch_event(&self, id: &str) -> Result<DispatchEvent> {
         self.conn
             .query_row(
-                "SELECT id, run_id, session_link_id, event_type, native_event_id,
-                        payload_json, created_at
-                 FROM agent_events
+                "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+                        subject_type, subject_id, source, severity, correlation_id,
+                        causation_id, native_event_id, payload_json, created_at
+                 FROM dispatch_events
                  WHERE id = ?1",
                 params![id],
-                agent_event_from_row,
+                dispatch_event_from_row,
             )
-            .with_context(|| format!("agent event {id} not found"))
+            .with_context(|| format!("dispatch event {id} not found"))
     }
 
-    pub fn list_agent_events_for_run(&self, run_id: &str) -> Result<Vec<AgentEvent>> {
+    pub fn list_dispatch_events_for_run(&self, run_id: &str) -> Result<Vec<DispatchEvent>> {
         let mut statement = self.conn.prepare(
-            "SELECT id, run_id, session_link_id, event_type, native_event_id,
-                    payload_json, created_at
-             FROM agent_events
+            "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+                    subject_type, subject_id, source, severity, correlation_id,
+                    causation_id, native_event_id, payload_json, created_at
+             FROM dispatch_events
              WHERE run_id = ?1
-             ORDER BY created_at, id",
+             ORDER BY sequence",
         )?;
-        let rows = statement.query_map(params![run_id], agent_event_from_row)?;
+        let rows = statement.query_map(params![run_id], dispatch_event_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_dispatch_events_for_session(
+        &self,
+        session_link_id: &str,
+    ) -> Result<Vec<DispatchEvent>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+                    subject_type, subject_id, source, severity, correlation_id,
+                    causation_id, native_event_id, payload_json, created_at
+             FROM dispatch_events
+             WHERE session_link_id = ?1
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(params![session_link_id], dispatch_event_from_row)?;
         collect_rows(rows)
     }
 
@@ -960,9 +990,257 @@ impl DispatchStore {
         let rows = statement.query_map(params![issue_task_id], memory_event_from_row)?;
         collect_rows(rows)
     }
+
+    pub fn record_dispatch_failure(&self, input: NewDispatchFailure) -> Result<DispatchFailure> {
+        let id = next_id("dispatch-failure");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO dispatch_failures (
+                id, run_id, phase, failure_class, code, retryable, message,
+                details_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                input.run_id,
+                input.phase,
+                input.failure_class.as_str(),
+                input.code,
+                bool_int(input.retryable),
+                input.message,
+                json_text(&input.details_json)?,
+                created_at
+            ],
+        )?;
+        self.get_dispatch_failure(&id)
+            .with_context(|| format!("dispatch failure {id} was not persisted"))
+    }
+
+    pub fn get_dispatch_failure(&self, id: &str) -> Result<DispatchFailure> {
+        self.conn
+            .query_row(
+                "SELECT id, run_id, phase, failure_class, code, retryable, message,
+                        details_json, created_at
+                 FROM dispatch_failures
+                 WHERE id = ?1",
+                params![id],
+                dispatch_failure_from_row,
+            )
+            .with_context(|| format!("dispatch failure {id} not found"))
+    }
+
+    pub fn list_dispatch_failures_for_run(&self, run_id: &str) -> Result<Vec<DispatchFailure>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, run_id, phase, failure_class, code, retryable, message,
+                    details_json, created_at
+             FROM dispatch_failures
+             WHERE run_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![run_id], dispatch_failure_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn record_adapter_probe(&self, input: NewAdapterProbeResult) -> Result<AdapterProbeResult> {
+        let id = next_id("adapter-probe");
+        let checked_at = now();
+        self.conn.execute(
+            "INSERT INTO adapter_probe_results (
+                id, agent_id, adapter, capability, method, status, protocol_version,
+                checked_at, expires_at, error_code, details_json
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                id,
+                input.agent_id,
+                input.adapter,
+                input.capability.as_str(),
+                input.method,
+                input.status.as_str(),
+                input.protocol_version,
+                checked_at,
+                input.expires_at,
+                input.error_code,
+                json_text(&input.details_json)?
+            ],
+        )?;
+        self.get_adapter_probe(&id)
+            .with_context(|| format!("adapter probe {id} was not persisted"))
+    }
+
+    pub fn get_adapter_probe(&self, id: &str) -> Result<AdapterProbeResult> {
+        self.conn
+            .query_row(
+                "SELECT id, agent_id, adapter, capability, method, status,
+                        protocol_version, checked_at, expires_at, error_code, details_json
+                 FROM adapter_probe_results
+                 WHERE id = ?1",
+                params![id],
+                adapter_probe_result_from_row,
+            )
+            .with_context(|| format!("adapter probe {id} not found"))
+    }
+
+    pub fn latest_adapter_probe(
+        &self,
+        agent_id: &str,
+        capability: AgentCapabilityName,
+    ) -> Result<Option<AdapterProbeResult>> {
+        self.conn
+            .query_row(
+                "SELECT id, agent_id, adapter, capability, method, status,
+                        protocol_version, checked_at, expires_at, error_code, details_json
+                 FROM adapter_probe_results
+                 WHERE agent_id = ?1 AND capability = ?2
+                 ORDER BY checked_at DESC, id DESC
+                 LIMIT 1",
+                params![agent_id, capability.as_str()],
+                adapter_probe_result_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_adapter_probes(&self, agent_id: &str) -> Result<Vec<AdapterProbeResult>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, agent_id, adapter, capability, method, status,
+                    protocol_version, checked_at, expires_at, error_code, details_json
+             FROM adapter_probe_results
+             WHERE agent_id = ?1
+             ORDER BY checked_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![agent_id], adapter_probe_result_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn append_session_transcript_item(
+        &self,
+        input: NewSessionTranscriptItem,
+    ) -> Result<SessionTranscriptItem> {
+        let id = next_id("transcript-item");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO session_transcript_items (
+                id, session_link_id, turn_id, item_index, item_type, text,
+                payload_artifact_id, payload_storage, metadata_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                input.session_link_id,
+                input.turn_id,
+                input.item_index,
+                input.item_type,
+                input.text,
+                input.payload_artifact_id,
+                input.payload_storage.as_str(),
+                json_text(&input.metadata_json)?,
+                created_at
+            ],
+        )?;
+        self.get_session_transcript_item(&id)
+            .with_context(|| format!("transcript item {id} was not persisted"))
+    }
+
+    pub fn get_session_transcript_item(&self, id: &str) -> Result<SessionTranscriptItem> {
+        self.conn
+            .query_row(
+                "SELECT id, session_link_id, turn_id, item_index, item_type, text,
+                        payload_artifact_id, payload_storage, metadata_json, created_at
+                 FROM session_transcript_items
+                 WHERE id = ?1",
+                params![id],
+                session_transcript_item_from_row,
+            )
+            .with_context(|| format!("transcript item {id} not found"))
+    }
+
+    pub fn list_session_transcript_items(
+        &self,
+        session_link_id: &str,
+    ) -> Result<Vec<SessionTranscriptItem>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, session_link_id, turn_id, item_index, item_type, text,
+                    payload_artifact_id, payload_storage, metadata_json, created_at
+             FROM session_transcript_items
+             WHERE session_link_id = ?1
+             ORDER BY item_index, id",
+        )?;
+        let rows =
+            statement.query_map(params![session_link_id], session_transcript_item_from_row)?;
+        collect_rows(rows)
+    }
 }
 
 fn initialize_schema(conn: &Connection) -> Result<()> {
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    match version {
+        0 => create_schema_v2(conn)?,
+        1 => migrate_schema_v1_to_v2(conn)?,
+        2 => create_schema_v2(conn)?,
+        other => anyhow::bail!("unsupported dispatch database schema version {other}"),
+    }
+    Ok(())
+}
+
+fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
+    create_schema_v2(conn)?;
+    if table_exists(conn, "agent_events")? {
+        conn.execute_batch(
+            r#"
+            INSERT INTO dispatch_events (
+                id, run_id, session_link_id, issue_task_id, event_kind,
+                subject_type, subject_id, source, severity, correlation_id,
+                causation_id, native_event_id, payload_json, created_at
+            )
+            SELECT
+                id,
+                run_id,
+                session_link_id,
+                NULL,
+                CASE event_type
+                    WHEN 'dispatch_approval_resolved' THEN 'dispatch_approval_resolved'
+                    WHEN 'dispatch_starting' THEN 'dispatch_starting'
+                    WHEN 'dispatch_failed' THEN 'dispatch_failed'
+                    WHEN 'session_synced' THEN 'session_synced'
+                    WHEN 'session_transcript_read' THEN 'session_transcript_read'
+                    WHEN 'session_started' THEN 'session_started'
+                    WHEN 'session_resumed' THEN 'session_resumed'
+                    WHEN 'session_renamed' THEN 'session_renamed'
+                    WHEN 'session_forked' THEN 'session_forked'
+                    WHEN 'session_archived' THEN 'session_archived'
+                    WHEN 'turn_started' THEN 'turn_started'
+                    WHEN 'a2a_result_imported' THEN 'a2a_result_imported'
+                    ELSE 'legacy'
+                END,
+                CASE
+                    WHEN session_link_id IS NOT NULL THEN 'session'
+                    WHEN run_id IS NOT NULL THEN 'dispatch_run'
+                    ELSE 'system'
+                END,
+                COALESCE(session_link_id, run_id),
+                'migration',
+                CASE WHEN event_type = 'dispatch_failed' THEN 'error' ELSE 'info' END,
+                run_id,
+                NULL,
+                native_event_id,
+                payload_json,
+                created_at
+            FROM agent_events
+            WHERE NOT EXISTS (
+                SELECT 1 FROM dispatch_events WHERE dispatch_events.id = agent_events.id
+            )
+            ORDER BY created_at, id;
+
+            DROP TABLE agent_events;
+            PRAGMA user_version = 2;
+            "#,
+        )?;
+    }
+    Ok(())
+}
+
+fn create_schema_v2(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS agent_profiles (
@@ -1034,16 +1312,25 @@ fn initialize_schema(conn: &Connection) -> Result<()> {
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
         );
 
-        CREATE TABLE IF NOT EXISTS agent_events (
-            id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS dispatch_events (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
             run_id TEXT,
             session_link_id TEXT,
-            event_type TEXT NOT NULL,
+            issue_task_id TEXT,
+            event_kind TEXT NOT NULL,
+            subject_type TEXT NOT NULL,
+            subject_id TEXT,
+            source TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            correlation_id TEXT,
+            causation_id TEXT,
             native_event_id TEXT,
             payload_json TEXT NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (session_link_id) REFERENCES agent_session_links(id) ON DELETE SET NULL
+            FOREIGN KEY (session_link_id) REFERENCES agent_session_links(id) ON DELETE SET NULL,
+            FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS agent_artifacts (
@@ -1096,15 +1383,75 @@ fn initialize_schema(conn: &Connection) -> Result<()> {
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS dispatch_failures (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            failure_class TEXT NOT NULL,
+            code TEXT NOT NULL,
+            retryable INTEGER NOT NULL CHECK (retryable IN (0, 1)),
+            message TEXT NOT NULL,
+            details_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS adapter_probe_results (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            adapter TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            method TEXT,
+            status TEXT NOT NULL,
+            protocol_version TEXT,
+            checked_at TEXT NOT NULL,
+            expires_at TEXT,
+            error_code TEXT,
+            details_json TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_transcript_items (
+            id TEXT PRIMARY KEY,
+            session_link_id TEXT NOT NULL,
+            turn_id TEXT,
+            item_index INTEGER NOT NULL,
+            item_type TEXT NOT NULL,
+            text TEXT,
+            payload_artifact_id TEXT,
+            payload_storage TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_link_id) REFERENCES agent_session_links(id) ON DELETE CASCADE,
+            FOREIGN KEY (payload_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_issue_tasks_issue_key ON issue_tasks(issue_key);
         CREATE INDEX IF NOT EXISTS idx_dispatch_runs_issue_task ON dispatch_runs(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_agent_session_links_issue_task ON agent_session_links(issue_task_id);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_events_run ON dispatch_events(run_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_events_session ON dispatch_events(session_link_id, sequence);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_issue_task ON agent_artifacts(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_github_interactions_issue_task ON github_interactions(issue_task_id);
-        PRAGMA user_version = 1;
+        CREATE INDEX IF NOT EXISTS idx_dispatch_failures_run ON dispatch_failures(run_id);
+        CREATE INDEX IF NOT EXISTS idx_adapter_probe_agent ON adapter_probe_results(agent_id, capability, checked_at);
+        CREATE INDEX IF NOT EXISTS idx_session_transcript_items_session ON session_transcript_items(session_link_id, item_index);
+        PRAGMA user_version = 2;
         "#,
     )?;
     Ok(())
+}
+
+fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    Ok(exists)
 }
 
 fn agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<AgentProfile> {
@@ -1188,16 +1535,28 @@ fn agent_session_link_from_row(row: &Row<'_>) -> rusqlite::Result<AgentSessionLi
     })
 }
 
-fn agent_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentEvent> {
-    let payload: String = row.get(5)?;
-    Ok(AgentEvent {
+fn dispatch_event_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchEvent> {
+    let event_kind: String = row.get(5)?;
+    let subject_type: String = row.get(6)?;
+    let source: String = row.get(8)?;
+    let severity: String = row.get(9)?;
+    let payload: String = row.get(13)?;
+    Ok(DispatchEvent {
         id: row.get(0)?,
-        run_id: row.get(1)?,
-        session_link_id: row.get(2)?,
-        event_type: row.get(3)?,
-        native_event_id: row.get(4)?,
+        sequence: row.get(1)?,
+        run_id: row.get(2)?,
+        session_link_id: row.get(3)?,
+        issue_task_id: row.get(4)?,
+        event_kind: parse_enum(&event_kind, DispatchEventKind::parse_value)?,
+        subject_type: parse_enum(&subject_type, DispatchSubjectType::parse_value)?,
+        subject_id: row.get(7)?,
+        source: parse_enum(&source, DispatchEventSource::parse_value)?,
+        severity: parse_enum(&severity, DispatchEventSeverity::parse_value)?,
+        correlation_id: row.get(10)?,
+        causation_id: row.get(11)?,
+        native_event_id: row.get(12)?,
         payload_json: parse_json(&payload)?,
-        created_at: row.get(6)?,
+        created_at: row.get(14)?,
     })
 }
 
@@ -1258,6 +1617,58 @@ fn memory_event_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryEvent> {
         source: row.get(3)?,
         payload_json: parse_json(&payload)?,
         created_at: row.get(5)?,
+    })
+}
+
+fn dispatch_failure_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchFailure> {
+    let failure_class: String = row.get(3)?;
+    let details: String = row.get(7)?;
+    Ok(DispatchFailure {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        phase: row.get(2)?,
+        failure_class: parse_enum(&failure_class, DispatchFailureClass::parse_value)?,
+        code: row.get(4)?,
+        retryable: int_bool(row.get(5)?),
+        message: row.get(6)?,
+        details_json: parse_json(&details)?,
+        created_at: row.get(8)?,
+    })
+}
+
+fn adapter_probe_result_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterProbeResult> {
+    let capability: String = row.get(3)?;
+    let status: String = row.get(5)?;
+    let details: String = row.get(10)?;
+    Ok(AdapterProbeResult {
+        id: row.get(0)?,
+        agent_id: row.get(1)?,
+        adapter: row.get(2)?,
+        capability: parse_enum(&capability, AgentCapabilityName::parse_value)?,
+        method: row.get(4)?,
+        status: parse_enum(&status, AdapterProbeStatus::parse_value)?,
+        protocol_version: row.get(6)?,
+        checked_at: row.get(7)?,
+        expires_at: row.get(8)?,
+        error_code: row.get(9)?,
+        details_json: parse_json(&details)?,
+    })
+}
+
+fn session_transcript_item_from_row(row: &Row<'_>) -> rusqlite::Result<SessionTranscriptItem> {
+    let payload_storage: String = row.get(7)?;
+    let metadata: String = row.get(8)?;
+    Ok(SessionTranscriptItem {
+        id: row.get(0)?,
+        session_link_id: row.get(1)?,
+        turn_id: row.get(2)?,
+        item_index: row.get(3)?,
+        item_type: row.get(4)?,
+        text: row.get(5)?,
+        payload_artifact_id: row.get(6)?,
+        payload_storage: parse_enum(&payload_storage, TranscriptPayloadStorage::parse_value)?,
+        metadata_json: parse_json(&metadata)?,
+        created_at: row.get(9)?,
     })
 }
 

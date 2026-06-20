@@ -127,6 +127,86 @@ string_enum!(MemoryEventType {
     AgentPerformanceSignal => "agent_performance_signal",
 });
 
+string_enum!(DispatchEventKind {
+    DispatchApprovalResolved => "dispatch_approval_resolved",
+    DispatchStarting => "dispatch_starting",
+    DispatchFailed => "dispatch_failed",
+    SessionSynced => "session_synced",
+    SessionTranscriptRead => "session_transcript_read",
+    SessionStarted => "session_started",
+    SessionResumed => "session_resumed",
+    SessionRenamed => "session_renamed",
+    SessionForked => "session_forked",
+    SessionArchived => "session_archived",
+    TurnStarted => "turn_started",
+    A2aResultImported => "a2a_result_imported",
+    Legacy => "legacy",
+});
+
+string_enum!(DispatchEventSeverity {
+    Info => "info",
+    Warning => "warning",
+    Error => "error",
+});
+
+string_enum!(DispatchEventSource {
+    Runtime => "runtime",
+    Adapter => "adapter",
+    Tool => "tool",
+    A2a => "a2a",
+    Github => "github",
+    Migration => "migration",
+});
+
+string_enum!(DispatchSubjectType {
+    DispatchRun => "dispatch_run",
+    Session => "session",
+    IssueTask => "issue_task",
+    Approval => "approval",
+    Artifact => "artifact",
+    Adapter => "adapter",
+    System => "system",
+});
+
+string_enum!(PolicyAction {
+    StartDispatch => "start_dispatch",
+    ResumeDispatch => "resume_dispatch",
+    ReadSessionTranscript => "read_session_transcript",
+    RenameSession => "rename_session",
+    ForkSession => "fork_session",
+    ArchiveSession => "archive_session",
+    SendA2aTask => "send_a2a_task",
+    PostGithubComment => "post_github_comment",
+    OpenPr => "open_pr",
+});
+
+string_enum!(PolicyRequirement {
+    Allowed => "allowed",
+    RequiresApproval => "requires_approval",
+    Forbidden => "forbidden",
+});
+
+string_enum!(AdapterProbeStatus {
+    Supported => "supported",
+    Unsupported => "unsupported",
+    Failed => "failed",
+});
+
+string_enum!(DispatchFailureClass {
+    Adapter => "adapter",
+    Capability => "capability",
+    Policy => "policy",
+    External => "external",
+    Storage => "storage",
+    Validation => "validation",
+    Unknown => "unknown",
+});
+
+string_enum!(TranscriptPayloadStorage {
+    Inline => "inline",
+    Artifact => "artifact",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentProfile {
     pub id: String,
@@ -244,23 +324,116 @@ pub struct NewAgentSessionLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentEvent {
+pub struct DispatchEvent {
     pub id: String,
+    pub sequence: i64,
     pub run_id: Option<String>,
     pub session_link_id: Option<String>,
-    pub event_type: String,
+    pub issue_task_id: Option<String>,
+    pub event_kind: DispatchEventKind,
+    pub subject_type: DispatchSubjectType,
+    pub subject_id: Option<String>,
+    pub source: DispatchEventSource,
+    pub severity: DispatchEventSeverity,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
     pub native_event_id: Option<String>,
     pub payload_json: Value,
     pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct NewAgentEvent {
+pub struct NewDispatchEvent {
     pub run_id: Option<String>,
     pub session_link_id: Option<String>,
-    pub event_type: String,
+    pub issue_task_id: Option<String>,
+    pub event_kind: DispatchEventKind,
+    pub subject_type: DispatchSubjectType,
+    pub subject_id: Option<String>,
+    pub source: DispatchEventSource,
+    pub severity: DispatchEventSeverity,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
     pub native_event_id: Option<String>,
     pub payload_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DispatchFailure {
+    pub id: String,
+    pub run_id: String,
+    pub phase: String,
+    pub failure_class: DispatchFailureClass,
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+    pub details_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewDispatchFailure {
+    pub run_id: String,
+    pub phase: String,
+    pub failure_class: DispatchFailureClass,
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AdapterProbeResult {
+    pub id: String,
+    pub agent_id: String,
+    pub adapter: String,
+    pub capability: AgentCapabilityName,
+    pub method: Option<String>,
+    pub status: AdapterProbeStatus,
+    pub protocol_version: Option<String>,
+    pub checked_at: String,
+    pub expires_at: Option<String>,
+    pub error_code: Option<String>,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewAdapterProbeResult {
+    pub agent_id: String,
+    pub adapter: String,
+    pub capability: AgentCapabilityName,
+    pub method: Option<String>,
+    pub status: AdapterProbeStatus,
+    pub protocol_version: Option<String>,
+    pub expires_at: Option<String>,
+    pub error_code: Option<String>,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptItem {
+    pub id: String,
+    pub session_link_id: String,
+    pub turn_id: Option<String>,
+    pub item_index: i64,
+    pub item_type: String,
+    pub text: Option<String>,
+    pub payload_artifact_id: Option<String>,
+    pub payload_storage: TranscriptPayloadStorage,
+    pub metadata_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewSessionTranscriptItem {
+    pub session_link_id: String,
+    pub turn_id: Option<String>,
+    pub item_index: i64,
+    pub item_type: String,
+    pub text: Option<String>,
+    pub payload_artifact_id: Option<String>,
+    pub payload_storage: TranscriptPayloadStorage,
+    pub metadata_json: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

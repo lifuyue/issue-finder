@@ -1,9 +1,13 @@
 use anyhow::Result;
 
 use super::a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
+use super::capability_probe::AgentProbeReport;
 use super::execution::DispatchExecutionResult;
 use super::github_projection::{GitHubApprovalResult, GitHubCommentDraftResult, GitHubPostResult};
-use super::model::{AgentArtifact, AgentEvent, AgentProfile, AgentSessionLink, GitHubInteraction};
+use super::model::{
+    AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
+    SessionTranscriptItem,
+};
 use super::packaging::PackageImportResult;
 use super::runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchStatusSnapshot,
@@ -11,6 +15,7 @@ use super::runtime::{
 };
 use super::session_approvals::{SessionMutationApprovalResolution, SessionMutationProposal};
 use super::session_ops::{SessionTranscriptResult, SessionsSyncResult};
+use super::timeline::{DispatchTimeline, DispatchTrace};
 
 pub(crate) fn render_cli_output<T: serde::Serialize>(
     json: bool,
@@ -48,6 +53,22 @@ pub(crate) fn render_agent_capabilities(view: &AgentCapabilitiesView) -> String 
         lines.push(format!(
             "- {}: {}",
             capability.capability, capability.status
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_agent_probe(report: &AgentProbeReport) -> String {
+    let mut lines = vec![format!(
+        "Probe results for {} (refreshed={}):",
+        report.agent_id, report.refreshed
+    )];
+    for probe in &report.probes {
+        lines.push(format!(
+            "- {}: {} method={}",
+            probe.capability,
+            probe.status,
+            probe.method.as_deref().unwrap_or("-")
         ));
     }
     lines.join("\n")
@@ -114,9 +135,30 @@ pub(crate) fn render_session_search(result: &SessionSearchResult) -> String {
 
 pub(crate) fn render_session_transcript(result: &SessionTranscriptResult) -> String {
     format!(
-        "Read session {} transcript into artifact {}.\nPath: {}",
-        result.session.id, result.transcript_artifact.id, result.transcript_artifact.path
+        "Read session {} transcript into artifact {}.\nReplay items: {}\nPath: {}",
+        result.session.id,
+        result.transcript_artifact.id,
+        result.replay_items.len(),
+        result.transcript_artifact.path
     )
+}
+
+pub(crate) fn render_session_replay(items: &[SessionTranscriptItem]) -> String {
+    if items.is_empty() {
+        return "No replay items found.".to_string();
+    }
+
+    let mut lines = vec!["Session replay:".to_string()];
+    for item in items {
+        lines.push(format!(
+            "- #{} type={} turn={} storage={}",
+            item.item_index,
+            item.item_type,
+            item.turn_id.as_deref().unwrap_or("-"),
+            item.payload_storage
+        ));
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn render_session_mutation_proposal(result: &SessionMutationProposal) -> String {
@@ -161,13 +203,14 @@ pub(crate) fn render_dispatch_status(status: &DispatchStatusSnapshot) -> String 
     }
     lines.push(format!("Approvals: {}", status.approval_requests.len()));
     lines.push(format!("Artifacts: {}", status.artifacts.len()));
+    lines.push(format!("Failures: {}", status.failures.len()));
     if let Some(reason) = &status.run.failure_reason {
         lines.push(format!("Failure: {reason}"));
     }
     lines.join("\n")
 }
 
-pub(crate) fn render_dispatch_events(events: &[AgentEvent]) -> String {
+pub(crate) fn render_dispatch_events(events: &[DispatchEvent]) -> String {
     if events.is_empty() {
         return "No dispatch events found.".to_string();
     }
@@ -175,13 +218,42 @@ pub(crate) fn render_dispatch_events(events: &[AgentEvent]) -> String {
     let mut lines = vec!["Dispatch events:".to_string()];
     for event in events {
         lines.push(format!(
-            "- {} {} native={}",
+            "- #{} {} {} native={}",
+            event.sequence,
             event.created_at,
-            event.event_type,
+            event.event_kind,
             event.native_event_id.as_deref().unwrap_or("-")
         ));
     }
     lines.join("\n")
+}
+
+pub(crate) fn render_dispatch_timeline(timeline: &DispatchTimeline) -> String {
+    if timeline.items.is_empty() {
+        return format!("No timeline items found for {}.", timeline.run.id);
+    }
+
+    let mut lines = vec![format!("Dispatch timeline for {}:", timeline.run.id)];
+    for item in &timeline.items {
+        lines.push(format!(
+            "- {} {} {}",
+            item.created_at, item.kind, item.summary
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_dispatch_trace(trace: &DispatchTrace) -> String {
+    format!(
+        "Dispatch trace for {}:\nEvents: {}\nApprovals: {}\nArtifacts: {}\nFailures: {}\nGitHub interactions: {}\nTimeline items: {}",
+        trace.run.id,
+        trace.events.len(),
+        trace.approvals.len(),
+        trace.artifacts.len(),
+        trace.failures.len(),
+        trace.github_interactions.len(),
+        trace.timeline.len()
+    )
 }
 
 pub(crate) fn render_dispatch_artifacts(artifacts: &[AgentArtifact]) -> String {

@@ -12,6 +12,8 @@ use super::a2a_gateway::{self, A2aApprovalResult, A2aExportResult, A2aResultImpo
 use super::adapters::codex_app_server::{
     codex_capability_mappings, default_codex_app_server_startup_metadata,
 };
+use super::capability_probe::{probe_agent, AgentProbeReport};
+use super::events::dispatch_run_event;
 use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
 use super::github_projection::{
     self, GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
@@ -19,12 +21,14 @@ use super::github_projection::{
 };
 use super::memory::record_dispatch_approval_signal;
 use super::model::{
-    AgentArtifact, AgentCapability, AgentCapabilityName, AgentEvent, AgentProfile,
-    AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
-    CapabilityStatus, DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus,
-    NewAgentCapability, NewAgentEvent, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
+    AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, AgentSessionLink,
+    AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus,
+    DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
+    DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus, NewAgentCapability,
+    NewAgentProfile, NewApprovalRequest, NewDispatchRun, PolicyAction, SessionTranscriptItem,
 };
 use super::packaging::{self, PackageImportResult};
+use super::policy::{classify_action, ensure_capability_preconditions};
 use super::session_approvals::{
     approve_session_mutation_with_adapter, pending_session_mutation, reject_session_mutation,
     request_session_archive, request_session_fork, request_session_rename, PendingSessionMutation,
@@ -35,6 +39,10 @@ use super::session_ops::{
     SessionsSyncRequest, SessionsSyncResult,
 };
 use super::store::DispatchStore;
+use super::timeline::{
+    approval_latency, dispatch_timeline, dispatch_trace, ApprovalLatency, DispatchTimeline,
+    DispatchTrace,
+};
 
 pub struct DispatchRuntime {
     store: DispatchStore,
@@ -63,7 +71,9 @@ pub struct DispatchStatusSnapshot {
     pub agent: AgentProfile,
     pub selected_session: Option<AgentSessionLink>,
     pub approval_requests: Vec<ApprovalRequest>,
+    pub approval_latencies: Vec<ApprovalLatency>,
     pub artifacts: Vec<AgentArtifact>,
+    pub failures: Vec<DispatchFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -172,8 +182,12 @@ impl DispatchRuntime {
         &self,
         session_link_id: &str,
     ) -> Result<SessionTranscriptResult> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ReadTranscript)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ReadSessionTranscript)?;
         read_codex_session_transcript(&self.store, session_link_id)
+    }
+
+    pub fn session_replay(&self, session_link_id: &str) -> Result<Vec<SessionTranscriptItem>> {
+        self.store.list_session_transcript_items(session_link_id)
     }
 
     pub fn rename_session(
@@ -184,17 +198,17 @@ impl DispatchRuntime {
         if display_name.trim().is_empty() {
             anyhow::bail!("session display name cannot be empty");
         }
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::RenameSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?;
         request_session_rename(&self.store, session_link_id, display_name)
     }
 
     pub fn archive_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ArchiveSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?;
         request_session_archive(&self.store, session_link_id)
     }
 
     pub fn fork_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?;
         request_session_fork(&self.store, session_link_id)
     }
 
@@ -206,17 +220,13 @@ impl DispatchRuntime {
         match &mutation {
             PendingSessionMutation::Rename {
                 session_link_id, ..
-            } => self.ensure_codex_session_adapter(
-                session_link_id,
-                AgentCapabilityName::RenameSession,
-            )?,
-            PendingSessionMutation::Fork { session_link_id } => self
-                .ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?,
-            PendingSessionMutation::Archive { session_link_id } => self
-                .ensure_codex_session_adapter(
-                    session_link_id,
-                    AgentCapabilityName::ArchiveSession,
-                )?,
+            } => self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?,
+            PendingSessionMutation::Fork { session_link_id } => {
+                self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?
+            }
+            PendingSessionMutation::Archive { session_link_id } => {
+                self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?
+            }
         }
         let session = self.store.get_session_link(mutation.session_link_id())?;
         let agent = self.store.get_agent_profile(&session.agent_id)?;
@@ -249,7 +259,9 @@ impl DispatchRuntime {
             .map(|session_id| self.store.get_session_link(session_id))
             .transpose()?;
         let approval_requests = self.store.list_approval_requests_for_run(run_id)?;
+        let approval_latencies = approval_requests.iter().map(approval_latency).collect();
         let artifacts = self.store.list_artifacts_for_run(run_id)?;
+        let failures = self.store.list_dispatch_failures_for_run(run_id)?;
 
         Ok(DispatchStatusSnapshot {
             run,
@@ -257,16 +269,30 @@ impl DispatchRuntime {
             agent,
             selected_session,
             approval_requests,
+            approval_latencies,
             artifacts,
+            failures,
         })
     }
 
-    pub fn dispatch_events(&self, run_id: &str) -> Result<Vec<AgentEvent>> {
-        self.store.list_agent_events_for_run(run_id)
+    pub fn dispatch_events(&self, run_id: &str) -> Result<Vec<DispatchEvent>> {
+        self.store.list_dispatch_events_for_run(run_id)
     }
 
     pub fn dispatch_artifacts(&self, run_id: &str) -> Result<Vec<AgentArtifact>> {
         self.store.list_artifacts_for_run(run_id)
+    }
+
+    pub fn dispatch_timeline(&self, run_id: &str) -> Result<DispatchTimeline> {
+        dispatch_timeline(&self.store, run_id)
+    }
+
+    pub fn dispatch_trace(&self, run_id: &str) -> Result<DispatchTrace> {
+        dispatch_trace(&self.store, run_id)
+    }
+
+    pub fn probe_agent(&self, agent_id: &str, refresh: bool) -> Result<AgentProbeReport> {
+        probe_agent(&self.store, agent_id, refresh)
     }
 
     pub fn import_handoff_from_inbox(&self, inbox_id: &str) -> Result<PackageImportResult> {
@@ -315,13 +341,12 @@ impl DispatchRuntime {
             .map(|session_link_id| self.store.get_session_link(session_link_id))
             .transpose()?;
         let dispatch_capability = if selected_session_link_id.is_some() {
-            AgentCapabilityName::ResumeSession
+            PolicyAction::ResumeDispatch
         } else {
-            AgentCapabilityName::StartSession
+            PolicyAction::StartDispatch
         };
-        self.ensure_agent_capability(&agent.id, dispatch_capability)?;
-        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetGoal)?;
-        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetMetadata)?;
+        let policy = classify_action(dispatch_capability);
+        ensure_capability_preconditions(&self.store, &agent.id, &policy)?;
 
         let run = self.store.create_dispatch_run(NewDispatchRun {
             issue_task_id: issue_task.id.clone(),
@@ -343,7 +368,8 @@ impl DispatchRuntime {
                 "newSession": selected_session.is_none(),
                 "requestedNewSession": request.new_session,
                 "selectedSessionLinkId": run.selected_session_link_id,
-                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str())
+                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str()),
+                "policy": policy
             }),
         })?;
 
@@ -397,17 +423,17 @@ impl DispatchRuntime {
                 .update_dispatch_run_status(&run.id, DispatchRunStatus::Canceled, None)?,
             ApprovalStatus::Pending => unreachable!(),
         };
-        self.store.append_agent_event(NewAgentEvent {
-            run_id: Some(run.id.clone()),
-            session_link_id: run.selected_session_link_id.clone(),
-            event_type: "dispatch_approval_resolved".to_string(),
-            native_event_id: None,
-            payload_json: json!({
+        self.store.append_dispatch_event(dispatch_run_event(
+            &run,
+            DispatchEventKind::DispatchApprovalResolved,
+            DispatchEventSource::Runtime,
+            DispatchEventSeverity::Info,
+            json!({
                 "approvalRequestId": approval_request.id,
                 "approvalStatus": status.as_str(),
                 "runStatus": run.status.as_str()
             }),
-        })?;
+        ))?;
         record_dispatch_approval_signal(&self.store, &run, &approval_request)?;
 
         Ok(DispatchApprovalResolution {
@@ -515,11 +541,7 @@ impl DispatchRuntime {
         Ok(session.id)
     }
 
-    fn ensure_codex_session_adapter(
-        &self,
-        session_link_id: &str,
-        capability: AgentCapabilityName,
-    ) -> Result<()> {
+    fn ensure_session_policy(&self, session_link_id: &str, action: PolicyAction) -> Result<()> {
         let session = self.store.get_session_link(session_link_id)?;
         let agent = self.store.get_agent_profile(&session.agent_id)?;
         if agent.adapter != "codex_app_server" {
@@ -528,14 +550,8 @@ impl DispatchRuntime {
                 agent.adapter
             );
         }
-        let capability = self.store.get_agent_capability(&agent.id, capability)?;
-        if capability.status == CapabilityStatus::Unsupported {
-            anyhow::bail!(
-                "agent {} does not support capability {}",
-                agent.id,
-                capability.capability.as_str()
-            );
-        }
+        let decision = classify_action(action);
+        ensure_capability_preconditions(&self.store, &agent.id, &decision)?;
         Ok(())
     }
 
