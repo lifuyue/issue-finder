@@ -5,10 +5,14 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::github::IssueRef;
 
+use super::github_interaction_policy::{
+    decide_final_comment, decide_tracking_comment, FinalCommentFacts, GitHubInteractionDecisionPlan,
+};
 use super::model::{
-    AgentArtifact, ApprovalRequest, ApprovalStatus, ApprovalType, GitHubInteraction,
-    GitHubInteractionStatus, GitHubInteractionType, IssueTask, IssueTaskStatus, NewApprovalRequest,
-    NewArtifact, NewGitHubInteraction,
+    AgentArtifact, ApprovalRequest, ApprovalStatus, ApprovalType, DispatchRun, DispatchRunOutcome,
+    GitHubInteraction, GitHubInteractionDecision, GitHubInteractionStatus, GitHubInteractionType,
+    IssueTask, IssueTaskStatus, NewApprovalRequest, NewArtifact, NewGitHubInteraction,
+    NewGitHubInteractionDecision,
 };
 use super::store::DispatchStore;
 
@@ -19,6 +23,15 @@ pub struct GitHubCommentDraftResult {
     pub interaction: GitHubInteraction,
     pub body_artifact: AgentArtifact,
     pub approval_request: ApprovalRequest,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubCommentPolicyResult {
+    pub issue_task: IssueTask,
+    pub decision: GitHubInteractionDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<GitHubCommentDraftResult>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -119,37 +132,32 @@ pub fn draft_tracking_comment(
     store: &DispatchStore,
     issue: &str,
     body_override: Option<String>,
-) -> Result<GitHubCommentDraftResult> {
+) -> Result<GitHubCommentPolicyResult> {
     let issue_task = imported_issue_task(store, issue)?;
-    let body = body_override
-        .unwrap_or_else(|| "I am tracking this issue and preparing a fix attempt.".to_string());
-    create_comment_draft(
-        store,
-        issue_task,
-        GitHubInteractionType::TrackingComment,
-        body,
-        None,
-    )
+    let interactions = store.list_github_interactions_for_issue_task(&issue_task.id)?;
+    let plan = decide_tracking_comment(&issue_task, &interactions, body_override);
+    create_policy_result(store, issue_task, None, plan)
 }
 
 pub fn draft_final_comment(
     store: &DispatchStore,
     run_id: &str,
     body_override: Option<String>,
-) -> Result<GitHubCommentDraftResult> {
+) -> Result<GitHubCommentPolicyResult> {
     let run = store.get_dispatch_run(run_id)?;
     let issue_task = store.get_issue_task(&run.issue_task_id)?;
-    let body = match body_override {
-        Some(body) => body,
-        None => derive_final_comment_body(store, &run.result_artifact_id)?,
-    };
-    create_comment_draft(
-        store,
-        issue_task,
-        GitHubInteractionType::FinalComment,
-        body,
-        Some(run.id),
-    )
+    let outcome = store.find_dispatch_run_outcome_by_run(&run.id)?;
+    let facts = final_comment_facts(store, &run, outcome.as_ref())?;
+    let interactions = store.list_github_interactions_for_issue_task(&issue_task.id)?;
+    let plan = decide_final_comment(
+        &issue_task,
+        &run,
+        outcome.as_ref(),
+        facts,
+        &interactions,
+        body_override,
+    );
+    create_policy_result(store, issue_task, Some(run.id), plan)
 }
 
 pub fn approve_github_interaction(
@@ -274,6 +282,40 @@ pub fn list_github_interactions(
     store.list_github_interactions_for_issue_task(&issue_task.id)
 }
 
+fn create_policy_result(
+    store: &DispatchStore,
+    issue_task: IssueTask,
+    run_id: Option<String>,
+    plan: GitHubInteractionDecisionPlan,
+) -> Result<GitHubCommentPolicyResult> {
+    let draft = match (plan.interaction_type, plan.body.clone()) {
+        (Some(interaction_type), Some(body)) => Some(create_comment_draft(
+            store,
+            issue_task.clone(),
+            interaction_type,
+            body,
+            run_id.clone(),
+        )?),
+        _ => None,
+    };
+    let decision = store.create_github_interaction_decision(NewGitHubInteractionDecision {
+        issue_task_id: issue_task.id.clone(),
+        run_id,
+        decision_kind: plan.decision_kind,
+        interaction_type: plan.interaction_type,
+        github_interaction_id: draft.as_ref().map(|draft| draft.interaction.id.clone()),
+        body_artifact_id: draft.as_ref().map(|draft| draft.body_artifact.id.clone()),
+        reason_code: plan.reason_code,
+        reasons_json: json!(plan.reasons),
+        inputs_json: plan.inputs_json,
+    })?;
+    Ok(GitHubCommentPolicyResult {
+        issue_task,
+        decision,
+        draft,
+    })
+}
+
 fn create_comment_draft(
     store: &DispatchStore,
     issue_task: IssueTask,
@@ -342,32 +384,49 @@ fn imported_issue_task(store: &DispatchStore, issue: &str) -> Result<IssueTask> 
         .with_context(|| format!("issue task {issue_key} has not been imported"))
 }
 
-fn derive_final_comment_body(
+fn final_comment_facts(
     store: &DispatchStore,
-    result_artifact_id: &Option<String>,
-) -> Result<String> {
-    let artifact_id = result_artifact_id
-        .as_deref()
-        .context("dispatch run has no result artifact for final comment")?;
-    let bytes = store.read_artifact_bytes(artifact_id)?;
-    let value = serde_json::from_slice::<Value>(&bytes)
-        .context("fix result artifact must be JSON to derive final comment")?;
-    if let Some(reply) = value
+    run: &DispatchRun,
+    outcome: Option<&DispatchRunOutcome>,
+) -> Result<FinalCommentFacts> {
+    let result_artifact_id = outcome
+        .and_then(|outcome| outcome.result_artifact_id.clone())
+        .or_else(|| run.result_artifact_id.clone());
+    let value = match result_artifact_id.as_deref() {
+        Some(artifact_id) => {
+            let bytes = store.read_artifact_bytes(artifact_id)?;
+            Some(
+                serde_json::from_slice::<Value>(&bytes)
+                    .context("fix result artifact must be JSON to derive GitHub comment policy")?,
+            )
+        }
+        None => None,
+    };
+    let suggested_reply = value.as_ref().and_then(suggested_github_reply);
+    let result_status = value.as_ref().and_then(result_status);
+    Ok(FinalCommentFacts {
+        result_artifact_id,
+        suggested_reply,
+        result_status,
+        outcome_kind: outcome.map(|outcome| outcome.outcome_kind),
+        failure_class: outcome.and_then(|outcome| outcome.failure_class),
+        validation_outcome: outcome.and_then(|outcome| outcome.validation_outcome),
+    })
+}
+
+fn suggested_github_reply(value: &Value) -> Option<String> {
+    value
         .get("suggestedGitHubReply")
         .or_else(|| value.get("suggested_github_reply"))
         .and_then(Value::as_str)
-    {
-        return Ok(reply.to_string());
-    }
-    if let Some(summary) = value.get("summary").and_then(Value::as_str) {
-        return Ok(format!(
-            "Fix attempt completed.\n\nSummary:\n{summary}\n\nValidation details are recorded in the local Issue Finder result artifact."
-        ));
-    }
-    Ok(
-        "Fix attempt completed. Details are recorded in the local Issue Finder result artifact."
-            .to_string(),
-    )
+        .map(ToOwned::to_owned)
+}
+
+fn result_status(value: &Value) -> Option<String> {
+    value
+        .get("status")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
 }
 
 fn pending_github_approval(store: &DispatchStore, interaction_id: &str) -> Result<ApprovalRequest> {

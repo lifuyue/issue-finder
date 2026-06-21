@@ -9,10 +9,11 @@ use std::time::Duration;
 use anyhow::Result;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
-    ApprovalStatus, DispatchRunStatus, DispatchRuntime, GitHubCommentWriter,
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
+    DispatchRuntime, DispatchValidationOutcome, GitHubCommentWriter, GitHubInteractionDecisionKind,
     GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
-    IssueTaskStatus, NewArtifact, NewDispatchRun, NewIssueTask, PostedGitHubComment,
-    ReqwestGitHubCommentWriter,
+    IssueTaskStatus, NewArtifact, NewDispatchRun, NewDispatchRunOutcome, NewIssueTask,
+    PostedGitHubComment, ReqwestGitHubCommentWriter,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -24,14 +25,57 @@ mod env_lock;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn github_tracking_comment_requires_approval_before_posting() {
+fn default_tracking_comment_records_no_comment_decision() {
     let dir = tempdir().unwrap();
     let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
     let task = imported_issue_task(&runtime);
 
-    let draft = runtime
+    let result = runtime
         .draft_github_tracking_comment("owner/repo#123", None)
         .unwrap();
+    assert_eq!(result.issue_task.id, task.id);
+    assert_eq!(
+        result.decision.decision_kind,
+        GitHubInteractionDecisionKind::NoComment
+    );
+    assert_eq!(result.decision.reason_code, "tracking_default_silence");
+    assert!(result.draft.is_none());
+    assert!(runtime
+        .store()
+        .list_github_interactions_for_issue_task(&task.id)
+        .unwrap()
+        .is_empty());
+    let decisions = runtime
+        .store()
+        .list_github_interaction_decisions_for_issue_task(&task.id)
+        .unwrap();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(
+        decisions[0].decision_kind,
+        GitHubInteractionDecisionKind::NoComment
+    );
+}
+
+#[test]
+fn explicit_tracking_comment_requires_approval_before_posting() {
+    let dir = tempdir().unwrap();
+    let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
+    let task = imported_issue_task(&runtime);
+
+    let result = runtime
+        .draft_github_tracking_comment(
+            "owner/repo#123",
+            Some(
+                "I have a concrete fix plan and will post a PR link after validation.".to_string(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        result.decision.decision_kind,
+        GitHubInteractionDecisionKind::Tracking
+    );
+    assert_eq!(result.decision.reason_code, "explicit_tracking_body");
+    let draft = result.draft.as_ref().unwrap();
     assert_eq!(draft.issue_task.id, task.id);
     assert_eq!(
         draft.interaction.interaction_type,
@@ -40,6 +84,10 @@ fn github_tracking_comment_requires_approval_before_posting() {
     assert_eq!(draft.interaction.status, GitHubInteractionStatus::Draft);
     assert_eq!(draft.approval_request.status, ApprovalStatus::Pending);
     assert_eq!(draft.approval_request.run_id, None);
+    assert_eq!(
+        result.decision.github_interaction_id.as_deref(),
+        Some(draft.interaction.id.as_str())
+    );
 
     let body = String::from_utf8(
         runtime
@@ -49,7 +97,7 @@ fn github_tracking_comment_requires_approval_before_posting() {
     )
     .unwrap();
     assert!(body.starts_with("<!-- issue-finder:tracking_comment -->"));
-    assert!(body.contains("I am tracking this issue and preparing a fix attempt."));
+    assert!(body.contains("concrete fix plan"));
 
     let mut writer = FakeGitHubWriter::default();
     let error = runtime
@@ -90,14 +138,48 @@ fn github_tracking_comment_requires_approval_before_posting() {
 }
 
 #[test]
+fn duplicate_tracking_comment_records_no_comment_decision() {
+    let dir = tempdir().unwrap();
+    let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
+    let task = imported_issue_task(&runtime);
+
+    let first = runtime
+        .draft_github_tracking_comment("owner/repo#123", Some("custom body".to_string()))
+        .unwrap();
+    assert!(first.draft.is_some());
+
+    let duplicate = runtime
+        .draft_github_tracking_comment("owner/repo#123", Some("another body".to_string()))
+        .unwrap();
+    assert_eq!(
+        duplicate.decision.decision_kind,
+        GitHubInteractionDecisionKind::NoComment
+    );
+    assert_eq!(
+        duplicate.decision.reason_code,
+        "duplicate_tracking_interaction"
+    );
+    assert!(duplicate.draft.is_none());
+    assert_eq!(
+        runtime
+            .store()
+            .list_github_interactions_for_issue_task(&task.id)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn rejected_github_comment_cannot_be_posted() {
     let dir = tempdir().unwrap();
     let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
     imported_issue_task(&runtime);
 
-    let draft = runtime
+    let result = runtime
         .draft_github_tracking_comment("owner/repo#123", Some("custom body".to_string()))
         .unwrap();
+    let draft = result.draft.as_ref().unwrap();
     let rejected = runtime
         .reject_github_interaction(&draft.interaction.id)
         .unwrap();
@@ -121,9 +203,10 @@ fn failed_github_comment_post_can_be_retried() {
     let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
     imported_issue_task(&runtime);
 
-    let draft = runtime
-        .draft_github_tracking_comment("owner/repo#123", None)
+    let result = runtime
+        .draft_github_tracking_comment("owner/repo#123", Some("custom tracking body".to_string()))
         .unwrap();
+    let draft = result.draft.as_ref().unwrap();
     runtime
         .approve_github_interaction(&draft.interaction.id)
         .unwrap();
@@ -187,8 +270,28 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
         .store()
         .set_dispatch_run_result_artifact(&run.id, &fix_result.id)
         .unwrap();
+    runtime
+        .store()
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
+            run_id: run.id.clone(),
+            idempotency_key: "final-success".to_string(),
+            outcome_kind: DispatchOutcomeKind::FixReady,
+            failure_class: None,
+            failure_detail: None,
+            task_class: None,
+            validation_outcome: Some(DispatchValidationOutcome::Passed),
+            result_artifact_id: Some(fix_result.id.clone()),
+            metadata_json: json!({ "source": "test" }),
+        })
+        .unwrap();
 
-    let draft = runtime.draft_github_final_comment(&run.id, None).unwrap();
+    let result = runtime.draft_github_final_comment(&run.id, None).unwrap();
+    assert_eq!(
+        result.decision.decision_kind,
+        GitHubInteractionDecisionKind::Final
+    );
+    assert_eq!(result.decision.reason_code, "final_suggested_reply");
+    let draft = result.draft.as_ref().unwrap();
     assert_eq!(
         draft.interaction.interaction_type,
         GitHubInteractionType::FinalComment
@@ -216,6 +319,133 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
         runtime.store().get_issue_task(&task.id).unwrap().status,
         IssueTaskStatus::GithubPosted
     );
+}
+
+#[test]
+fn final_github_comment_requires_explicit_suggested_reply() {
+    let dir = tempdir().unwrap();
+    let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
+    let task = imported_issue_task(&runtime);
+    let run = runtime
+        .store()
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id.clone(),
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Completed,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_session_link_id: None,
+        })
+        .unwrap();
+    let fix_result = runtime
+        .store()
+        .write_artifact(
+            NewArtifact {
+                issue_task_id: Some(task.id.clone()),
+                run_id: Some(run.id.clone()),
+                kind: "fix_result".to_string(),
+                content_type: "application/json".to_string(),
+                metadata_json: json!({ "source": "test" }),
+            },
+            br#"{"summary":"Fixed locally; validation passed."}"#,
+        )
+        .unwrap();
+    runtime
+        .store()
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
+            run_id: run.id.clone(),
+            idempotency_key: "final-missing-reply".to_string(),
+            outcome_kind: DispatchOutcomeKind::FixReady,
+            failure_class: None,
+            failure_detail: None,
+            task_class: None,
+            validation_outcome: Some(DispatchValidationOutcome::Passed),
+            result_artifact_id: Some(fix_result.id.clone()),
+            metadata_json: json!({ "source": "test" }),
+        })
+        .unwrap();
+
+    let result = runtime.draft_github_final_comment(&run.id, None).unwrap();
+    assert_eq!(
+        result.decision.decision_kind,
+        GitHubInteractionDecisionKind::NoReply
+    );
+    assert_eq!(
+        result.decision.reason_code,
+        "missing_suggested_github_reply"
+    );
+    assert!(result.draft.is_none());
+    assert!(runtime
+        .store()
+        .list_github_interactions_for_issue_task(&task.id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn context_gap_with_suggested_reply_drafts_clarification_comment() {
+    let dir = tempdir().unwrap();
+    let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
+    let task = imported_issue_task(&runtime);
+    let run = runtime
+        .store()
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id.clone(),
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::NeedsUser,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_session_link_id: None,
+        })
+        .unwrap();
+    let fix_result = runtime
+        .store()
+        .write_artifact(
+            NewArtifact {
+                issue_task_id: Some(task.id.clone()),
+                run_id: Some(run.id.clone()),
+                kind: "fix_result".to_string(),
+                content_type: "application/json".to_string(),
+                metadata_json: json!({ "source": "test" }),
+            },
+            br#"{"status":"needs_user","suggestedGitHubReply":"Could a maintainer confirm the expected behavior for empty config files?"}"#,
+        )
+        .unwrap();
+    runtime
+        .store()
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
+            run_id: run.id.clone(),
+            idempotency_key: "clarification-needed".to_string(),
+            outcome_kind: DispatchOutcomeKind::NeedsUser,
+            failure_class: Some(DispatchOutcomeFailureClass::ContextInsufficient),
+            failure_detail: Some("expected behavior is unclear".to_string()),
+            task_class: None,
+            validation_outcome: None,
+            result_artifact_id: Some(fix_result.id.clone()),
+            metadata_json: json!({ "source": "test" }),
+        })
+        .unwrap();
+
+    let result = runtime.draft_github_final_comment(&run.id, None).unwrap();
+    assert_eq!(
+        result.decision.decision_kind,
+        GitHubInteractionDecisionKind::Clarification
+    );
+    assert_eq!(result.decision.reason_code, "context_gap_suggested_reply");
+    let draft = result.draft.as_ref().unwrap();
+    assert_eq!(
+        draft.interaction.interaction_type,
+        GitHubInteractionType::ClarificationComment
+    );
+    let body = String::from_utf8(
+        runtime
+            .store()
+            .read_artifact_bytes(&draft.body_artifact.id)
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(body.starts_with("<!-- issue-finder:clarification_comment -->"));
+    assert!(body.contains("confirm the expected behavior"));
 }
 
 #[test]

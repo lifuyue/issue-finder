@@ -143,7 +143,16 @@ string_enum!(AgentSessionStatus {
 string_enum!(GitHubInteractionType {
     TrackingComment => "tracking_comment",
     ProgressComment => "progress_comment",
+    ClarificationComment => "clarification_comment",
     FinalComment => "final_comment",
+});
+
+string_enum!(GitHubInteractionDecisionKind {
+    Tracking => "tracking",
+    Clarification => "clarification",
+    Final => "final",
+    NoComment => "no_comment",
+    NoReply => "no_reply",
 });
 
 string_enum!(GitHubInteractionStatus {
@@ -559,6 +568,34 @@ pub struct NewGitHubInteraction {
     pub interaction_type: GitHubInteractionType,
     pub body_artifact_id: Option<String>,
     pub status: GitHubInteractionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GitHubInteractionDecision {
+    pub id: String,
+    pub issue_task_id: String,
+    pub run_id: Option<String>,
+    pub decision_kind: GitHubInteractionDecisionKind,
+    pub interaction_type: Option<GitHubInteractionType>,
+    pub github_interaction_id: Option<String>,
+    pub body_artifact_id: Option<String>,
+    pub reason_code: String,
+    pub reasons_json: Value,
+    pub inputs_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewGitHubInteractionDecision {
+    pub issue_task_id: String,
+    pub run_id: Option<String>,
+    pub decision_kind: GitHubInteractionDecisionKind,
+    pub interaction_type: Option<GitHubInteractionType>,
+    pub github_interaction_id: Option<String>,
+    pub body_artifact_id: Option<String>,
+    pub reason_code: String,
+    pub reasons_json: Value,
+    pub inputs_json: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

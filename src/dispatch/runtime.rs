@@ -16,7 +16,7 @@ use super::capability_probe::{probe_agent, AgentProbeReport};
 use super::events::dispatch_run_event;
 use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
 use super::github_projection::{
-    self, GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
+    self, GitHubApprovalResult, GitHubCommentPolicyResult, GitHubCommentWriter, GitHubPostResult,
     ReqwestGitHubCommentWriter,
 };
 use super::memory::record_dispatch_approval_signal;
@@ -636,7 +636,7 @@ impl DispatchRuntime {
         &self,
         issue: &str,
         body_override: Option<String>,
-    ) -> Result<GitHubCommentDraftResult> {
+    ) -> Result<GitHubCommentPolicyResult> {
         packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
         github_projection::draft_tracking_comment(&self.store, issue, body_override)
     }
@@ -645,7 +645,7 @@ impl DispatchRuntime {
         &self,
         run_id: &str,
         body_override: Option<String>,
-    ) -> Result<GitHubCommentDraftResult> {
+    ) -> Result<GitHubCommentPolicyResult> {
         github_projection::draft_final_comment(&self.store, run_id, body_override)
     }
 

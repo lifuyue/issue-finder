@@ -20,6 +20,7 @@ use crate::tool_specs::{
     TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
 };
 
+use super::github_projection::GitHubCommentPolicyResult;
 use super::model::{
     ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
     DispatchTaskClass, DispatchValidationOutcome,
@@ -589,30 +590,14 @@ pub fn execute_dispatch_tool(
             let result = runtime
                 .draft_github_tracking_comment(&args.issue, normalized_optional(args.body))
                 .map_err(map_issue_ref_error)?;
-            Ok(output(
-                "pending_approval",
-                format!(
-                    "Drafted {} {} and created GitHub post approval {}.",
-                    result.issue_task.issue_key,
-                    result.interaction.interaction_type,
-                    result.approval_request.id
-                ),
-                json!({ "githubDraft": result }),
-            ))
+            Ok(github_policy_output(result))
         }
         TOOL_GITHUB_DRAFT_FINAL_COMMENT => {
             let args: GithubDraftFinalCommentToolArgs = parse_arguments(arguments)?;
             let result = runtime
                 .draft_github_final_comment(&args.run_id, normalized_optional(args.body))
                 .map_err(DispatchToolError::System)?;
-            Ok(output(
-                "pending_approval",
-                format!(
-                    "Drafted final GitHub comment for dispatch run {}.",
-                    args.run_id
-                ),
-                json!({ "githubDraft": result }),
-            ))
+            Ok(github_policy_output(result))
         }
         TOOL_GITHUB_APPROVE_COMMENT => {
             let args: GithubInteractionToolArgs = parse_arguments(arguments)?;
@@ -697,6 +682,26 @@ fn output(
         content_text: content_text.into(),
         structured_fields: fields,
     }
+}
+
+fn github_policy_output(result: GitHubCommentPolicyResult) -> DispatchToolOutput {
+    let status = match result.draft.as_ref() {
+        Some(_) => "pending_approval",
+        None => result.decision.decision_kind.as_str(),
+    };
+    let content_text = match result.draft.as_ref() {
+        Some(draft) => format!(
+            "Drafted {} {} and created GitHub post approval {}.",
+            result.issue_task.issue_key,
+            draft.interaction.interaction_type,
+            draft.approval_request.id
+        ),
+        None => format!(
+            "GitHub interaction policy decided {} for {}.",
+            result.decision.decision_kind, result.issue_task.issue_key
+        ),
+    };
+    output(status, content_text, json!({ "githubDecision": result }))
 }
 
 fn parse_arguments<T>(arguments: &Value) -> std::result::Result<T, DispatchToolError>

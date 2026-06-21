@@ -6,6 +6,7 @@ pub mod cli_args;
 pub mod events;
 pub mod execution;
 pub mod failure;
+pub mod github_interaction_policy;
 pub mod github_projection;
 pub mod memory;
 pub mod model;
@@ -25,8 +26,8 @@ pub use a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 pub use capability_probe::AgentProbeReport;
 pub use execution::DispatchExecutionResult;
 pub use github_projection::{
-    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
-    PostedGitHubComment, ReqwestGitHubCommentWriter,
+    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubCommentWriter,
+    GitHubPostResult, PostedGitHubComment, ReqwestGitHubCommentWriter,
 };
 pub use model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AdapterProbeResult,
@@ -35,12 +36,13 @@ pub use model::{
     CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
     DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind,
     DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
-    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTask, IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult,
-    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact,
-    NewDispatchEvent, NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome,
-    NewGitHubInteraction, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem, PolicyAction,
-    PolicyRequirement, SessionTranscriptItem, TranscriptPayloadStorage,
+    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
+    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTask,
+    IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
+    NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
+    NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
+    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
+    PolicyAction, PolicyRequirement, SessionTranscriptItem, TranscriptPayloadStorage,
 };
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
