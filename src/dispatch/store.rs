@@ -244,6 +244,18 @@ impl DispatchStore {
         Ok(issue_task)
     }
 
+    pub fn list_issue_tasks(&self) -> Result<Vec<IssueTask>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_key, repo_full_name, issue_number, title, url, status,
+                    priority, category, created_at, updated_at,
+                    current_package_artifact_id, profile_snapshot_artifact_id
+             FROM issue_tasks
+             ORDER BY updated_at DESC, id",
+        )?;
+        let rows = statement.query_map([], issue_task_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn set_issue_task_package_artifact(
         &self,
         issue_task_id: &str,
@@ -322,6 +334,22 @@ impl DispatchStore {
                 dispatch_run_from_row,
             )
             .with_context(|| format!("dispatch run {id} not found"))
+    }
+
+    pub fn list_dispatch_runs_for_issue_task(
+        &self,
+        issue_task_id: &str,
+    ) -> Result<Vec<DispatchRun>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
+                    created_at, started_at, completed_at, selected_session_link_id,
+                    result_artifact_id, failure_reason
+             FROM dispatch_runs
+             WHERE issue_task_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![issue_task_id], dispatch_run_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn set_dispatch_run_session(
