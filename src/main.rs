@@ -221,6 +221,17 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            issue_finder::cli::EvalCommand::AgentLoop(eval_args) => {
+                if !eval_args.offline {
+                    anyhow::bail!("agent loop eval currently requires --offline");
+                }
+                let report = issue_finder::agent_loop_eval::run_offline_eval(&eval_args.output)?;
+                println!(
+                    "Wrote offline agent loop eval to {} ({} samples).",
+                    eval_args.output.display(),
+                    report.metrics.total_samples
+                );
+            }
         },
         Command::Memory(args) => match args.command {
             issue_finder::cli::MemoryCommand::Status => {

@@ -17,6 +17,7 @@ recommendation_eval/
     source_trust.json
     feedback_replay.json
     dispatch_outcome_replay.json
+    lifecycle_reactivation.json
 ```
 
 ## Sample Shape
@@ -33,6 +34,8 @@ Required fields:
 - `expected.reasons`: human-readable explanation for the expectation.
 
 Optional `dispatchOutcomes` entries model approved or candidate dispatch outcome hints for deterministic replay. Approved repo/task-class outcome trends may apply bounded `memoryAdjustment`; candidate entries must remain inert. Policy or user blocked outcomes should not penalize similar feed candidates.
+
+Lifecycle/reactivation samples may set `feedback.lastSeenCommentsCount` plus expected reactivation and feedback penalty bounds. These samples keep candidate lifecycle behavior in the recommendation owner eval instead of runtime agent-loop tests.
 
 Prefer `createdAgeDays`, `updatedAgeDays`, and `pushedAgeDays` over fixed dates when the sample is not about an exact historical date. The evaluator converts these relative values to RFC3339 timestamps at runtime, keeping tests stable over time.
 

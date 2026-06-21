@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Issue Finder Agent Loop Evaluation Fixtures",
+  "type": "object",
+  "required": ["samples"],
+  "additionalProperties": false,
+  "properties": {
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sample" }
+    }
+  },
+  "$defs": {
+    "sample": {
+      "type": "object",
+      "required": ["id", "family", "scenario", "expected"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "family": {
+          "type": "string",
+          "enum": [
+            "runtime_vs_quality",
+            "package_quality",
+            "lifecycle_reactivation",
+            "github_interaction_policy",
+            "session_continuity",
+            "memory_governance"
+          ]
+        },
+        "scenario": {
+          "type": "string",
+          "enum": [
+            "runtime_failure_does_not_rewrite_issue_quality",
+            "package_missing_outcome_contract_is_insufficient",
+            "lifecycle_reactivation_after_maintainer_activity",
+            "github_approval_retry_policy",
+            "session_resume_uses_selected_native_session",
+            "memory_governance_prevents_profile_drift"
+          ]
+        },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": ["behaviors", "reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "behaviors": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
