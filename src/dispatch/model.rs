@@ -185,13 +185,11 @@ string_enum!(MemoryEventType {
     PositiveSignal => "positive_signal",
     NegativeSignal => "negative_signal",
     ProfileAdjustmentCandidate => "profile_adjustment_candidate",
-    AgentPerformanceSignal => "agent_performance_signal",
 });
 
 string_enum!(DispatchEventKind {
     DispatchApprovalResolved => "dispatch_approval_resolved",
     DispatchOutcomeRecorded => "dispatch_outcome_recorded",
-    DispatchOutcomeMemoryIngestFailed => "dispatch_outcome_memory_ingest_failed",
     DispatchStarting => "dispatch_starting",
     DispatchFailed => "dispatch_failed",
     SessionSynced => "session_synced",

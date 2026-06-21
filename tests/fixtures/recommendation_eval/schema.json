@@ -140,6 +140,7 @@
       "properties": {
         "approved": { "type": "boolean" },
         "repoFullName": { "type": "string" },
+        "agentId": { "type": "string" },
         "outcomeKind": {
           "type": "string",
           "enum": ["fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"]
@@ -169,8 +170,7 @@
             "dependency_upgrade",
             "unknown_task"
           ]
-        },
-        "weight": { "type": "number", "minimum": -1, "maximum": 1 }
+        }
       }
     },
     "expected": {

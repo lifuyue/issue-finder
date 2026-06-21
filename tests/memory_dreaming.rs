@@ -67,7 +67,8 @@ fn deterministic_dreaming_consumes_activation_and_raw_evidence_as_candidates() {
     assert_eq!(hint.status, MemoryHintStatus::Candidate);
     assert_eq!(hint.hint_type, MemoryHintType::Dispatch);
     assert_eq!(hint.approved_at, None);
-    assert_eq!(hint.policy_json["recommendation"], "prefer");
+    assert_eq!(hint.policy_json["kind"], "agent_suitability_prior");
+    assert!(hint.weight > 0.0);
 }
 
 #[test]
@@ -157,13 +158,16 @@ fn dreaming_separates_dispatch_agent_hints_from_ranking_trend_hints() {
         .hints
         .iter()
         .any(|hint| hint.hint_type == MemoryHintType::Dispatch
-            && hint.policy_json["kind"] == "agent_performance"));
+            && hint.policy_json["kind"] == "agent_suitability_prior"));
     let ranking_hints = result
         .hints
         .iter()
         .filter(|hint| {
             hint.hint_type == MemoryHintType::Ranking
-                && hint.policy_json["kind"] == "dispatch_outcome_trend"
+                && matches!(
+                    hint.policy_json["kind"].as_str(),
+                    Some("issue_quality_prior" | "execution_friction_prior")
+                )
         })
         .collect::<Vec<_>>();
     assert!(
@@ -177,7 +181,7 @@ fn dreaming_separates_dispatch_agent_hints_from_ranking_trend_hints() {
     }));
     assert!(ranking_hints
         .iter()
-        .all(|hint| hint.policy_json["failures"].as_u64().unwrap_or(0) <= 1));
+        .all(|hint| hint.policy_json["negativeSignals"].as_u64().unwrap_or(0) <= 1));
 }
 
 #[test]

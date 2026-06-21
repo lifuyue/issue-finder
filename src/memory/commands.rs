@@ -11,6 +11,7 @@ use crate::memory::model::{
     MemoryHintScopeType, MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryQueryKind,
     MemoryRawEvent, NewMemoryDream, NewMemoryHint,
 };
+use crate::memory::outcome_projection::sync_dispatch_outcome_feedback;
 use crate::memory::store::MemoryStore;
 use crate::paths::IssueFinderPaths;
 
@@ -339,6 +340,7 @@ pub fn memory_tombstone(
 }
 
 pub fn memory_dream(paths: &IssueFinderPaths, scope: &str) -> Result<MemoryDreamRunOutput> {
+    sync_dispatch_outcome_feedback(paths)?;
     let store = MemoryStore::open(paths)?;
     let now = Utc::now().to_rfc3339();
     let (scope, scope_ref) = parse_dream_scope(scope)?;

@@ -537,6 +537,18 @@ impl DispatchStore {
             .map_err(Into::into)
     }
 
+    pub fn list_dispatch_run_outcomes(&self) -> Result<Vec<DispatchRunOutcome>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
+                    failure_detail, task_class, validation_outcome, result_artifact_id,
+                    metadata_json, recorded_at
+             FROM dispatch_run_outcomes
+             ORDER BY recorded_at, id",
+        )?;
+        let rows = statement.query_map([], dispatch_run_outcome_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn create_session_link(&self, input: NewAgentSessionLink) -> Result<AgentSessionLink> {
         let id = next_id("session-link");
         let created_at = now();
@@ -1416,7 +1428,6 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 CASE event_type
                     WHEN 'dispatch_approval_resolved' THEN 'dispatch_approval_resolved'
                     WHEN 'dispatch_outcome_recorded' THEN 'dispatch_outcome_recorded'
-                    WHEN 'dispatch_outcome_memory_ingest_failed' THEN 'dispatch_outcome_memory_ingest_failed'
                     WHEN 'dispatch_starting' THEN 'dispatch_starting'
                     WHEN 'dispatch_failed' THEN 'dispatch_failed'
                     WHEN 'session_synced' THEN 'session_synced'
@@ -1439,7 +1450,6 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 'migration',
                 CASE
                     WHEN event_type = 'dispatch_failed' THEN 'error'
-                    WHEN event_type = 'dispatch_outcome_memory_ingest_failed' THEN 'warning'
                     ELSE 'info'
                 END,
                 run_id,

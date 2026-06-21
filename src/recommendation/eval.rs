@@ -8,6 +8,7 @@ use crate::github::GitHubIssue;
 use crate::github_enrichment::{
     EnrichedComment, EnrichedIssue, EnrichedParticipants, TimestampedSample,
 };
+use crate::memory::outcome_projection::{ranking_adjustment_for_candidate, OutcomeFeedbackInput};
 use crate::paths::{atomic_write, IssueFinderPaths};
 use crate::recommendation::engine::{RecommendationEngine, ScoutOptions};
 use crate::recommendation::events::IssueKey;
@@ -210,13 +211,13 @@ pub struct SampleDispatchOutcome {
     pub approved: bool,
     #[serde(default)]
     pub repo_full_name: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub outcome_kind: String,
     #[serde(default)]
     pub failure_class: Option<String>,
     #[serde(default)]
     pub task_class: Option<String>,
-    #[serde(default)]
-    pub weight: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1131,31 +1132,30 @@ impl EvaluationSample {
             return;
         }
         let task_class = fixture_task_class(self);
-        let adjustment = self
+        let outcomes = self
             .dispatch_outcomes
             .iter()
-            .filter(|outcome| outcome.approved)
-            .filter(|outcome| {
-                outcome
-                    .repo_full_name
-                    .as_deref()
-                    .is_none_or(|repo| repo == ranked.issue.repo_full_name)
+            .enumerate()
+            .map(|(index, outcome)| OutcomeFeedbackInput {
+                id: format!("{}:dispatch-outcome:{index}", self.id),
+                approved: outcome.approved,
+                issue_key: IssueKey::new(
+                    outcome
+                        .repo_full_name
+                        .clone()
+                        .unwrap_or_else(|| self.issue.repo_full_name.clone()),
+                    self.issue.number,
+                ),
+                repo_scope: outcome.repo_full_name.clone(),
+                agent_id: outcome.agent_id.clone(),
+                outcome_kind: outcome.outcome_kind.clone(),
+                failure_class: outcome.failure_class.clone(),
+                task_class: outcome.task_class.clone(),
+                validation_outcome: None,
             })
-            .filter(|outcome| {
-                outcome
-                    .task_class
-                    .as_deref()
-                    .is_none_or(|expected| expected == task_class)
-            })
-            .filter(|outcome| {
-                !matches!(
-                    outcome.failure_class.as_deref(),
-                    Some("policy_blocked" | "user_canceled")
-                )
-            })
-            .map(dispatch_outcome_weight)
-            .sum::<i32>()
-            .clamp(-80, 60);
+            .collect::<Vec<_>>();
+        let adjustment =
+            ranking_adjustment_for_candidate(&outcomes, &ranked.issue.repo_full_name, task_class);
         if adjustment == 0 {
             return;
         }
@@ -1170,15 +1170,6 @@ impl EvaluationSample {
             "Dispatch outcome replay adjustment: {sign}{adjustment}"
         ));
     }
-}
-
-fn dispatch_outcome_weight(outcome: &SampleDispatchOutcome) -> i32 {
-    let default = match outcome.outcome_kind.as_str() {
-        "fix_ready" | "completed_no_change" => 0.35,
-        "failed" | "blocked" => -0.45,
-        _ => 0.0,
-    };
-    (outcome.weight.unwrap_or(default) * 100.0).round() as i32
 }
 
 fn fixture_task_class(sample: &EvaluationSample) -> &'static str {

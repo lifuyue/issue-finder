@@ -10,6 +10,9 @@ use crate::memory::model::{
     MemoryModelStatus, MemoryNode, MemoryRawEvent, MemoryRawEventType, MemorySubjectType,
     NewMemoryDream, NewMemoryHint,
 };
+use crate::memory::outcome_projection::{
+    outcome_feedback_input_from_raw_event, project_raw_dispatch_outcome, OutcomePriorKind,
+};
 use crate::memory::store::MemoryStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,8 +268,7 @@ fn deterministic_proposals(
     evidence: &DreamEvidence,
 ) -> Vec<MemoryDreamProposal> {
     let mut proposals = Vec::new();
-    proposals.extend(agent_performance_proposals(evidence));
-    proposals.extend(dispatch_ranking_trend_proposals(evidence));
+    proposals.extend(outcome_projection_proposals(evidence));
     proposals.extend(feedback_policy_proposals(request, evidence));
     proposals.extend(repo_summary_proposals(evidence));
     proposals.extend(stale_hint_proposals(request, evidence));
@@ -275,154 +277,105 @@ fn deterministic_proposals(
 }
 
 #[derive(Default)]
-struct AgentPerformanceStats {
-    successes: usize,
-    failures: usize,
+struct ProjectionStats {
+    positive: usize,
+    negative: usize,
+    net_weight: f64,
     event_ids: BTreeSet<String>,
     node_ids: BTreeSet<String>,
 }
 
-#[derive(Default)]
-struct OutcomeTrendStats {
-    successes: usize,
-    failures: usize,
-    event_ids: BTreeSet<String>,
-    node_ids: BTreeSet<String>,
-}
-
-fn agent_performance_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamProposal> {
-    let mut by_agent_task = BTreeMap::<(String, String), AgentPerformanceStats>::new();
+fn outcome_projection_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamProposal> {
+    let mut by_projection = BTreeMap::<
+        (
+            OutcomePriorKind,
+            MemoryHintType,
+            MemoryHintScopeType,
+            String,
+        ),
+        ProjectionStats,
+    >::new();
     for event in evidence.raw_events.values() {
-        let Some((agent_id, task_type, succeeded)) = dispatch_outcome(event) else {
+        let Some(projections) = project_raw_dispatch_outcome(event) else {
             continue;
         };
-        let stats = by_agent_task.entry((agent_id, task_type)).or_default();
-        if succeeded {
-            stats.successes += 1;
-        } else {
-            stats.failures += 1;
+        for projection in projections {
+            let key = (
+                projection.prior_kind,
+                projection.hint_type,
+                projection.scope_type,
+                projection.scope_ref.clone(),
+            );
+            let stats = by_projection.entry(key).or_default();
+            if projection.weight >= 0.0 {
+                stats.positive += 1;
+            } else {
+                stats.negative += 1;
+            }
+            stats.net_weight += projection.weight;
+            stats.event_ids.insert(event.id.clone());
+            stats.node_ids.extend(evidence.event_node_ids(&event.id));
         }
-        stats.event_ids.insert(event.id.clone());
-        stats.node_ids.extend(evidence.event_node_ids(&event.id));
     }
 
-    by_agent_task
+    by_projection
         .into_iter()
-        .map(|((agent_id, task_type), stats)| {
-            let recommendation = if stats.successes >= stats.failures {
-                "prefer"
-            } else {
-                "avoid"
-            };
-            MemoryDreamProposal {
-                dream_type: MemoryDreamType::AgentPerformance,
-                summary: format!(
-                    "Agent `{agent_id}` has {} successful and {} failed dispatch events for `{task_type}`.",
-                    stats.successes, stats.failures
-                ),
-                evidence_node_ids: stats.node_ids.into_iter().collect(),
-                evidence_event_ids: stats.event_ids.into_iter().collect(),
-                evidence_hint_ids: Vec::new(),
-                confidence: 0.55 + ((stats.successes + stats.failures) as f64 * 0.05).min(0.25),
-                hint: Some(MemoryHintProposal {
-                    hint_type: MemoryHintType::Dispatch,
-                    scope_type: MemoryHintScopeType::Agent,
-                    scope_ref: agent_id.clone(),
-                    summary: format!(
-                        "Review `{agent_id}` for `{task_type}` dispatches; current evidence suggests `{recommendation}`."
-                    ),
-                    policy_json: json!({
-                        "kind": "agent_performance",
-                        "agentId": agent_id,
-                        "taskType": task_type,
-                        "successes": stats.successes,
-                        "failures": stats.failures,
-                        "recommendation": recommendation,
-                    }),
-                    weight: if recommendation == "prefer" { 0.25 } else { -0.25 },
-                    expires_at: None,
-                }),
-            }
+        .map(|((prior_kind, hint_type, scope_type, scope_ref), stats)| {
+            projection_proposal(prior_kind, hint_type, scope_type, scope_ref, stats)
         })
         .collect()
 }
 
-fn dispatch_ranking_trend_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamProposal> {
-    let mut by_repo = BTreeMap::<String, OutcomeTrendStats>::new();
-    let mut by_task = BTreeMap::<String, OutcomeTrendStats>::new();
-    for event in evidence.raw_events.values() {
-        let Some(outcome) = ranking_outcome(event) else {
-            continue;
-        };
-        if let Some(repo) = repo_from_event(event) {
-            let stats = by_repo.entry(repo).or_default();
-            add_outcome_trend(stats, &outcome, evidence, event);
-        }
-        if let Some(task_type) = json_string(&event.payload_json, "taskType") {
-            let stats = by_task.entry(task_type).or_default();
-            add_outcome_trend(stats, &outcome, evidence, event);
-        }
-    }
-
-    let repo_proposals = by_repo
-        .into_iter()
-        .map(|(repo, stats)| ranking_trend_proposal(MemoryHintScopeType::Repo, repo, stats));
-    let task_proposals = by_task.into_iter().map(|(task_type, stats)| {
-        ranking_trend_proposal(MemoryHintScopeType::IssueType, task_type, stats)
-    });
-    repo_proposals.chain(task_proposals).collect()
-}
-
-fn add_outcome_trend(
-    stats: &mut OutcomeTrendStats,
-    outcome: &RankingOutcome,
-    evidence: &DreamEvidence,
-    event: &MemoryRawEvent,
-) {
-    if outcome.positive {
-        stats.successes += 1;
-    } else {
-        stats.failures += 1;
-    }
-    stats.event_ids.insert(event.id.clone());
-    stats.node_ids.extend(evidence.event_node_ids(&event.id));
-}
-
-fn ranking_trend_proposal(
+fn projection_proposal(
+    prior_kind: OutcomePriorKind,
+    hint_type: MemoryHintType,
     scope_type: MemoryHintScopeType,
     scope_ref: String,
-    stats: OutcomeTrendStats,
+    stats: ProjectionStats,
 ) -> MemoryDreamProposal {
-    let net = stats.successes as isize - stats.failures as isize;
-    let weight = (net as f64 * 0.20).clamp(-0.60, 0.45);
-    let recommendation = if net >= 0 { "boost" } else { "cooldown" };
+    let weight = stats.net_weight.clamp(-0.60, 0.45);
+    let count = stats.positive + stats.negative;
     MemoryDreamProposal {
-        dream_type: MemoryDreamType::DiscoveryPolicy,
+        dream_type: projection_dream_type(prior_kind),
         summary: format!(
-            "Dispatch outcomes for `{scope_ref}` include {} success and {} failure events.",
-            stats.successes, stats.failures
+            "Dispatch outcome projector found {} positive and {} negative `{}` signals for `{scope_ref}`.",
+            stats.positive,
+            stats.negative,
+            prior_kind.as_str()
         ),
         evidence_node_ids: stats.node_ids.into_iter().collect(),
         evidence_event_ids: stats.event_ids.into_iter().collect(),
         evidence_hint_ids: Vec::new(),
-        confidence: 0.55,
+        confidence: 0.55 + (count as f64 * 0.05).min(0.25),
         hint: Some(MemoryHintProposal {
-            hint_type: MemoryHintType::Ranking,
+            hint_type,
             scope_type,
             scope_ref: scope_ref.clone(),
             summary: format!(
-                "Use dispatch outcome trend for `{scope_ref}` as a `{recommendation}` ranking signal."
+                "Use typed `{}` dispatch outcome prior for `{scope_ref}`.",
+                prior_kind.as_str()
             ),
             policy_json: json!({
-                "kind": "dispatch_outcome_trend",
+                "kind": prior_kind.policy_kind(),
+                "priorKind": prior_kind.as_str(),
                 "scope": scope_ref,
-                "successes": stats.successes,
-                "failures": stats.failures,
-                "recommendation": recommendation,
+                "positiveSignals": stats.positive,
+                "negativeSignals": stats.negative,
+                "netWeight": weight,
+                "projectorVersion": 1
             }),
             weight,
             expires_at: None,
         }),
+    }
+}
+
+fn projection_dream_type(prior_kind: OutcomePriorKind) -> MemoryDreamType {
+    match prior_kind {
+        OutcomePriorKind::AgentSuitability => MemoryDreamType::AgentPerformance,
+        OutcomePriorKind::IssueQuality | OutcomePriorKind::ExecutionFriction => {
+            MemoryDreamType::DiscoveryPolicy
+        }
     }
 }
 
@@ -578,7 +531,8 @@ fn conflict_proposals(evidence: &DreamEvidence) -> Vec<MemoryDreamProposal> {
             continue;
         };
         for event in evidence.raw_events.values() {
-            let Some((agent_id, task_type, succeeded)) = dispatch_outcome(event) else {
+            let Some((agent_id, task_type, succeeded)) = dispatch_outcome_for_conflict(event)
+            else {
                 continue;
             };
             if prediction.matches(&agent_id, &task_type) && prediction.predicts_success != succeeded
@@ -749,51 +703,22 @@ fn feedback_kind(event: &MemoryRawEvent) -> Option<&'static str> {
     }
 }
 
-fn dispatch_outcome(event: &MemoryRawEvent) -> Option<(String, String, bool)> {
-    let succeeded = match event.event_type {
-        MemoryRawEventType::DispatchSuccess | MemoryRawEventType::ValidationPass => true,
-        MemoryRawEventType::DispatchFailure | MemoryRawEventType::ValidationFail => false,
-        _ => return None,
-    };
-    let agent_id = json_string(&event.payload_json, "agentId")?;
-    let task_type =
-        json_string(&event.payload_json, "taskType").unwrap_or_else(|| "unknown_task".to_string());
-    Some((agent_id, task_type, succeeded))
-}
-
-struct RankingOutcome {
-    positive: bool,
-}
-
-fn ranking_outcome(event: &MemoryRawEvent) -> Option<RankingOutcome> {
-    let failure_class = json_string(&event.payload_json, "failureClass");
-    if failure_class
-        .as_deref()
-        .is_some_and(|class| matches!(class, "policy_blocked" | "user_canceled"))
-    {
-        return None;
-    }
-
-    if let Some(outcome_kind) = json_string(&event.payload_json, "outcomeKind") {
-        let positive = match outcome_kind.as_str() {
-            "fix_ready" | "completed_no_change" => true,
-            "failed" | "blocked" => false,
-            "needs_user" | "canceled" => return None,
-            _ => return None,
-        };
-        return Some(RankingOutcome { positive });
-    }
-
-    dispatch_outcome(event).map(|(_, _, succeeded)| RankingOutcome {
-        positive: succeeded,
-    })
-}
-
 #[derive(Debug, Clone)]
 struct HintPrediction {
     agent_id: Option<String>,
     task_type: Option<String>,
     predicts_success: bool,
+}
+
+fn dispatch_outcome_for_conflict(event: &MemoryRawEvent) -> Option<(String, String, bool)> {
+    let input = outcome_feedback_input_from_raw_event(event)?;
+    let succeeded = match input.outcome_kind.as_str() {
+        "fix_ready" | "completed_no_change" => true,
+        "failed" | "blocked" => false,
+        _ => return None,
+    };
+    let task_class = input.task_class_or_unknown().to_string();
+    Some((input.agent_id?, task_class, succeeded))
 }
 
 impl HintPrediction {

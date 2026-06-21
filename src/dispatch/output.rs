@@ -378,17 +378,6 @@ pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResul
     if let Some(validation_outcome) = result.outcome.validation_outcome {
         lines.push(format!("Validation: {validation_outcome}"));
     }
-    if let Some(memory) = &result.memory_ingest {
-        lines.push(format!(
-            "Memory ingest: dispatch={} rawEvents={} nodes={}",
-            memory.dispatch_memory_event_id,
-            memory.memory_raw_event_ids.len(),
-            memory.memory_node_ids.len()
-        ));
-    }
-    if let Some(error) = &result.memory_ingest_error {
-        lines.push(format!("Memory ingest failed: {error}"));
-    }
     lines.join("\n")
 }
 
