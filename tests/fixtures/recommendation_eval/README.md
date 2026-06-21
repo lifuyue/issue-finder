@@ -32,7 +32,7 @@ Required fields:
 - `expected.behavior`: one of `visible_top`, `visible`, `visible_lower`, `hidden`, `fallback_candidate`.
 - `expected.reasons`: human-readable explanation for the expectation.
 
-Optional `dispatchOutcomes` entries model approved or candidate dispatch outcome hints for deterministic replay. Approved repo/task-class outcome trends may apply bounded `memoryAdjustment`; candidate entries must remain inert. Policy or user blocked outcomes should not penalize similar feed candidates.
+Optional `dispatchOutcomes` entries model approved or candidate dispatch outcome hints for deterministic replay. Approved entries are evaluated through the same typed outcome projector used by memory dreaming: issue-quality and execution-friction priors may apply bounded `memoryAdjustment`, while agent-suitability priors remain dispatch-only. Candidate entries must remain inert. Policy, user-blocked, and agent-runtime outcomes should not penalize similar feed candidates as issue-quality failures.
 
 Prefer `createdAgeDays`, `updatedAgeDays`, and `pushedAgeDays` over fixed dates when the sample is not about an exact historical date. The evaluator converts these relative values to RFC3339 timestamps at runtime, keeping tests stable over time.
 

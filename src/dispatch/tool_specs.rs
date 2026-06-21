@@ -209,7 +209,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_record_outcome",
-            "Record a normalized dispatch outcome and best-effort memory signal for one dispatch run.",
+            "Record a normalized dispatch outcome for one dispatch run.",
             dispatch_record_outcome_schema(),
             false,
         ),

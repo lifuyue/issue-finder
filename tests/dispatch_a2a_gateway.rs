@@ -2,9 +2,10 @@ use std::path::Path;
 
 use issue_finder::dispatch::{
     ApprovalStatus, ApprovalType, DispatchEventKind, DispatchOutcomeKind, DispatchRunStatus,
-    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType,
-    NewDispatchRun, NewIssueTask,
+    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewDispatchRun,
+    NewIssueTask,
 };
+use issue_finder::memory::{sync_dispatch_outcome_feedback, MemoryRawEventType, MemoryStore};
 use issue_finder::paths::IssueFinderPaths;
 use tempfile::tempdir;
 
@@ -63,7 +64,8 @@ fn a2a_send_approval_can_be_rejected_without_external_send() {
 #[test]
 fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
     let dir = tempdir().unwrap();
-    let runtime = DispatchRuntime::open(test_paths(dir.path())).unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
     let task = create_packaged_task(&runtime);
     let run = runtime
         .store()
@@ -124,9 +126,23 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
         .store()
         .list_memory_events_for_issue_task(&task.id)
         .unwrap();
-    assert_eq!(memory.len(), 1);
-    assert_eq!(memory[0].event_type, MemoryEventType::PositiveSignal);
-    assert_eq!(memory[0].source, "dispatch_outcome");
+    assert!(memory.is_empty());
+
+    let raw_events = MemoryStore::open(&paths)
+        .unwrap()
+        .list_raw_events()
+        .unwrap();
+    assert!(raw_events.is_empty());
+    sync_dispatch_outcome_feedback(&paths).unwrap();
+    let raw_events = MemoryStore::open(&paths)
+        .unwrap()
+        .list_raw_events()
+        .unwrap();
+    assert_eq!(raw_events.len(), 1);
+    assert_eq!(
+        raw_events[0].event_type,
+        MemoryRawEventType::DispatchSuccess
+    );
 }
 
 fn create_packaged_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::IssueTask {

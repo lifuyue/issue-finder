@@ -402,19 +402,18 @@ Memory event types:
 
 ```text
 positive_signal
-  User approved dispatch, completed fix, or marked issue high quality.
+  User approved dispatch or issue review.
 
 negative_signal
-  User rejected issue, canceled run, or marked recommendation noisy or unsuitable.
+  User rejected issue review or canceled/rejected dispatch approval.
 
 profile_adjustment_candidate
   Candidate profile change derived from long-term feedback.
-
-agent_performance_signal
-  Agent success, failure, runtime, or user intervention for a task class.
 ```
 
-Profile changes should remain reviewable by a user or main agent. Future profile tools can aggregate `memory_events` into proposed `[profile]` edits, but the first dispatch runtime should only record evidence and candidates.
+Dispatch outcome feedback is no longer interpreted by the dispatch runtime. Recorded outcomes are projected by the memory-owned typed projector into issue-quality, execution-friction, and agent-suitability priors before any approved memory hint can affect ranking or dispatch planning.
+
+Profile changes should remain reviewable by a user or main agent. Future profile tools can aggregate memory evidence into proposed `[profile]` edits, but dispatch runtime should only record dispatch facts.
 
 ## Safety and Approval Policy
 

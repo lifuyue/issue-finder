@@ -45,9 +45,9 @@ pub use model::{
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
 pub use runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeMemoryIngestView,
-    DispatchOutcomeRecordRequest, DispatchOutcomeRecordResult, DispatchProposal,
-    DispatchProposalRequest, DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordRequest,
+    DispatchOutcomeRecordResult, DispatchProposal, DispatchProposalRequest, DispatchRuntime,
+    DispatchStatusSnapshot, SessionSearchResult,
 };
 pub use session_approvals::{
     PendingSessionMutation, SessionMutationApprovalResolution, SessionMutationProposal,
