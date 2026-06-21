@@ -12,6 +12,7 @@ Discover good first issues
   -> Generate handoff, policy, probe, event, and context artifacts
   -> Store the task in the local inbox
   -> Track optional dispatch state, session links, and result artifacts
+  -> Project local candidate/task board state for queries
   -> Generate a daily report
 ```
 
@@ -252,6 +253,8 @@ Issue Finder stores local state under `~/.issue-finder` by default:
   dispatch/
     dispatch.sqlite3
     artifacts/
+  recommendation/
+    events.jsonl
   reports/
     YYYY-MM-DD.md
 ```
@@ -321,6 +324,8 @@ By default it does not read complete conversation bodies, system prompts, tool o
 `probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
 
 When dispatch state is used, `handoff.json` can be copied into a broader `IssueTaskPackage` artifact. Issue-based dispatch and projection commands import the matching ready inbox handoff automatically when local dispatch state does not exist yet; `dispatch package import-handoff` remains available for explicit inspection or scripting. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, agent events, result artifacts, and GitHub comment interactions. The current CLI can manage linked native sessions, create and approve or reject dispatch proposals, execute approved runs through the native adapter, create local A2A task artifacts with explicit `a2a_send` approval before external use, import local A2A result artifacts, and draft approval-gated GitHub tracking or final comments. Execution first performs local approval, package, and capability checks, then uses the isolated Codex app-server JSON-RPC adapter to start or resume a thread and send the first turn. The adapter starts or connects through `codex app-server daemon start` and `codex app-server proxy` by default, and records local startup metadata in agent capability details. Session read uses the same isolated adapter boundary and persists transcript artifacts locally. Session rename, fork, and archive are approval-gated mutations: the request creates a local approval first, and `sessions approve` performs the native mutation after approval. GitHub posting is a separate projection step: Issue Finder drafts comment bodies as local artifacts, requires explicit approval, then posts through the configured GitHub token.
+
+The candidate task board is a derived library-level read model over recommendation events, inbox items, and dispatch state. It is a query surface, not a persisted source of truth. Dispatch terminal outcomes remain visible as terminal board status even if an inbox item was marked done or archived; archive and dismiss feedback only affect display state. Reactivation is also projected locally and does not change recommendation feed score or memory ranking adjustments.
 
 Runtime topic docs:
 
