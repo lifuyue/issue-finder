@@ -13,6 +13,7 @@ Each dataset focuses on one ranking pressure. Add new samples to an existing dat
 - `source_trust.json`: GFI trusted, overlay trusted, and global source trust behavior.
 - `feedback_replay.json`: shown/read/prepared/done/dismissed/restored state behavior.
 - `dispatch_outcome_replay.json`: typed dispatch outcome projectors, validation and environment friction, issue-quality disentanglement, agent mismatch exclusion, policy/user block exclusion, and candidate-hint inertness.
+- `lifecycle_reactivation.json`: recommendation lifecycle recovery when a previously cooled issue receives new issue, comment, or maintainer activity.
 
 ## Profile Names
 

@@ -1,3 +1,4 @@
+pub mod agent_loop_eval;
 pub mod agent_policy;
 pub mod candidate_board;
 pub mod cli;

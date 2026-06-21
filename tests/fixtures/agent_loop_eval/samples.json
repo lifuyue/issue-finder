@@ -1,0 +1,97 @@
+{
+  "samples": [
+    {
+      "id": "runtime_failure_stays_runtime_signal",
+      "family": "runtime_vs_quality",
+      "scenario": "runtime_failure_does_not_rewrite_issue_quality",
+      "expected": {
+        "behaviors": [
+          "run_status_failed",
+          "issue_task_status_not_rewritten_to_quality_reject",
+          "runtime_failure_recorded_as_dispatch_outcome",
+          "dispatch_outcome_ingested_as_memory_signal"
+        ],
+        "reasons": [
+          "A validation failure during execution should become a dispatch outcome and memory signal, not an issue quality verdict."
+        ]
+      }
+    },
+    {
+      "id": "package_without_outcome_contract_is_insufficient",
+      "family": "package_quality",
+      "scenario": "package_missing_outcome_contract_is_insufficient",
+      "expected": {
+        "behaviors": [
+          "package_missing_outcome_contract_detected",
+          "package_marked_insufficient_for_agent_loop"
+        ],
+        "reasons": [
+          "Execution agents need a stable fix_result contract; missing outcome contract is package-quality insufficiency."
+        ]
+      }
+    },
+    {
+      "id": "feedback_recovers_after_maintainer_activity",
+      "family": "lifecycle_reactivation",
+      "scenario": "lifecycle_reactivation_after_maintainer_activity",
+      "expected": {
+        "behaviors": [
+          "reactivation_boost_applied_after_new_activity",
+          "prior_feedback_penalty_recovered_but_not_erased",
+          "maintainer_activity_explains_reactivation"
+        ],
+        "reasons": [
+          "A previously read issue should be eligible again when issue activity and maintainer response create new evidence."
+        ]
+      }
+    },
+    {
+      "id": "github_drafts_are_approval_and_retry_gated",
+      "family": "github_interaction_policy",
+      "scenario": "github_approval_retry_policy",
+      "expected": {
+        "behaviors": [
+          "github_post_blocked_until_approval",
+          "github_failed_post_is_persisted_for_retry",
+          "github_retry_posts_after_failure",
+          "github_rejected_draft_cannot_post"
+        ],
+        "reasons": [
+          "GitHub interaction policy must remain offline-testable and approval-gated before any write."
+        ]
+      }
+    },
+    {
+      "id": "dispatch_resumes_selected_native_session",
+      "family": "session_continuity",
+      "scenario": "session_resume_uses_selected_native_session",
+      "expected": {
+        "behaviors": [
+          "native_session_selector_resolved_to_local_link",
+          "execution_resumed_selected_native_session",
+          "resumed_session_started_agent_turn",
+          "session_link_remains_continuity_anchor"
+        ],
+        "reasons": [
+          "Agent loop resumability depends on stable local links to existing native sessions."
+        ]
+      }
+    },
+    {
+      "id": "memory_governance_blocks_unapproved_profile_drift",
+      "family": "memory_governance",
+      "scenario": "memory_governance_prevents_profile_drift",
+      "expected": {
+        "behaviors": [
+          "only_approved_ranking_hint_is_decision_eligible",
+          "profile_candidate_hint_is_separate_from_ranking",
+          "memory_off_blocks_decision_hints",
+          "suppressed_scope_blocks_profile_drift"
+        ],
+        "reasons": [
+          "Candidate/profile memory should not silently change ranking or profile behavior without approved decision scope."
+        ]
+      }
+    }
+  ]
+}

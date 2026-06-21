@@ -40,6 +40,8 @@ const FEEDBACK_REPLAY: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/feedback_replay.json");
 const DISPATCH_OUTCOME_REPLAY: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/dispatch_outcome_replay.json");
+const LIFECYCLE_REACTIVATION: &str =
+    include_str!("../../tests/fixtures/recommendation_eval/datasets/lifecycle_reactivation.json");
 
 const LIVE_PROFILE_NAMES: [&str; 6] = [
     "default_cli_devtools",
@@ -202,6 +204,8 @@ pub struct SampleFeedback {
     pub done: bool,
     #[serde(default)]
     pub feedback_age_days: i64,
+    #[serde(default)]
+    pub last_seen_comments_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -239,6 +243,14 @@ pub struct ExpectedOutcome {
     pub min_memory_adjustment: Option<i32>,
     #[serde(default)]
     pub max_memory_adjustment: Option<i32>,
+    #[serde(default)]
+    pub min_reactivation_boost: Option<i32>,
+    #[serde(default)]
+    pub max_reactivation_boost: Option<i32>,
+    #[serde(default)]
+    pub min_feedback_penalty: Option<i32>,
+    #[serde(default)]
+    pub max_feedback_penalty: Option<i32>,
     pub reasons: Vec<String>,
 }
 
@@ -319,6 +331,8 @@ pub struct RankedSampleSummary {
     pub expected_behavior: ExpectedBehavior,
     pub final_feed_score: i32,
     pub freshness_boost: i32,
+    pub feedback_penalty: i32,
+    pub reactivation_boost: i32,
     pub memory_adjustment: i32,
     pub profile_fit: i32,
     pub visibility: String,
@@ -404,6 +418,7 @@ pub fn builtin_datasets() -> Vec<(&'static str, &'static str)> {
         ("source_trust", SOURCE_TRUST),
         ("feedback_replay", FEEDBACK_REPLAY),
         ("dispatch_outcome_replay", DISPATCH_OUTCOME_REPLAY),
+        ("lifecycle_reactivation", LIFECYCLE_REACTIVATION),
     ]
 }
 
@@ -541,6 +556,8 @@ pub fn evaluate_dataset(dataset: &EvaluationDataset) -> DatasetReport {
             expected_behavior: item.sample.expected.behavior,
             final_feed_score: item.ranked.recommendation.final_feed_score,
             freshness_boost: item.ranked.recommendation.freshness_boost,
+            feedback_penalty: item.ranked.recommendation.feedback_penalty,
+            reactivation_boost: item.ranked.recommendation.reactivation_boost,
             memory_adjustment: item.ranked.recommendation.memory_adjustment,
             profile_fit: item.ranked.value_assessment.profile_fit_score,
             visibility: item.ranked.recommendation.visibility.to_string(),
@@ -862,6 +879,62 @@ fn failures_for_ranked(ranked: &[RankedEvaluationSample<'_>]) -> Vec<EvaluationF
                 ),
             });
         }
+        if item
+            .sample
+            .expected
+            .min_reactivation_boost
+            .is_some_and(|min| item.ranked.recommendation.reactivation_boost < min)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "reactivation boost {} below expected minimum",
+                    item.ranked.recommendation.reactivation_boost
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .max_reactivation_boost
+            .is_some_and(|max| item.ranked.recommendation.reactivation_boost > max)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "reactivation boost {} above expected maximum",
+                    item.ranked.recommendation.reactivation_boost
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .min_feedback_penalty
+            .is_some_and(|min| item.ranked.recommendation.feedback_penalty < min)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "feedback penalty {} below expected minimum",
+                    item.ranked.recommendation.feedback_penalty
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .max_feedback_penalty
+            .is_some_and(|max| item.ranked.recommendation.feedback_penalty > max)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "feedback penalty {} above expected maximum",
+                    item.ranked.recommendation.feedback_penalty
+                ),
+            });
+        }
         if item.sample.expected.reasons.is_empty() {
             failures.push(EvaluationFailure {
                 sample_id: item.sample.id.clone(),
@@ -1120,7 +1193,11 @@ impl EvaluationSample {
             last_prepared_at: (self.feedback.prepared_count > 0).then(|| timestamp.clone()),
             last_feedback_at: Some(timestamp),
             last_seen_issue_updated_at: Some(issue.updated_at.clone()),
-            last_seen_comments_count: Some(self.issue.comments_count),
+            last_seen_comments_count: Some(
+                self.feedback
+                    .last_seen_comments_count
+                    .unwrap_or(self.issue.comments_count),
+            ),
         };
         let mut states = HashMap::new();
         states.insert(state.issue_key.clone(), state);
