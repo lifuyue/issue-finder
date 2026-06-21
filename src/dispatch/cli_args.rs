@@ -224,7 +224,7 @@ pub struct DispatchPackageArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DispatchPackageCommand {
-    /// Import an existing inbox handoff as an IssueTaskPackage artifact.
+    /// Import an existing inbox handoff as an IssueTaskPackage v3 artifact.
     ImportHandoff(DispatchImportHandoffArgs),
 }
 
@@ -327,13 +327,13 @@ pub struct DispatchA2aArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DispatchA2aCommand {
-    /// Export an imported IssueTaskPackage as a local A2A task artifact.
+    /// Export an imported IssueTaskPackage v3 as a local A2A task artifact.
     Export(DispatchA2aExportArgs),
     /// Approve an outbound A2A task artifact for external use.
     Approve(DispatchA2aApprovalArgs),
     /// Reject an outbound A2A task artifact.
     Reject(DispatchA2aApprovalArgs),
-    /// Import a local A2A result file as a dispatch artifact.
+    /// Import a local A2A result file that satisfies the package outcome contract.
     ImportResult(Box<DispatchA2aImportResultArgs>),
 }
 

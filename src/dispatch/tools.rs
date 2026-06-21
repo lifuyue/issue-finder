@@ -513,7 +513,7 @@ pub fn execute_dispatch_tool(
             Ok(output(
                 "pending_approval",
                 format!(
-                    "Created A2A task artifact {} and approval request {}.",
+                    "Created A2A task artifact {} from IssueTaskPackage v3 and approval request {}.",
                     result.export_artifact.id, result.approval_request.id
                 ),
                 json!({ "a2aExport": result }),
@@ -578,7 +578,7 @@ pub fn execute_dispatch_tool(
             Ok(output(
                 "ok",
                 format!(
-                    "Imported A2A result artifact {} for dispatch run {}.",
+                    "Imported A2A result artifact {} for dispatch run {} against the package outcome contract.",
                     result.artifact.id, result.run.id
                 ),
                 json!({ "a2aResultImport": result }),

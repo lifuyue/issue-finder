@@ -174,6 +174,7 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     let package_artifact = store
         .write_task_package_artifact(&task.id, &package)
         .unwrap();
+    assert_eq!(package.version, 3);
     let packaged_task = store.get_issue_task(&task.id).unwrap();
     assert_eq!(
         packaged_task.current_package_artifact_id,

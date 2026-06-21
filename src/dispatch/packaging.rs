@@ -10,10 +10,11 @@ use crate::paths::IssueFinderPaths;
 
 use super::memory::record_issue_review_signal;
 use super::model::{
-    AgentArtifact, ApprovalRequest, ApprovalStatus, ApprovalType, IssueTask, IssueTaskPackage,
-    IssueTaskStatus, MemoryEvent, NewApprovalRequest, NewArtifact, NewIssueTask,
+    AgentArtifact, ApprovalRequest, ApprovalStatus, ApprovalType, IssueTask, IssueTaskStatus,
+    MemoryEvent, NewApprovalRequest, NewArtifact, NewIssueTask,
 };
 use super::store::DispatchStore;
+use super::task_package::IssueTaskPackage;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -360,7 +361,7 @@ fn create_issue_review_approval(
         approval_type: ApprovalType::IssueReview,
         status: ApprovalStatus::Pending,
         prompt: format!(
-            "Approve {} as an IssueTaskPackage v2 candidate?",
+            "Approve {} as an IssueTaskPackage v3 candidate?",
             issue_task.issue_key
         ),
         details_json: json!({
@@ -369,11 +370,11 @@ fn create_issue_review_approval(
             "inboxId": item.id,
             "handoffArtifactId": handoff_artifact.id,
             "profileSnapshotArtifactId": profile_snapshot_artifact.id,
-            "packageVersion": 2,
+            "packageVersion": 3,
             "priority": item.score,
             "category": handoff.value_assessment.recommendation_category,
             "llmConfirmation": handoff.llm_confirmation,
-            "reviewKind": "issue_task_package_v2"
+            "reviewKind": "issue_task_package_v3"
         }),
     })
 }
@@ -409,7 +410,7 @@ fn read_current_package(
     let package = serde_json::from_slice::<IssueTaskPackage>(
         &store.read_artifact_bytes(&package_artifact.id)?,
     )
-    .context("existing IssueTaskPackage artifact is not valid JSON")?;
+    .context("existing IssueTaskPackage artifact is not valid v3 JSON")?;
     Ok((Some(package_artifact), Some(package)))
 }
 

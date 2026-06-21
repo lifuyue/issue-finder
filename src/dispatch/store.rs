@@ -16,12 +16,13 @@ use super::model::{
     DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass,
     DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType,
     DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus,
-    GitHubInteractionType, IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent,
-    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    GitHubInteractionType, IssueTask, IssueTaskStatus, MemoryEvent, MemoryEventType,
+    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewAgentSessionLink,
+    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
+    NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
     NewSessionTranscriptItem, SessionTranscriptItem, TranscriptPayloadStorage,
 };
+use super::task_package::IssueTaskPackage;
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
