@@ -20,8 +20,8 @@ use super::model::{
     IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
     NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
     NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
-    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent,
-    NewSessionTranscriptItem, SessionTranscriptItem, TranscriptPayloadStorage,
+    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
+    SessionTranscriptItem, TranscriptPayloadStorage,
 };
 use super::task_package::IssueTaskPackage;
 

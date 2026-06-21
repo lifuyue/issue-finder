@@ -21,10 +21,10 @@ use crate::dispatch::{
 use crate::github::GitHubIssue;
 use crate::github_enrichment::EnrichedIssue;
 use crate::memory::{
-    MemoryControlPlane, MemoryDecisionHintRequest, MemoryDreamRun, MemoryDreamScope,
-    MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType, MemoryHintScope, MemoryHintScopeType,
-    MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryRuntimeMode, MemoryStore,
-    NewMemoryDream, NewMemoryHint,
+    sync_dispatch_outcome_feedback, MemoryControlPlane, MemoryDecisionHintRequest, MemoryDreamRun,
+    MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType, MemoryHintScope,
+    MemoryHintScopeType, MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryRawEventType,
+    MemoryRuntimeMode, MemoryStore, NewMemoryDream, NewMemoryHint,
 };
 use crate::paths::{atomic_write, IssueFinderPaths};
 use crate::recommendation::feedback::assess_feedback;
@@ -198,7 +198,7 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
         result_artifact_id: None,
         metadata_json: json!({ "source": "agent_loop_eval" }),
     })?;
-    let memory = runtime
+    let dispatch_memory = runtime
         .store()
         .list_memory_events_for_issue_task(&task.id)?;
     let mut observations = Vec::new();
@@ -209,14 +209,31 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
     if task_after.status == IssueTaskStatus::Dispatched {
         observations.push("issue_task_status_not_rewritten_to_quality_reject".to_string());
     }
-    if memory.iter().any(|event| {
-        event.source == "dispatch_outcome"
-            && event.payload_json["failureClass"] == "validation_failed"
+    let outcomes = runtime.store().list_dispatch_run_outcomes()?;
+    if outcomes.iter().any(|outcome| {
+        outcome.id == recorded.outcome.id
+            && outcome.failure_class == Some(DispatchOutcomeFailureClass::ValidationFailed)
     }) {
         observations.push("runtime_failure_recorded_as_dispatch_outcome".to_string());
     }
-    if recorded.memory_ingest.is_some() {
-        observations.push("dispatch_outcome_ingested_as_memory_signal".to_string());
+    if dispatch_memory
+        .iter()
+        .all(|event| event.source != "dispatch_outcome")
+    {
+        observations.push("dispatch_runtime_does_not_directly_write_memory_signal".to_string());
+    }
+    let memory_store = MemoryStore::open(&home.paths)?;
+    if memory_store.list_raw_events()?.is_empty() {
+        let sync = sync_dispatch_outcome_feedback(&home.paths)?;
+        let raw_events = MemoryStore::open(&home.paths)?.list_raw_events()?;
+        if sync.projected_outcomes == 1
+            && raw_events.iter().any(|event| {
+                event.event_type == MemoryRawEventType::DispatchFailure
+                    && event.payload_json["failureClass"] == "validation_failed"
+            })
+        {
+            observations.push("memory_projector_sync_records_dispatch_outcome".to_string());
+        }
     }
     Ok(observations)
 }
@@ -228,7 +245,8 @@ fn package_insufficiency_observations() -> Vec<String> {
         title: "Fix parser panic".to_string(),
         url: "https://github.com/owner/repo/issues/202".to_string(),
     });
-    package.outcome_contract = Value::Null;
+    package.outcome_contract.required_artifact.clear();
+    package.outcome_contract.required_fields.clear();
     let mut observations = Vec::new();
     let findings = package_contract_findings(&package);
     if findings
@@ -297,10 +315,20 @@ fn github_policy_observations() -> Result<Vec<String>> {
     let home = EvalHome::new("github-policy")?;
     let runtime = crate::dispatch::DispatchRuntime::open(home.paths.clone())?;
     create_packaged_task(&runtime, 404)?;
-    let draft = runtime.draft_github_tracking_comment("owner/repo#404", None)?;
+    let draft = runtime.draft_github_tracking_comment(
+        "owner/repo#404",
+        Some("I am checking whether this issue is still reproducible.".to_string()),
+    )?;
+    let draft_interaction_id = draft
+        .draft
+        .as_ref()
+        .context("explicit tracking body should create a draft interaction")?
+        .interaction
+        .id
+        .clone();
     let mut writer = FakeGitHubWriter::default();
     let blocked = runtime
-        .post_github_interaction_with_writer(&mut writer, &draft.interaction.id)
+        .post_github_interaction_with_writer(&mut writer, &draft_interaction_id)
         .unwrap_err();
 
     let mut observations = Vec::new();
@@ -308,33 +336,41 @@ fn github_policy_observations() -> Result<Vec<String>> {
         observations.push("github_post_blocked_until_approval".to_string());
     }
 
-    runtime.approve_github_interaction(&draft.interaction.id)?;
+    runtime.approve_github_interaction(&draft_interaction_id)?;
     writer.failures_remaining = 1;
     let failed = runtime
-        .post_github_interaction_with_writer(&mut writer, &draft.interaction.id)
+        .post_github_interaction_with_writer(&mut writer, &draft_interaction_id)
         .unwrap_err();
     let failed_interaction = runtime
         .store()
-        .get_github_interaction(&draft.interaction.id)?;
+        .get_github_interaction(&draft_interaction_id)?;
     if failed.to_string().contains("transient GitHub failure")
         && failed_interaction.status == GitHubInteractionStatus::Failed
     {
         observations.push("github_failed_post_is_persisted_for_retry".to_string());
     }
     let posted =
-        runtime.retry_github_interaction_with_writer(&mut writer, &draft.interaction.id)?;
+        runtime.retry_github_interaction_with_writer(&mut writer, &draft_interaction_id)?;
     if posted.interaction.status == GitHubInteractionStatus::Posted {
         observations.push("github_retry_posts_after_failure".to_string());
     }
 
+    create_packaged_task(&runtime, 405)?;
     let rejected = runtime.draft_github_tracking_comment(
-        "owner/repo#404",
+        "owner/repo#405",
         Some("second tracking draft".to_string()),
     )?;
-    runtime.reject_github_interaction(&rejected.interaction.id)?;
+    let rejected_interaction_id = rejected
+        .draft
+        .as_ref()
+        .context("explicit tracking body should create a rejected draft interaction")?
+        .interaction
+        .id
+        .clone();
+    runtime.reject_github_interaction(&rejected_interaction_id)?;
     let calls_before_rejected_post = writer.calls.len();
     let rejected_error = runtime
-        .post_github_interaction_with_writer(&mut writer, &rejected.interaction.id)
+        .post_github_interaction_with_writer(&mut writer, &rejected_interaction_id)
         .unwrap_err();
     if rejected_error.to_string().contains("not approved")
         && writer.calls.len() == calls_before_rejected_post
@@ -473,26 +509,25 @@ fn memory_governance_observations() -> Result<Vec<String>> {
 
 fn package_contract_findings(package: &IssueTaskPackage) -> Vec<String> {
     let mut findings = Vec::new();
-    if package.outcome_contract.is_null() {
+    if package.outcome_contract.required_artifact.trim().is_empty()
+        || package.outcome_contract.required_fields.is_empty()
+    {
         findings.push("missing_outcome_contract".to_string());
     }
-    let required_artifact = package
+    let has_summary = package
         .outcome_contract
-        .get("requiredArtifact")
-        .and_then(Value::as_str);
-    let required_fields = package
+        .required_fields
+        .iter()
+        .any(|field| field == "summary");
+    let has_status = package
         .outcome_contract
-        .get("requiredFields")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let has_summary = required_fields
+        .required_fields
         .iter()
-        .any(|field| field.as_str() == Some("summary"));
-    let has_status = required_fields
-        .iter()
-        .any(|field| field.as_str() == Some("status"));
-    if required_artifact != Some("fix_result.json") || !has_summary || !has_status {
+        .any(|field| field == "status");
+    if package.outcome_contract.required_artifact != "fix_result.json"
+        || !has_summary
+        || !has_status
+    {
         findings.push("required_fix_result_contract_unavailable".to_string());
     }
     findings

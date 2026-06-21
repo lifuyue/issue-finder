@@ -9,10 +9,11 @@
           "run_status_failed",
           "issue_task_status_not_rewritten_to_quality_reject",
           "runtime_failure_recorded_as_dispatch_outcome",
-          "dispatch_outcome_ingested_as_memory_signal"
+          "dispatch_runtime_does_not_directly_write_memory_signal",
+          "memory_projector_sync_records_dispatch_outcome"
         ],
         "reasons": [
-          "A validation failure during execution should become a dispatch outcome and memory signal, not an issue quality verdict."
+          "A validation failure during execution should become a dispatch outcome that the memory projector can sync, not an issue quality verdict or direct runtime memory write."
         ]
       }
     },
