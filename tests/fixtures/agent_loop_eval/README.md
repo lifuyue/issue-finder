@@ -13,7 +13,7 @@ agent_loop_eval/
 ## Family Responsibilities
 
 - `runtime_vs_quality`: runtime execution outcomes are recorded as dispatch/memory signals without rewriting issue quality.
-- `package_quality`: package v2 artifacts must expose enough stable contract shape for execution agents and result import.
+- `package_quality`: task package artifacts must expose enough stable contract shape for execution agents and result import.
 - `lifecycle_reactivation`: prior feedback can be partially recovered by issue updates, new comments, and maintainer activity.
 - `github_interaction_policy`: GitHub writes are draft/approval/retry gated and use fake writers in eval.
 - `session_continuity`: selected native sessions are resumed and remain the continuity anchor for dispatch execution.
