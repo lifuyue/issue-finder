@@ -240,11 +240,11 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
         Some(DispatchCommand::Github(args)) => match args.command {
             DispatchGithubCommand::DraftTracking(args) => {
                 let result = runtime.draft_github_tracking_comment(&args.issue, args.body)?;
-                render_cli_output(args.json, &result, || render_github_draft(&result))
+                render_cli_output(args.json, &result, || render_github_policy_result(&result))
             }
             DispatchGithubCommand::DraftFinal(args) => {
                 let result = runtime.draft_github_final_comment(&args.run_id, args.body)?;
-                render_cli_output(args.json, &result, || render_github_draft(&result))
+                render_cli_output(args.json, &result, || render_github_policy_result(&result))
             }
             DispatchGithubCommand::Approve(args) => {
                 let result = runtime.approve_github_interaction(&args.interaction_id)?;

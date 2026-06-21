@@ -6,6 +6,7 @@ pub mod cli_args;
 pub mod events;
 pub mod execution;
 pub mod failure;
+pub mod github_interaction_policy;
 pub mod github_projection;
 pub mod memory;
 pub mod model;
@@ -16,6 +17,7 @@ pub mod runtime;
 pub mod session_approvals;
 pub mod session_ops;
 pub mod store;
+pub mod task_package;
 pub mod timeline;
 pub mod tool_specs;
 pub mod tools;
@@ -24,8 +26,8 @@ pub use a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 pub use capability_probe::AgentProbeReport;
 pub use execution::DispatchExecutionResult;
 pub use github_projection::{
-    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
-    PostedGitHubComment, ReqwestGitHubCommentWriter,
+    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubCommentWriter,
+    GitHubPostResult, PostedGitHubComment, ReqwestGitHubCommentWriter,
 };
 pub use model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AdapterProbeResult,
@@ -34,20 +36,20 @@ pub use model::{
     CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
     DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind,
     DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
-    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTask, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEvent,
-    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
-    NewSessionTranscriptItem, PolicyAction, PolicyRequirement, SessionTranscriptItem,
-    TranscriptPayloadStorage,
+    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
+    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTask,
+    IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
+    NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
+    NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
+    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
+    PolicyAction, PolicyRequirement, SessionTranscriptItem, TranscriptPayloadStorage,
 };
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
 pub use runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeMemoryIngestView,
-    DispatchOutcomeRecordRequest, DispatchOutcomeRecordResult, DispatchProposal,
-    DispatchProposalRequest, DispatchRuntime, DispatchStatusSnapshot, SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordRequest,
+    DispatchOutcomeRecordResult, DispatchProposal, DispatchProposalRequest, DispatchRuntime,
+    DispatchStatusSnapshot, SessionSearchResult,
 };
 pub use session_approvals::{
     PendingSessionMutation, SessionMutationApprovalResolution, SessionMutationProposal,
@@ -56,6 +58,7 @@ pub use session_ops::{
     SessionMutationResult, SessionTranscriptResult, SessionsSyncRequest, SessionsSyncResult,
 };
 pub use store::DispatchStore;
+pub use task_package::{IssueTaskPackage, IssueTaskPackageIssue};
 pub use timeline::{ApprovalLatency, DispatchTimeline, DispatchTrace, TimelineItem};
 
 pub use cli::{handle_agents_cli, handle_dispatch_cli, handle_sessions_cli};

@@ -128,7 +128,7 @@ Purpose: complete the first vertical contribution loop.
 Scope:
 
 - Structured LLM confirmation DTO.
-- IssueTaskPackage v2 fields.
+- IssueTaskPackage v3 fields.
 - Human review inbox or CLI review flow.
 - Dispatch approval decision points.
 - Outcome inputs required by memory and recommendation.
@@ -420,7 +420,7 @@ Required doc updates by branch:
 
 - `thread-worktree-orchestration`: repository collaboration guidance.
 - `dispatch-runtime-next`: dispatch runtime design updates.
-- `vertical-loop-v1`: vertical contribution loop and package v2 design.
+- `vertical-loop-v1`: vertical contribution loop and current package contract design.
 - `recommendation-feedback-loop`: recommendation eval and outcome feedback design.
 
 Docs must not leave contradictory old/new descriptions for later contributors to reconcile.

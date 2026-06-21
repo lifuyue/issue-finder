@@ -8,7 +8,7 @@ use issue_finder::dispatch::{
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff};
 use issue_finder::inbox::upsert_ready;
-use issue_finder::memory::{MemoryRawEventType, MemoryStore};
+use issue_finder::memory::{sync_dispatch_outcome_feedback, MemoryRawEventType, MemoryStore};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::repo_scan::{CandidateFile, RepoScan, ValidationCommand};
 use issue_finder::workspace::{PreparedWorkspace, WorkspaceInfo};
@@ -116,7 +116,7 @@ fn issue_review_rejection_records_memory_and_blocks_dispatch() {
 }
 
 #[test]
-fn dispatch_outcome_record_ingests_hybrid_memory_best_effort() {
+fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths.clone()).unwrap();
@@ -150,17 +150,21 @@ fn dispatch_outcome_record_ingests_hybrid_memory_best_effort() {
 
     assert_eq!(result.run.status.to_string(), "failed");
     assert_eq!(result.outcome.outcome_kind, DispatchOutcomeKind::Failed);
-    assert!(result.memory_ingest.is_some());
     let memory = runtime
         .store()
         .list_memory_events_for_issue_task(&task.id)
         .unwrap();
-    assert_eq!(memory.len(), 2);
-    assert_eq!(
-        memory[1].event_type,
-        MemoryEventType::AgentPerformanceSignal
-    );
-    assert_eq!(memory[1].payload_json["failureClass"], "validation_failed");
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0].source, "dispatch_approval");
+
+    let raw_events = MemoryStore::open(&paths)
+        .unwrap()
+        .list_raw_events()
+        .unwrap();
+    assert!(raw_events.is_empty());
+
+    let sync = sync_dispatch_outcome_feedback(&paths).unwrap();
+    assert_eq!(sync.projected_outcomes, 1);
 
     let raw_events = MemoryStore::open(&paths)
         .unwrap()

@@ -258,6 +258,9 @@ pub fn is_issue_finder_projection_comment(body: &str) -> bool {
     let normalized = normalize(body);
     normalized.contains("issue finder projection")
         || normalized.contains("issue finder tracking comment")
+        || normalized.contains("issue finder progress comment")
+        || normalized.contains("issue finder clarification comment")
+        || normalized.contains("issue finder final comment")
         || body.contains("<!-- issue-finder:")
         || normalized == "i am tracking this issue and preparing a fix attempt"
 }
@@ -371,6 +374,12 @@ mod tests {
     fn ignores_issue_finder_projection_comments_as_competition() {
         for body in [
             "<!-- issue-finder:tracking_comment -->\nI am tracking this issue and preparing a fix attempt.",
+            "<!-- issue-finder:progress_comment -->\nI am working on this and will report back.",
+            "<!-- issue-finder:clarification_comment -->\nCould a maintainer clarify the expected behavior?",
+            "<!-- issue-finder:final_comment -->\nI opened a PR with the fix.",
+            "Issue Finder progress comment: I am working on this.",
+            "Issue Finder clarification comment: Could a maintainer clarify the expected behavior?",
+            "Issue Finder final comment: I opened a PR with the fix.",
             "I am tracking this issue and preparing a fix attempt.",
         ] {
             let markers = detect_comment_competition_markers(body);

@@ -30,8 +30,7 @@
           "approved": true,
           "repoFullName": "clap-rs/clap",
           "outcomeKind": "fix_ready",
-          "taskClass": "rust_cli_panic",
-          "weight": 0.35
+          "taskClass": "rust_cli_panic"
         }
       ],
       "expected": {
@@ -69,8 +68,7 @@
           "approved": true,
           "outcomeKind": "failed",
           "failureClass": "validation_failed",
-          "taskClass": "rust_cli_panic",
-          "weight": -0.45
+          "taskClass": "rust_cli_panic"
         }
       ],
       "expected": {
@@ -107,8 +105,7 @@
           "approved": true,
           "outcomeKind": "blocked",
           "failureClass": "policy_blocked",
-          "taskClass": "rust_cli_panic",
-          "weight": -0.60
+          "taskClass": "rust_cli_panic"
         }
       ],
       "expected": {
@@ -145,8 +142,7 @@
         {
           "approved": false,
           "outcomeKind": "fix_ready",
-          "taskClass": "rust_cli_panic",
-          "weight": 0.60
+          "taskClass": "rust_cli_panic"
         }
       ],
       "expected": {
@@ -183,16 +179,171 @@
         {
           "approved": true,
           "outcomeKind": "fix_ready",
-          "taskClass": "rust_cli_panic",
-          "weight": 0.45
+          "taskClass": "rust_cli_panic"
         }
       ],
       "expected": {
         "quality": "excellent",
         "behavior": "visible_top",
-        "minMemoryAdjustment": 40,
+        "minMemoryAdjustment": 30,
         "maxRankBucket": 3,
         "reasons": ["Approved dispatch outcome hints should apply enough pressure to influence rank."]
+      }
+    },
+    {
+      "id": "dispatch_environment_friction_cools_execution_not_quality",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-env",
+        "number": 61,
+        "title": "CLI panic when reading plugin config",
+        "body": "The failure is small and reproducible, but prior attempts hit unavailable test dependencies. Add a regression test after the environment is available.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 10,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Rust CLI with plugin support",
+        "language": "Rust",
+        "stars": 700,
+        "forks": 40,
+        "watchers": 15,
+        "openIssues": 24,
+        "topics": ["rust", "cli", "plugins"],
+        "pushedAgeDays": 1
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "failed",
+          "failureClass": "dependency_unavailable",
+          "taskClass": "rust_cli_panic"
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "maxMemoryAdjustment": -20,
+        "reasons": ["Environment failures should become execution-friction priors, not issue-quality failures."]
+      }
+    },
+    {
+      "id": "dispatch_agent_runtime_error_does_not_cool_issue_candidate",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-agent",
+        "number": 62,
+        "title": "CLI panic on short config file",
+        "body": "The parser panics on a short TOML file. The fix is isolated and has existing test helpers.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 9,
+        "updatedAgeDays": 2
+      },
+      "repository": {
+        "description": "Rust configuration parser CLI",
+        "language": "Rust",
+        "stars": 850,
+        "forks": 55,
+        "watchers": 18,
+        "openIssues": 22,
+        "topics": ["rust", "cli", "config"],
+        "pushedAgeDays": 1
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "agentId": "codex",
+          "outcomeKind": "failed",
+          "failureClass": "agent_runtime_error",
+          "taskClass": "rust_cli_panic"
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "minMemoryAdjustment": 0,
+        "maxMemoryAdjustment": 0,
+        "reasons": ["Agent runtime errors should project to agent suitability without cooling issue ranking."]
+      }
+    },
+    {
+      "id": "dispatch_reproduction_failure_cools_issue_quality",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-repro",
+        "number": 63,
+        "title": "CLI panic reported without reproduction steps",
+        "body": "A panic is mentioned, but the issue does not include inputs, version, command output, or a failing test case.",
+        "labels": ["bug", "help wanted"],
+        "createdAgeDays": 40,
+        "updatedAgeDays": 8
+      },
+      "repository": {
+        "description": "Rust CLI tooling",
+        "language": "Rust",
+        "stars": 1000,
+        "forks": 75,
+        "watchers": 20,
+        "openIssues": 38,
+        "topics": ["rust", "cli"],
+        "pushedAgeDays": 4
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "failed",
+          "failureClass": "reproduction_failed",
+          "taskClass": "rust_cli_panic"
+        }
+      ],
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "maxMemoryAdjustment": -30,
+        "reasons": ["Contribution outcomes that show missing reproduction can cool issue-quality priors."]
+      }
+    },
+    {
+      "id": "dispatch_mixed_positive_negative_outcomes_are_bounded",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "owner/rust-mixed",
+        "number": 64,
+        "title": "CLI panic while loading nested workspace config",
+        "body": "A prior dispatch fixed a similar parser path, while another failed validation. The net signal should stay bounded and explainable.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 6,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust workspace CLI",
+        "language": "Rust",
+        "stars": 650,
+        "forks": 45,
+        "watchers": 15,
+        "openIssues": 20,
+        "topics": ["rust", "cli", "workspace"],
+        "pushedAgeDays": 1
+      },
+      "dispatchOutcomes": [
+        {
+          "approved": true,
+          "outcomeKind": "fix_ready",
+          "taskClass": "rust_cli_panic"
+        },
+        {
+          "approved": true,
+          "outcomeKind": "failed",
+          "failureClass": "validation_failed",
+          "taskClass": "rust_cli_panic"
+        }
+      ],
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minMemoryAdjustment": -20,
+        "maxMemoryAdjustment": 0,
+        "reasons": ["Positive and negative dispatch outcomes should combine through the shared projector and remain bounded."]
       }
     }
   ]

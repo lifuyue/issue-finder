@@ -58,7 +58,10 @@ fn execution_starts_new_native_session_after_approval() {
             .unwrap(),
     )
     .unwrap();
+    assert!(prompt.contains("Issue Finder task package v3"));
     assert!(prompt.contains("owner/repo#123"));
+    assert!(prompt.contains("reproduction_contract"));
+    assert!(prompt.contains("outcome_contract"));
     assert!(prompt.contains("Task package path:"));
 
     let event_types = runtime

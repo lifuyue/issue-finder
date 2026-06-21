@@ -206,6 +206,8 @@ pub struct EvalArgs {
 pub enum EvalCommand {
     /// Generate offline or live recommendation evaluation reports.
     Recommendation(RecommendationEvalArgs),
+    /// Generate offline agent loop evaluation reports.
+    AgentLoop(AgentLoopEvalArgs),
 }
 
 #[derive(Debug, Args)]
@@ -223,6 +225,16 @@ pub struct RecommendationEvalArgs {
     #[arg(long, default_value_t = 15)]
     pub limit: usize,
     /// Output directory for metrics.json, report.md, and visible.jsonl.
+    #[arg(long)]
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentLoopEvalArgs {
+    /// Run deterministic offline fixture evaluation.
+    #[arg(long)]
+    pub offline: bool,
+    /// Output directory for metrics.json and report.md.
     #[arg(long)]
     pub output: PathBuf,
 }

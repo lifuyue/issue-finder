@@ -16,11 +16,10 @@ use super::capability_probe::{probe_agent, AgentProbeReport};
 use super::events::dispatch_run_event;
 use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
 use super::github_projection::{
-    self, GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
+    self, GitHubApprovalResult, GitHubCommentPolicyResult, GitHubCommentWriter, GitHubPostResult,
     ReqwestGitHubCommentWriter,
 };
 use super::memory::record_dispatch_approval_signal;
-use super::memory::{ingest_dispatch_outcome_memory, DispatchOutcomeMemoryIngest};
 use super::model::{
     AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, AgentSessionLink,
     AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus,
@@ -101,16 +100,6 @@ pub struct DispatchOutcomeRecordResult {
     pub run: DispatchRun,
     pub issue_task: super::model::IssueTask,
     pub outcome: DispatchRunOutcome,
-    pub memory_ingest: Option<DispatchOutcomeMemoryIngestView>,
-    pub memory_ingest_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct DispatchOutcomeMemoryIngestView {
-    pub dispatch_memory_event_id: String,
-    pub memory_raw_event_ids: Vec<String>,
-    pub memory_node_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -564,8 +553,6 @@ impl DispatchRuntime {
                 run,
                 issue_task,
                 outcome,
-                memory_ingest: None,
-                memory_ingest_error: None,
             });
         }
 
@@ -604,27 +591,11 @@ impl DispatchRuntime {
             }),
         ))?;
 
-        let memory_ingest = match ingest_dispatch_outcome_memory(&self.store, &run, &outcome) {
-            Ok(ingest) => (Some(memory_ingest_view(ingest)), None),
-            Err(error) => {
-                let message = error.to_string();
-                let _ = self.store.append_dispatch_event(dispatch_run_event(
-                    &run,
-                    DispatchEventKind::DispatchOutcomeMemoryIngestFailed,
-                    DispatchEventSource::Runtime,
-                    DispatchEventSeverity::Warning,
-                    json!({ "error": message }),
-                ));
-                (None, Some(message))
-            }
-        };
         let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
         Ok(DispatchOutcomeRecordResult {
             run,
             issue_task,
             outcome,
-            memory_ingest: memory_ingest.0,
-            memory_ingest_error: memory_ingest.1,
         })
     }
 
@@ -636,7 +607,7 @@ impl DispatchRuntime {
         &self,
         issue: &str,
         body_override: Option<String>,
-    ) -> Result<GitHubCommentDraftResult> {
+    ) -> Result<GitHubCommentPolicyResult> {
         packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
         github_projection::draft_tracking_comment(&self.store, issue, body_override)
     }
@@ -645,7 +616,7 @@ impl DispatchRuntime {
         &self,
         run_id: &str,
         body_override: Option<String>,
-    ) -> Result<GitHubCommentDraftResult> {
+    ) -> Result<GitHubCommentPolicyResult> {
         github_projection::draft_final_comment(&self.store, run_id, body_override)
     }
 
@@ -754,14 +725,6 @@ impl DispatchRuntime {
             );
         }
         Ok(())
-    }
-}
-
-fn memory_ingest_view(ingest: DispatchOutcomeMemoryIngest) -> DispatchOutcomeMemoryIngestView {
-    DispatchOutcomeMemoryIngestView {
-        dispatch_memory_event_id: ingest.dispatch_memory_event.id,
-        memory_raw_event_ids: ingest.memory_ingest.raw_event_ids,
-        memory_node_ids: ingest.memory_ingest.node_ids,
     }
 }
 

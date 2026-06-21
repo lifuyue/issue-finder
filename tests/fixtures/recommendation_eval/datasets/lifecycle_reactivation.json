@@ -1,0 +1,119 @@
+{
+  "name": "lifecycle_reactivation",
+  "profile": "default_cli_devtools",
+  "limit": 10,
+  "samples": [
+    {
+      "id": "lifecycle_read_issue_reactivated_by_maintainer_response",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/reactivated-cli",
+        "number": 310,
+        "title": "CLI panic after workspace config reload",
+        "body": "After reloading workspace config, the Rust CLI panics. New maintainer comment points to src/config.rs and asks for a regression test.",
+        "labels": ["bug", "good first issue"],
+        "createdAgeDays": 20,
+        "updatedAgeDays": 0,
+        "commentsCount": 4
+      },
+      "repository": {
+        "description": "Rust developer tool CLI",
+        "language": "Rust",
+        "stars": 1800,
+        "forks": 160,
+        "watchers": 40,
+        "openIssues": 80,
+        "topics": ["rust", "cli", "developer-tools"],
+        "pushedAgeDays": 1
+      },
+      "activity": { "maintainerRecentResponse": true },
+      "feedback": {
+        "shownCount": 1,
+        "readCount": 2,
+        "feedbackAgeDays": 3,
+        "lastSeenCommentsCount": 2
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_top",
+        "minReactivationBoost": 75,
+        "maxFeedbackPenalty": 70,
+        "maxRankBucket": 3,
+        "reasons": ["New issue activity, new comments, and maintainer response should recover most of the prior read penalty."]
+      }
+    },
+    {
+      "id": "lifecycle_read_without_new_activity_stays_cooled",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "owner/cooled-cli",
+        "number": 311,
+        "title": "Improve CLI config error wording",
+        "body": "The CLI prints a vague config error. Suggested fix: add context and snapshot tests.",
+        "labels": ["help wanted", "cli"],
+        "createdAgeDays": 30,
+        "updatedAgeDays": 8,
+        "commentsCount": 1
+      },
+      "repository": {
+        "description": "Rust developer tool CLI",
+        "language": "Rust",
+        "stars": 1200,
+        "forks": 100,
+        "watchers": 30,
+        "openIssues": 60,
+        "topics": ["rust", "cli", "developer-tools"],
+        "pushedAgeDays": 2
+      },
+      "feedback": {
+        "shownCount": 1,
+        "readCount": 1,
+        "feedbackAgeDays": 0,
+        "lastSeenCommentsCount": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "maxReactivationBoost": 0,
+        "minFeedbackPenalty": 35,
+        "reasons": ["Prior read feedback should keep a candidate cooled when no new activity appears after feedback."]
+      }
+    },
+    {
+      "id": "lifecycle_done_feedback_remains_hidden_despite_activity",
+      "sourceTier": "overlay_trusted",
+      "issue": {
+        "repoFullName": "owner/done-cli",
+        "number": 312,
+        "title": "Add CLI parser regression test",
+        "body": "A small test-only issue received a new comment after the user already marked it done.",
+        "labels": ["test", "good first issue"],
+        "createdAgeDays": 6,
+        "updatedAgeDays": 0,
+        "commentsCount": 3
+      },
+      "repository": {
+        "description": "Rust CLI parser",
+        "language": "Rust",
+        "stars": 900,
+        "forks": 90,
+        "watchers": 20,
+        "openIssues": 40,
+        "topics": ["rust", "cli", "testing"],
+        "pushedAgeDays": 1
+      },
+      "activity": { "maintainerRecentResponse": true },
+      "feedback": {
+        "done": true,
+        "feedbackAgeDays": 5,
+        "lastSeenCommentsCount": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "hidden",
+        "maxReactivationBoost": 0,
+        "reasons": ["Done feedback remains an explicit lifecycle terminal state even when the issue later changes."]
+      }
+    }
+  ]
+}

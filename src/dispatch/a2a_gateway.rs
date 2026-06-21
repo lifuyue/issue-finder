@@ -66,7 +66,7 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
         },
         input_artifacts: vec![A2aArtifactRef {
             role: "issue_task_package".to_string(),
-            name: "issue_task_package.json".to_string(),
+            name: "issue_task_package_v3.json".to_string(),
             artifact_id: package_artifact.id.clone(),
             path: package_artifact.path.clone(),
             content_type: package_artifact.content_type.clone(),
@@ -76,6 +76,7 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             "patch".to_string(),
             "pr_link".to_string(),
             "session_link".to_string(),
+            "validation_log".to_string(),
         ],
         callback: A2aCallbackPolicy {
             expected_result_artifact: "fix_result.json".to_string(),
@@ -90,7 +91,8 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             content_type: "application/json".to_string(),
             metadata_json: json!({
                 "issueKey": issue_task.issue_key,
-                "packageArtifactId": package_artifact.id
+                "packageArtifactId": package_artifact.id,
+                "packageContractVersion": 3
             }),
         },
         serde_json::to_vec_pretty(&task)?,
@@ -108,7 +110,9 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             "issueKey": issue_task.issue_key,
             "packageArtifactId": package_artifact.id,
             "a2aTaskArtifactId": export_artifact.id,
-            "importMode": task.callback.import_mode
+            "importMode": task.callback.import_mode,
+            "packageContractVersion": 3,
+            "expectedResultArtifact": task.callback.expected_result_artifact
         }),
     })?;
 

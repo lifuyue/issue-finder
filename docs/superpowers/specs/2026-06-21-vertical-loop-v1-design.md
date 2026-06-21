@@ -15,7 +15,7 @@ prepare
   -> typed LLM confirmation in handoff
   -> import handoff as issue review candidate
   -> human issue review approval
-  -> IssueTaskPackage v2
+  -> IssueTaskPackage v3
   -> dispatch proposal approval
   -> agent execution / A2A / GitHub projection
   -> local outcome artifacts and memory signals
@@ -27,7 +27,7 @@ prepare
 - Keep LLM output non-authoritative and reviewable.
 - Require human approval before package creation.
 - Keep dispatch approval separate from issue review approval.
-- Define the package v2 outcome contract consumed by execution agents and future recommendation feedback.
+- Define the package v3 outcome contract consumed by execution agents and future recommendation feedback.
 - Emit dispatch/memory signals for issue review decisions without changing recommendation ranking in this branch.
 
 ## Non-Goals
@@ -42,7 +42,8 @@ prepare
 
 - `src/llm_review.rs` owns typed LLM confirmation DTOs and parsing.
 - `src/handoff.rs` and `src/context_pack.rs` own handoff/context rendering compatibility.
-- `src/dispatch/packaging.rs` owns handoff import, issue review approvals, and package v2 creation.
+- `src/dispatch/task_package.rs` owns the typed package v3 contract and builder.
+- `src/dispatch/packaging.rs` owns handoff import, issue review approvals, and package creation.
 - `src/dispatch/runtime.rs`, `src/dispatch/tools.rs`, and `src/dispatch/cli.rs` expose review operations through thin adapters.
 - `src/dispatch/memory.rs` owns local memory signals emitted by dispatch decisions.
 - `src/recommendation/*` remains the owner for whether outcome signals affect ranking.
@@ -68,7 +69,7 @@ New prepare output includes `llm_confirmation`:
 
 LLM confirmation cannot change deterministic scores, recommendation category, prepare gate decisions, or dispatch policy. Disabled, empty, malformed, or failing LLM responses produce non-blocking `disabled` or `failed` confirmation statuses.
 
-The legacy free-form `llm_review` field remains readable/renderable for old handoffs, but package v2 does not use it as confirmation evidence.
+The legacy free-form `llm_review` field remains readable/renderable for old handoffs, but package v3 does not use it as confirmation evidence.
 
 ## Issue Review
 
@@ -77,7 +78,7 @@ Importing a ready inbox handoff creates an `approval_requests` row with `approva
 Review approval:
 
 - Resolves the issue review approval as approved.
-- Writes `IssueTaskPackage.version = 2`.
+- Writes `IssueTaskPackage.version = 3`.
 - Updates the issue task to `user_approved`.
 - Records a positive `issue_review` memory signal.
 
@@ -89,18 +90,26 @@ Review rejection:
 - Records a negative `issue_review` memory signal.
 - Blocks dispatch/A2A/GitHub projection for that task.
 
-## IssueTaskPackage V2
+## IssueTaskPackage V3
 
-Package v2 adds explicit sections:
+Package v3 is the current handoff contract for execution agents. It replaces the earlier loose package shape with typed sections:
 
 ```text
 source
 human_review
 memory_context
+reproduction_contract
+success_criteria
+change_budget
+environment_contract
+interaction_policy
+session_context
 outcome_contract
 ```
 
-The package includes typed `llm_confirmation`, value evidence, profile snapshot, workspace policy, context pack metadata, validation hints, and callback policy.
+The package includes typed `llm_confirmation`, value evidence, profile snapshot, workspace policy, context pack metadata, validation hints, and callback policy. Existing local v2 artifacts are not migrated in place; users can re-import and approve a ready handoff to create a v3 artifact.
+
+The reproduction contract does not infer steps from arbitrary issue text. It states the agent's obligations: read issue/context evidence, attempt reproduction when practical, record commands and observations, and report blockers instead of fabricating evidence.
 
 The outcome contract requires `fix_result.json` with:
 
@@ -108,13 +117,16 @@ The outcome contract requires `fix_result.json` with:
 status
 summary
 changedFiles
+reproduction
+successCriteria
 validation
 residualRisks
 failureReason
+sessionContext
 suggestedGitHubReply
 ```
 
-Optional artifacts are `patch`, `pr_link`, and `session_link`.
+Optional artifacts are `patch`, `pr_link`, `session_link`, and `validation_log`.
 
 ## Tool And CLI Contract
 

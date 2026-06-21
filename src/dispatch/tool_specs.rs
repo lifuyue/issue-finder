@@ -173,7 +173,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_review_approve",
-            "Approve an issue review and create an IssueTaskPackage v2 artifact.",
+            "Approve an issue review and create an IssueTaskPackage v3 artifact.",
             issue_review_approval_schema(),
             false,
         ),
@@ -209,13 +209,13 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_record_outcome",
-            "Record a normalized dispatch outcome and best-effort memory signal for one dispatch run.",
+            "Record a normalized dispatch outcome for one dispatch run.",
             dispatch_record_outcome_schema(),
             false,
         ),
         dispatch_tool_spec(
             "a2a_export_task",
-            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
+            "Create a local A2A task artifact from the approved IssueTaskPackage v3 and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             a2a_export_task_schema(),
             false,
         ),
@@ -233,19 +233,19 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "a2a_import_result",
-            "Import a local A2A result file as a dispatch artifact.",
+            "Import a local A2A result file that satisfies the IssueTaskPackage v3 outcome contract.",
             a2a_import_result_schema(),
             false,
         ),
         dispatch_tool_spec(
             "github_draft_tracking_comment",
-            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
+            "Evaluate GitHub tracking-comment policy for an imported issue; default policy returns no_comment, while an allowed draft creates a post approval request.",
             github_draft_tracking_comment_schema(),
             false,
         ),
         dispatch_tool_spec(
             "github_draft_final_comment",
-            "Draft a final GitHub comment from a dispatch result artifact and create a post approval request.",
+            "Evaluate GitHub final/clarification comment policy from a dispatch result artifact; only explicit suggested replies create post approval requests.",
             github_draft_final_comment_schema(),
             false,
         ),

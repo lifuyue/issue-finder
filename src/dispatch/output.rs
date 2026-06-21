@@ -3,7 +3,9 @@ use anyhow::Result;
 use super::a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 use super::capability_probe::AgentProbeReport;
 use super::execution::DispatchExecutionResult;
-use super::github_projection::{GitHubApprovalResult, GitHubCommentDraftResult, GitHubPostResult};
+use super::github_projection::{
+    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubPostResult,
+};
 use super::model::{
     AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
     SessionTranscriptItem,
@@ -376,17 +378,6 @@ pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResul
     if let Some(validation_outcome) = result.outcome.validation_outcome {
         lines.push(format!("Validation: {validation_outcome}"));
     }
-    if let Some(memory) = &result.memory_ingest {
-        lines.push(format!(
-            "Memory ingest: dispatch={} rawEvents={} nodes={}",
-            memory.dispatch_memory_event_id,
-            memory.memory_raw_event_ids.len(),
-            memory.memory_node_ids.len()
-        ));
-    }
-    if let Some(error) = &result.memory_ingest_error {
-        lines.push(format!("Memory ingest failed: {error}"));
-    }
     lines.join("\n")
 }
 
@@ -403,7 +394,7 @@ pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> Str
 
 pub(crate) fn render_a2a_export(result: &A2aExportResult) -> String {
     format!(
-        "Created local A2A task artifact for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
+        "Created local A2A task artifact from IssueTaskPackage v3 for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
         result.task.task.issue_key,
         result.task.task.task_type,
         result.export_artifact.path,
@@ -420,7 +411,7 @@ pub(crate) fn render_a2a_approval(action: &str, result: &A2aApprovalResult) -> S
 
 pub(crate) fn render_a2a_result_import(result: &A2aResultImport) -> String {
     format!(
-        "Imported A2A result artifact {} for dispatch run {}.\nRun status: {}",
+        "Imported A2A result artifact {} for dispatch run {} against the package outcome contract.\nRun status: {}",
         result.artifact.id, result.run.id, result.run.status
     )
 }
@@ -435,6 +426,24 @@ pub(crate) fn render_github_draft(result: &GitHubCommentDraftResult) -> String {
         result.approval_request.id,
         result.body_artifact.path
     )
+}
+
+pub(crate) fn render_github_policy_result(result: &GitHubCommentPolicyResult) -> String {
+    match &result.draft {
+        Some(draft) => format!(
+            "{}\nPolicy decision: {} ({})",
+            render_github_draft(draft),
+            result.decision.decision_kind,
+            result.decision.reason_code
+        ),
+        None => format!(
+            "GitHub interaction policy decided {} for {}#{}.\nReason: {}",
+            result.decision.decision_kind,
+            result.issue_task.repo_full_name,
+            result.issue_task.issue_number,
+            result.decision.reason_code
+        ),
+    }
 }
 
 pub(crate) fn render_github_approval(action: &str, result: &GitHubApprovalResult) -> String {

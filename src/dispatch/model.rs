@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::handoff::Handoff;
-
 macro_rules! string_enum {
     ($name:ident { $($variant:ident => $value:literal),+ $(,)? }) => {
         #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,7 +143,16 @@ string_enum!(AgentSessionStatus {
 string_enum!(GitHubInteractionType {
     TrackingComment => "tracking_comment",
     ProgressComment => "progress_comment",
+    ClarificationComment => "clarification_comment",
     FinalComment => "final_comment",
+});
+
+string_enum!(GitHubInteractionDecisionKind {
+    Tracking => "tracking",
+    Clarification => "clarification",
+    Final => "final",
+    NoComment => "no_comment",
+    NoReply => "no_reply",
 });
 
 string_enum!(GitHubInteractionStatus {
@@ -178,13 +185,11 @@ string_enum!(MemoryEventType {
     PositiveSignal => "positive_signal",
     NegativeSignal => "negative_signal",
     ProfileAdjustmentCandidate => "profile_adjustment_candidate",
-    AgentPerformanceSignal => "agent_performance_signal",
 });
 
 string_enum!(DispatchEventKind {
     DispatchApprovalResolved => "dispatch_approval_resolved",
     DispatchOutcomeRecorded => "dispatch_outcome_recorded",
-    DispatchOutcomeMemoryIngestFailed => "dispatch_outcome_memory_ingest_failed",
     DispatchStarting => "dispatch_starting",
     DispatchFailed => "dispatch_failed",
     SessionSynced => "session_synced",
@@ -564,6 +569,34 @@ pub struct NewGitHubInteraction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GitHubInteractionDecision {
+    pub id: String,
+    pub issue_task_id: String,
+    pub run_id: Option<String>,
+    pub decision_kind: GitHubInteractionDecisionKind,
+    pub interaction_type: Option<GitHubInteractionType>,
+    pub github_interaction_id: Option<String>,
+    pub body_artifact_id: Option<String>,
+    pub reason_code: String,
+    pub reasons_json: Value,
+    pub inputs_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewGitHubInteractionDecision {
+    pub issue_task_id: String,
+    pub run_id: Option<String>,
+    pub decision_kind: GitHubInteractionDecisionKind,
+    pub interaction_type: Option<GitHubInteractionType>,
+    pub github_interaction_id: Option<String>,
+    pub body_artifact_id: Option<String>,
+    pub reason_code: String,
+    pub reasons_json: Value,
+    pub inputs_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApprovalRequest {
     pub id: String,
     pub run_id: Option<String>,
@@ -600,157 +633,6 @@ pub struct NewMemoryEvent {
     pub event_type: MemoryEventType,
     pub source: String,
     pub payload_json: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct IssueTaskPackage {
-    pub kind: String,
-    pub version: u8,
-    pub issue: IssueTaskPackageIssue,
-    #[serde(default)]
-    pub source: Value,
-    pub evidence: Value,
-    pub llm_confirmation: Value,
-    #[serde(default)]
-    pub human_review: Value,
-    pub user_profile_snapshot: Value,
-    pub workspace_policy: Value,
-    pub context_pack: Value,
-    pub validation_hints: Value,
-    #[serde(default)]
-    pub memory_context: Value,
-    pub expected_outputs: Vec<String>,
-    pub callback_policy: Value,
-    #[serde(default)]
-    pub outcome_contract: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IssueTaskPackageIssue {
-    pub repo_full_name: String,
-    pub number: u64,
-    pub title: String,
-    pub url: String,
-}
-
-impl IssueTaskPackage {
-    pub fn new(issue: IssueTaskPackageIssue) -> Self {
-        Self {
-            kind: "issue_finder_task_package".to_string(),
-            version: 2,
-            issue,
-            source: Value::Null,
-            evidence: Value::Null,
-            llm_confirmation: Value::Null,
-            human_review: Value::Null,
-            user_profile_snapshot: Value::Null,
-            workspace_policy: Value::Null,
-            context_pack: Value::Null,
-            validation_hints: Value::Null,
-            memory_context: Value::Null,
-            expected_outputs: vec!["fix_result.json".to_string()],
-            callback_policy: Value::Null,
-            outcome_contract: default_outcome_contract(),
-        }
-    }
-
-    pub fn from_reviewed_handoff(
-        handoff: &Handoff,
-        handoff_artifact_id: &str,
-        user_profile_snapshot: Value,
-        review_approval: &ApprovalRequest,
-    ) -> Self {
-        let expected_outputs = normalized_expected_outputs(&handoff.instructions.expected_output);
-        Self {
-            kind: "issue_finder_task_package".to_string(),
-            version: 2,
-            issue: IssueTaskPackageIssue {
-                repo_full_name: handoff.issue.repo_full_name.clone(),
-                number: handoff.issue.number,
-                title: handoff.issue.title.clone(),
-                url: handoff.issue.url.clone(),
-            },
-            source: serde_json::json!({
-                "sourceHandoffId": handoff.id,
-                "handoffArtifactId": handoff_artifact_id,
-                "packagedByApprovalRequestId": review_approval.id,
-                "packageVersion": 2
-            }),
-            evidence: serde_json::json!({
-                "handoffArtifactId": handoff_artifact_id,
-                "valueAssessment": handoff.value_assessment,
-                "recommendation": handoff.recommendation,
-                "evidencePack": handoff.evidence_pack
-            }),
-            llm_confirmation: serde_json::json!(handoff.llm_confirmation),
-            human_review: serde_json::json!({
-                "approvalRequestId": review_approval.id,
-                "status": review_approval.status,
-                "resolvedAt": review_approval.resolved_at,
-                "details": review_approval.details_json
-            }),
-            user_profile_snapshot,
-            workspace_policy: serde_json::json!({
-                "workspace": handoff.workspace,
-                "agentPolicy": handoff.agent_policy
-            }),
-            context_pack: serde_json::json!({
-                "context": handoff.context,
-                "contextPack": handoff.context_pack,
-                "probePack": handoff.probe_pack
-            }),
-            validation_hints: serde_json::json!({
-                "readiness": handoff.readiness,
-                "validationCommands": handoff.context.validation_commands
-            }),
-            memory_context: serde_json::json!(handoff.memory_context),
-            expected_outputs,
-            callback_policy: serde_json::json!({
-                "expectedArtifacts": ["fix_result.json"],
-                "optionalArtifacts": ["patch", "pr_link", "session_link"],
-                "sourceHandoffId": handoff.id,
-                "importMode": "local_artifact_only"
-            }),
-            outcome_contract: default_outcome_contract(),
-        }
-    }
-}
-
-fn normalized_expected_outputs(values: &[String]) -> Vec<String> {
-    let mut outputs = values
-        .iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    if !outputs.iter().any(|value| value == "fix_result.json") {
-        outputs.insert(0, "fix_result.json".to_string());
-    }
-    outputs
-}
-
-fn default_outcome_contract() -> Value {
-    serde_json::json!({
-        "version": 1,
-        "requiredArtifact": "fix_result.json",
-        "requiredFields": [
-            "status",
-            "summary",
-            "changedFiles",
-            "validation",
-            "residualRisks",
-            "failureReason",
-            "suggestedGitHubReply"
-        ],
-        "statusValues": ["success", "partial", "failed", "needs_user"],
-        "optionalArtifacts": ["patch", "pr_link", "session_link"],
-        "memoryInputs": {
-            "agentId": true,
-            "taskType": "fix_github_issue",
-            "validationPaths": true,
-            "failureReason": true,
-            "artifactRefs": true
-        }
-    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

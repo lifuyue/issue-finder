@@ -368,10 +368,10 @@ fn dispatch_metadata(
 
 fn dispatch_turn_prompt(issue_task: &IssueTask, package_artifact: &AgentArtifact) -> String {
     format!(
-        "You are receiving an Issue Finder task package.\n\
-Goal: locate, reproduce if practical, and fix the GitHub issue.\n\
-Read the package artifact first and respect workspace_policy.\n\
-Return a FixResult artifact with summary, files changed, validation run, residual risks, and suggested GitHub reply.\n\n\
+        "You are receiving an Issue Finder task package v3.\n\
+Goal: follow the package contract to reproduce when practical, make a scoped fix, validate, and report the result.\n\
+Read the package artifact first. Respect workspace_policy, reproduction_contract, change_budget, environment_contract, interaction_policy, session_context, and outcome_contract.\n\
+Return fix_result.json with reproduction evidence, success criteria status, changed files, validation run, residual risks, failure reason when applicable, session context, and suggested GitHub reply.\n\n\
 Issue: {}\n\
 Title: {}\n\
 Task package artifact id: {}\n\

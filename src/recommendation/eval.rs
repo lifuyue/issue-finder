@@ -8,6 +8,7 @@ use crate::github::GitHubIssue;
 use crate::github_enrichment::{
     EnrichedComment, EnrichedIssue, EnrichedParticipants, TimestampedSample,
 };
+use crate::memory::outcome_projection::{ranking_adjustment_for_candidate, OutcomeFeedbackInput};
 use crate::paths::{atomic_write, IssueFinderPaths};
 use crate::recommendation::engine::{RecommendationEngine, ScoutOptions};
 use crate::recommendation::events::IssueKey;
@@ -39,6 +40,8 @@ const FEEDBACK_REPLAY: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/feedback_replay.json");
 const DISPATCH_OUTCOME_REPLAY: &str =
     include_str!("../../tests/fixtures/recommendation_eval/datasets/dispatch_outcome_replay.json");
+const LIFECYCLE_REACTIVATION: &str =
+    include_str!("../../tests/fixtures/recommendation_eval/datasets/lifecycle_reactivation.json");
 
 const LIVE_PROFILE_NAMES: [&str; 6] = [
     "default_cli_devtools",
@@ -201,6 +204,8 @@ pub struct SampleFeedback {
     pub done: bool,
     #[serde(default)]
     pub feedback_age_days: i64,
+    #[serde(default)]
+    pub last_seen_comments_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,13 +215,13 @@ pub struct SampleDispatchOutcome {
     pub approved: bool,
     #[serde(default)]
     pub repo_full_name: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub outcome_kind: String,
     #[serde(default)]
     pub failure_class: Option<String>,
     #[serde(default)]
     pub task_class: Option<String>,
-    #[serde(default)]
-    pub weight: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -238,6 +243,14 @@ pub struct ExpectedOutcome {
     pub min_memory_adjustment: Option<i32>,
     #[serde(default)]
     pub max_memory_adjustment: Option<i32>,
+    #[serde(default)]
+    pub min_reactivation_boost: Option<i32>,
+    #[serde(default)]
+    pub max_reactivation_boost: Option<i32>,
+    #[serde(default)]
+    pub min_feedback_penalty: Option<i32>,
+    #[serde(default)]
+    pub max_feedback_penalty: Option<i32>,
     pub reasons: Vec<String>,
 }
 
@@ -318,6 +331,8 @@ pub struct RankedSampleSummary {
     pub expected_behavior: ExpectedBehavior,
     pub final_feed_score: i32,
     pub freshness_boost: i32,
+    pub feedback_penalty: i32,
+    pub reactivation_boost: i32,
     pub memory_adjustment: i32,
     pub profile_fit: i32,
     pub visibility: String,
@@ -403,6 +418,7 @@ pub fn builtin_datasets() -> Vec<(&'static str, &'static str)> {
         ("source_trust", SOURCE_TRUST),
         ("feedback_replay", FEEDBACK_REPLAY),
         ("dispatch_outcome_replay", DISPATCH_OUTCOME_REPLAY),
+        ("lifecycle_reactivation", LIFECYCLE_REACTIVATION),
     ]
 }
 
@@ -540,6 +556,8 @@ pub fn evaluate_dataset(dataset: &EvaluationDataset) -> DatasetReport {
             expected_behavior: item.sample.expected.behavior,
             final_feed_score: item.ranked.recommendation.final_feed_score,
             freshness_boost: item.ranked.recommendation.freshness_boost,
+            feedback_penalty: item.ranked.recommendation.feedback_penalty,
+            reactivation_boost: item.ranked.recommendation.reactivation_boost,
             memory_adjustment: item.ranked.recommendation.memory_adjustment,
             profile_fit: item.ranked.value_assessment.profile_fit_score,
             visibility: item.ranked.recommendation.visibility.to_string(),
@@ -861,6 +879,62 @@ fn failures_for_ranked(ranked: &[RankedEvaluationSample<'_>]) -> Vec<EvaluationF
                 ),
             });
         }
+        if item
+            .sample
+            .expected
+            .min_reactivation_boost
+            .is_some_and(|min| item.ranked.recommendation.reactivation_boost < min)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "reactivation boost {} below expected minimum",
+                    item.ranked.recommendation.reactivation_boost
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .max_reactivation_boost
+            .is_some_and(|max| item.ranked.recommendation.reactivation_boost > max)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "reactivation boost {} above expected maximum",
+                    item.ranked.recommendation.reactivation_boost
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .min_feedback_penalty
+            .is_some_and(|min| item.ranked.recommendation.feedback_penalty < min)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "feedback penalty {} below expected minimum",
+                    item.ranked.recommendation.feedback_penalty
+                ),
+            });
+        }
+        if item
+            .sample
+            .expected
+            .max_feedback_penalty
+            .is_some_and(|max| item.ranked.recommendation.feedback_penalty > max)
+        {
+            failures.push(EvaluationFailure {
+                sample_id: item.sample.id.clone(),
+                reason: format!(
+                    "feedback penalty {} above expected maximum",
+                    item.ranked.recommendation.feedback_penalty
+                ),
+            });
+        }
         if item.sample.expected.reasons.is_empty() {
             failures.push(EvaluationFailure {
                 sample_id: item.sample.id.clone(),
@@ -1119,7 +1193,11 @@ impl EvaluationSample {
             last_prepared_at: (self.feedback.prepared_count > 0).then(|| timestamp.clone()),
             last_feedback_at: Some(timestamp),
             last_seen_issue_updated_at: Some(issue.updated_at.clone()),
-            last_seen_comments_count: Some(self.issue.comments_count),
+            last_seen_comments_count: Some(
+                self.feedback
+                    .last_seen_comments_count
+                    .unwrap_or(self.issue.comments_count),
+            ),
         };
         let mut states = HashMap::new();
         states.insert(state.issue_key.clone(), state);
@@ -1131,31 +1209,30 @@ impl EvaluationSample {
             return;
         }
         let task_class = fixture_task_class(self);
-        let adjustment = self
+        let outcomes = self
             .dispatch_outcomes
             .iter()
-            .filter(|outcome| outcome.approved)
-            .filter(|outcome| {
-                outcome
-                    .repo_full_name
-                    .as_deref()
-                    .is_none_or(|repo| repo == ranked.issue.repo_full_name)
+            .enumerate()
+            .map(|(index, outcome)| OutcomeFeedbackInput {
+                id: format!("{}:dispatch-outcome:{index}", self.id),
+                approved: outcome.approved,
+                issue_key: IssueKey::new(
+                    outcome
+                        .repo_full_name
+                        .clone()
+                        .unwrap_or_else(|| self.issue.repo_full_name.clone()),
+                    self.issue.number,
+                ),
+                repo_scope: outcome.repo_full_name.clone(),
+                agent_id: outcome.agent_id.clone(),
+                outcome_kind: outcome.outcome_kind.clone(),
+                failure_class: outcome.failure_class.clone(),
+                task_class: outcome.task_class.clone(),
+                validation_outcome: None,
             })
-            .filter(|outcome| {
-                outcome
-                    .task_class
-                    .as_deref()
-                    .is_none_or(|expected| expected == task_class)
-            })
-            .filter(|outcome| {
-                !matches!(
-                    outcome.failure_class.as_deref(),
-                    Some("policy_blocked" | "user_canceled")
-                )
-            })
-            .map(dispatch_outcome_weight)
-            .sum::<i32>()
-            .clamp(-80, 60);
+            .collect::<Vec<_>>();
+        let adjustment =
+            ranking_adjustment_for_candidate(&outcomes, &ranked.issue.repo_full_name, task_class);
         if adjustment == 0 {
             return;
         }
@@ -1170,15 +1247,6 @@ impl EvaluationSample {
             "Dispatch outcome replay adjustment: {sign}{adjustment}"
         ));
     }
-}
-
-fn dispatch_outcome_weight(outcome: &SampleDispatchOutcome) -> i32 {
-    let default = match outcome.outcome_kind.as_str() {
-        "fix_ready" | "completed_no_change" => 0.35,
-        "failed" | "blocked" => -0.45,
-        _ => 0.0,
-    };
-    (outcome.weight.unwrap_or(default) * 100.0).round() as i32
 }
 
 fn fixture_task_class(sample: &EvaluationSample) -> &'static str {

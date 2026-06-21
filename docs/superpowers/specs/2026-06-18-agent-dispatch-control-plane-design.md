@@ -145,7 +145,7 @@ Existing inbox and recommendation files remain readable. New dispatch state shou
 
 ## Issue Task Package
 
-`handoff.json` becomes one artifact inside a broader portable unit of work.
+`handoff.json` becomes one artifact inside a broader portable unit of work. The current portable unit is `IssueTaskPackage.version = 3`.
 
 ```text
 IssueTaskPackage
@@ -156,18 +156,26 @@ IssueTaskPackage
   workspace_policy
   context_pack
   validation_hints
+  reproduction_contract
+  success_criteria
+  change_budget
+  environment_contract
+  interaction_policy
+  session_context
   expected_outputs
   callback_policy
+  outcome_contract
 ```
 
 The package should be serializable as `issue_task_package.json`, with optional companion artifact files for large context sections. It should contain enough information for a native adapter or A2A recipient to understand the task without re-running discovery.
 
 `callback_policy` describes what Issue Finder expects back:
 
-- `fix_result.json` with summary, changed files, validation, residual risks, and suggested GitHub reply.
+- `fix_result.json` with summary, changed files, reproduction evidence, success criteria status, validation, residual risks, failure reason when applicable, session context, and suggested GitHub reply.
 - Optional patch artifact.
 - Optional PR link artifact.
 - Optional native session link artifact.
+- Optional validation log artifact.
 
 ## State Machines
 
@@ -329,12 +337,14 @@ The adapter stores Codex thread id as `agent_session_links.native_session_id`. I
 Dispatch prompt template:
 
 ```text
-You are receiving an Issue Finder task package.
-Goal: locate, reproduce if practical, and fix the GitHub issue.
+You are receiving an Issue Finder task package v3.
+Goal: follow the package contract to reproduce when practical, make a scoped fix, validate, and report the result.
 Read the package artifacts first.
-Respect workspace_policy.
-Return a FixResult artifact with summary, files changed, validation run,
-residual risks, and suggested GitHub reply.
+Respect workspace_policy, reproduction_contract, change_budget, environment_contract,
+interaction_policy, session_context, and outcome_contract.
+Return fix_result.json with reproduction evidence, success criteria status, files changed,
+validation run, residual risks, failure reason when applicable, session context,
+and suggested GitHub reply.
 ```
 
 The adapter must not bypass Codex's native approval and sandbox behavior. If Codex asks for user approval, Issue Finder records a `needs_user` run state and links to the native session.
@@ -347,10 +357,10 @@ Outbound mapping:
 
 ```text
 IssueTaskPackage -> A2A Task: fix_github_issue
-input artifact: issue_task_package.json
+input artifact: issue_task_package_v3.json
 input artifact: context_pack.zip or local artifact refs
 expected artifact: fix_result.json
-optional artifact: patch / pr_link / session_link
+optional artifact: patch / pr_link / session_link / validation_log
 ```
 
 Inbound mapping:
@@ -402,19 +412,18 @@ Memory event types:
 
 ```text
 positive_signal
-  User approved dispatch, completed fix, or marked issue high quality.
+  User approved dispatch or issue review.
 
 negative_signal
-  User rejected issue, canceled run, or marked recommendation noisy or unsuitable.
+  User rejected issue review or canceled/rejected dispatch approval.
 
 profile_adjustment_candidate
   Candidate profile change derived from long-term feedback.
-
-agent_performance_signal
-  Agent success, failure, runtime, or user intervention for a task class.
 ```
 
-Profile changes should remain reviewable by a user or main agent. Future profile tools can aggregate `memory_events` into proposed `[profile]` edits, but the first dispatch runtime should only record evidence and candidates.
+Dispatch outcome feedback is no longer interpreted by the dispatch runtime. Recorded outcomes are projected by the memory-owned typed projector into issue-quality, execution-friction, and agent-suitability priors before any approved memory hint can affect ranking or dispatch planning.
+
+Profile changes should remain reviewable by a user or main agent. Future profile tools can aggregate memory evidence into proposed `[profile]` edits, but dispatch runtime should only record dispatch facts.
 
 ## Safety and Approval Policy
 

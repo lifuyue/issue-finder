@@ -613,12 +613,14 @@ pub fn codex_app_server_startup_metadata(command: &str) -> Value {
 }
 
 pub fn dispatch_prompt() -> &'static str {
-    "You are receiving an Issue Finder task package.\n\
-Goal: locate, reproduce if practical, and fix the GitHub issue.\n\
+    "You are receiving an Issue Finder task package v3.\n\
+Goal: follow the package contract to reproduce when practical, make a scoped fix, validate, and report the result.\n\
 Read the package artifacts first.\n\
-Respect workspace_policy.\n\
-Return a FixResult artifact with summary, files changed, validation run,\n\
-residual risks, and suggested GitHub reply."
+Respect workspace_policy, reproduction_contract, change_budget, environment_contract,\n\
+interaction_policy, session_context, and outcome_contract.\n\
+Return fix_result.json with reproduction evidence, success criteria status, files changed,\n\
+validation run, residual risks, failure reason when applicable, session context,\n\
+and suggested GitHub reply."
 }
 
 fn mapping(capability: AgentCapabilityName, method: &'static str) -> CodexCapabilityMapping {

@@ -15,13 +15,15 @@ use super::model::{
     ApprovalType, CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity,
     DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass,
     DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType,
-    DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus,
-    GitHubInteractionType, IssueTask, IssueTaskPackage, IssueTaskStatus, MemoryEvent,
-    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
-    NewSessionTranscriptItem, SessionTranscriptItem, TranscriptPayloadStorage,
+    DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
+    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTask,
+    IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
+    NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
+    NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
+    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
+    SessionTranscriptItem, TranscriptPayloadStorage,
 };
+use super::task_package::IssueTaskPackage;
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -244,6 +246,18 @@ impl DispatchStore {
         Ok(issue_task)
     }
 
+    pub fn list_issue_tasks(&self) -> Result<Vec<IssueTask>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_key, repo_full_name, issue_number, title, url, status,
+                    priority, category, created_at, updated_at,
+                    current_package_artifact_id, profile_snapshot_artifact_id
+             FROM issue_tasks
+             ORDER BY updated_at DESC, id",
+        )?;
+        let rows = statement.query_map([], issue_task_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn set_issue_task_package_artifact(
         &self,
         issue_task_id: &str,
@@ -322,6 +336,22 @@ impl DispatchStore {
                 dispatch_run_from_row,
             )
             .with_context(|| format!("dispatch run {id} not found"))
+    }
+
+    pub fn list_dispatch_runs_for_issue_task(
+        &self,
+        issue_task_id: &str,
+    ) -> Result<Vec<DispatchRun>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
+                    created_at, started_at, completed_at, selected_session_link_id,
+                    result_artifact_id, failure_reason
+             FROM dispatch_runs
+             WHERE issue_task_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![issue_task_id], dispatch_run_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn set_dispatch_run_session(
@@ -505,6 +535,18 @@ impl DispatchStore {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn list_dispatch_run_outcomes(&self) -> Result<Vec<DispatchRunOutcome>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
+                    failure_detail, task_class, validation_outcome, result_artifact_id,
+                    metadata_json, recorded_at
+             FROM dispatch_run_outcomes
+             ORDER BY recorded_at, id",
+        )?;
+        let rows = statement.query_map([], dispatch_run_outcome_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn create_session_link(&self, input: NewAgentSessionLink) -> Result<AgentSessionLink> {
@@ -968,6 +1010,84 @@ impl DispatchStore {
         collect_rows(rows)
     }
 
+    pub fn create_github_interaction_decision(
+        &self,
+        input: NewGitHubInteractionDecision,
+    ) -> Result<GitHubInteractionDecision> {
+        let id = next_id("github-decision");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO github_interaction_decisions (
+                id, issue_task_id, run_id, decision_kind, interaction_type,
+                github_interaction_id, body_artifact_id, reason_code, reasons_json,
+                inputs_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                id,
+                input.issue_task_id,
+                input.run_id,
+                input.decision_kind.as_str(),
+                input.interaction_type.map(GitHubInteractionType::as_str),
+                input.github_interaction_id,
+                input.body_artifact_id,
+                input.reason_code,
+                json_text(&input.reasons_json)?,
+                json_text(&input.inputs_json)?,
+                created_at
+            ],
+        )?;
+        self.get_github_interaction_decision(&id)
+            .with_context(|| format!("github interaction decision {id} was not persisted"))
+    }
+
+    pub fn get_github_interaction_decision(&self, id: &str) -> Result<GitHubInteractionDecision> {
+        self.conn
+            .query_row(
+                "SELECT id, issue_task_id, run_id, decision_kind, interaction_type,
+                        github_interaction_id, body_artifact_id, reason_code, reasons_json,
+                        inputs_json, created_at
+                 FROM github_interaction_decisions
+                 WHERE id = ?1",
+                params![id],
+                github_interaction_decision_from_row,
+            )
+            .with_context(|| format!("github interaction decision {id} not found"))
+    }
+
+    pub fn list_github_interaction_decisions_for_issue_task(
+        &self,
+        issue_task_id: &str,
+    ) -> Result<Vec<GitHubInteractionDecision>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_task_id, run_id, decision_kind, interaction_type,
+                    github_interaction_id, body_artifact_id, reason_code, reasons_json,
+                    inputs_json, created_at
+             FROM github_interaction_decisions
+             WHERE issue_task_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows =
+            statement.query_map(params![issue_task_id], github_interaction_decision_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_github_interaction_decisions_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<GitHubInteractionDecision>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, issue_task_id, run_id, decision_kind, interaction_type,
+                    github_interaction_id, body_artifact_id, reason_code, reasons_json,
+                    inputs_json, created_at
+             FROM github_interaction_decisions
+             WHERE run_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![run_id], github_interaction_decision_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn create_approval_request(&self, input: NewApprovalRequest) -> Result<ApprovalRequest> {
         let id = next_id("approval");
         let created_at = now();
@@ -1308,7 +1428,6 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 CASE event_type
                     WHEN 'dispatch_approval_resolved' THEN 'dispatch_approval_resolved'
                     WHEN 'dispatch_outcome_recorded' THEN 'dispatch_outcome_recorded'
-                    WHEN 'dispatch_outcome_memory_ingest_failed' THEN 'dispatch_outcome_memory_ingest_failed'
                     WHEN 'dispatch_starting' THEN 'dispatch_starting'
                     WHEN 'dispatch_failed' THEN 'dispatch_failed'
                     WHEN 'session_synced' THEN 'session_synced'
@@ -1331,7 +1450,6 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                 'migration',
                 CASE
                     WHEN event_type = 'dispatch_failed' THEN 'error'
-                    WHEN event_type = 'dispatch_outcome_memory_ingest_failed' THEN 'warning'
                     ELSE 'info'
                 END,
                 run_id,
@@ -1490,6 +1608,24 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             FOREIGN KEY (body_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS github_interaction_decisions (
+            id TEXT PRIMARY KEY,
+            issue_task_id TEXT NOT NULL,
+            run_id TEXT,
+            decision_kind TEXT NOT NULL,
+            interaction_type TEXT,
+            github_interaction_id TEXT,
+            body_artifact_id TEXT,
+            reason_code TEXT NOT NULL,
+            reasons_json TEXT NOT NULL,
+            inputs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (github_interaction_id) REFERENCES github_interactions(id) ON DELETE SET NULL,
+            FOREIGN KEY (body_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS approval_requests (
             id TEXT PRIMARY KEY,
             run_id TEXT,
@@ -1563,6 +1699,8 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_dispatch_events_session ON dispatch_events(session_link_id, sequence);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_issue_task ON agent_artifacts(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_github_interactions_issue_task ON github_interactions(issue_task_id);
+        CREATE INDEX IF NOT EXISTS idx_github_interaction_decisions_issue_task ON github_interaction_decisions(issue_task_id);
+        CREATE INDEX IF NOT EXISTS idx_github_interaction_decisions_run ON github_interaction_decisions(run_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_failures_run ON dispatch_failures(run_id);
         CREATE INDEX IF NOT EXISTS idx_adapter_probe_agent ON adapter_probe_results(agent_id, capability, checked_at);
         CREATE INDEX IF NOT EXISTS idx_session_transcript_items_session ON session_transcript_items(session_link_id, item_index);
@@ -1748,6 +1886,32 @@ fn github_interaction_from_row(row: &Row<'_>) -> rusqlite::Result<GitHubInteract
         created_at: row.get(6)?,
         posted_at: row.get(7)?,
         error: row.get(8)?,
+    })
+}
+
+fn github_interaction_decision_from_row(
+    row: &Row<'_>,
+) -> rusqlite::Result<GitHubInteractionDecision> {
+    let decision_kind: String = row.get(3)?;
+    let interaction_type: Option<String> = row.get(4)?;
+    let reasons: String = row.get(8)?;
+    let inputs: String = row.get(9)?;
+    let interaction_type = match interaction_type {
+        Some(value) => Some(parse_enum(&value, GitHubInteractionType::parse_value)?),
+        None => None,
+    };
+    Ok(GitHubInteractionDecision {
+        id: row.get(0)?,
+        issue_task_id: row.get(1)?,
+        run_id: row.get(2)?,
+        decision_kind: parse_enum(&decision_kind, GitHubInteractionDecisionKind::parse_value)?,
+        interaction_type,
+        github_interaction_id: row.get(5)?,
+        body_artifact_id: row.get(6)?,
+        reason_code: row.get(7)?,
+        reasons_json: parse_json(&reasons)?,
+        inputs_json: parse_json(&inputs)?,
+        created_at: row.get(10)?,
     })
 }
 

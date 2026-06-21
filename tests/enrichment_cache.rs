@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -280,52 +280,67 @@ fn issue() -> GitHubIssue {
 }
 
 fn start_enrichment_server() -> (String, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let handle = thread::spawn(move || {
-        let started = Instant::now();
-        let mut last_request_at = Instant::now();
-        let mut served = 0usize;
-        while started.elapsed() < Duration::from_secs(5) {
-            if served >= 6 && last_request_at.elapsed() > Duration::from_millis(250) {
-                break;
-            }
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    last_request_at = Instant::now();
-                    let mut buffer = [0u8; 4096];
-                    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-                    let body = if request.starts_with("GET /repos/owner/repo/issues/12/comments") {
-                        comments_body()
-                    } else if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
-                        "[]".to_string()
-                    } else if request.starts_with("GET /repos/owner/repo/issues/12") {
-                        issue_body()
-                    } else if request.starts_with("GET /repos/owner/repo/stargazers") {
-                        stargazers_body()
-                    } else if request.starts_with("GET /repos/owner/repo/forks") {
-                        forks_body()
-                    } else if request.starts_with("GET /repos/owner/repo") {
-                        repo_body()
-                    } else {
-                        "{}".to_string()
-                    };
-                    write_response(&mut stream, &body);
-                    served += 1;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(_) => break,
-            }
+    start_json_server(6, |request| {
+        if request.starts_with("GET /repos/owner/repo/issues/12/comments") {
+            comments_body()
+        } else if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
+            "[]".to_string()
+        } else if request.starts_with("GET /repos/owner/repo/issues/12") {
+            issue_body()
+        } else if request.starts_with("GET /repos/owner/repo/stargazers") {
+            stargazers_body()
+        } else if request.starts_with("GET /repos/owner/repo/forks") {
+            forks_body()
+        } else if request.starts_with("GET /repos/owner/repo") {
+            repo_body()
+        } else {
+            "{}".to_string()
         }
-    });
-    (base_url, handle)
+    })
 }
 
 fn start_tail_sampling_server() -> (String, thread::JoinHandle<()>) {
+    start_json_server(7, |request| {
+        if request.starts_with("GET /repos/owner/repo/issues/12/comments") {
+            if request.contains("&page=1") {
+                comments_tail_page_body(0, 30)
+            } else {
+                recent_comment_page_body()
+            }
+        } else if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
+            "[]".to_string()
+        } else if request.starts_with("GET /repos/owner/repo/issues/12") {
+            tail_issue_body()
+        } else if request.starts_with("GET /repos/owner/repo/stargazers") {
+            if request.contains("&page=1") {
+                stargazers_tail_page_body()
+            } else {
+                recent_stargazer_page_body()
+            }
+        } else if request.starts_with("GET /repos/owner/repo/forks") {
+            "[]".to_string()
+        } else if request.starts_with("GET /repos/owner/repo") {
+            tail_repo_body()
+        } else {
+            "{}".to_string()
+        }
+    })
+}
+
+fn start_timeline_completion_server() -> (String, thread::JoinHandle<()>) {
+    start_json_server(1, |request| {
+        if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
+            open_pr_timeline_body()
+        } else {
+            "{}".to_string()
+        }
+    })
+}
+
+fn start_json_server<F>(minimum_requests: usize, responder: F) -> (String, thread::JoinHandle<()>)
+where
+    F: Fn(&str) -> String + Send + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
@@ -333,41 +348,18 @@ fn start_tail_sampling_server() -> (String, thread::JoinHandle<()>) {
         let started = Instant::now();
         let mut last_request_at = Instant::now();
         let mut served = 0usize;
-        while started.elapsed() < Duration::from_secs(5) {
-            if served >= 7 && last_request_at.elapsed() > Duration::from_millis(250) {
+        while started.elapsed() < Duration::from_secs(10) {
+            if served >= minimum_requests && last_request_at.elapsed() > Duration::from_secs(1) {
                 break;
             }
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    last_request_at = Instant::now();
-                    let mut buffer = [0u8; 4096];
-                    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-                    let body = if request.starts_with("GET /repos/owner/repo/issues/12/comments") {
-                        if request.contains("&page=1") {
-                            comments_tail_page_body(0, 30)
-                        } else {
-                            recent_comment_page_body()
-                        }
-                    } else if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
-                        "[]".to_string()
-                    } else if request.starts_with("GET /repos/owner/repo/issues/12") {
-                        tail_issue_body()
-                    } else if request.starts_with("GET /repos/owner/repo/stargazers") {
-                        if request.contains("&page=1") {
-                            stargazers_tail_page_body()
-                        } else {
-                            recent_stargazer_page_body()
-                        }
-                    } else if request.starts_with("GET /repos/owner/repo/forks") {
-                        "[]".to_string()
-                    } else if request.starts_with("GET /repos/owner/repo") {
-                        tail_repo_body()
-                    } else {
-                        "{}".to_string()
-                    };
-                    write_response(&mut stream, &body);
-                    served += 1;
+                    if let Some(request) = read_http_request(&mut stream) {
+                        last_request_at = Instant::now();
+                        let body = responder(&request);
+                        write_response(&mut stream, &body);
+                        served += 1;
+                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
@@ -379,40 +371,24 @@ fn start_tail_sampling_server() -> (String, thread::JoinHandle<()>) {
     (base_url, handle)
 }
 
-fn start_timeline_completion_server() -> (String, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let handle = thread::spawn(move || {
-        let started = Instant::now();
-        let mut last_request_at = Instant::now();
-        let mut served = 0usize;
-        while started.elapsed() < Duration::from_secs(5) {
-            if served >= 1 && last_request_at.elapsed() > Duration::from_millis(250) {
-                break;
-            }
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    last_request_at = Instant::now();
-                    let mut buffer = [0u8; 4096];
-                    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-                    let body = if request.starts_with("GET /repos/owner/repo/issues/12/timeline") {
-                        open_pr_timeline_body()
-                    } else {
-                        "{}".to_string()
-                    };
-                    write_response(&mut stream, &body);
-                    served += 1;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(_) => break,
-            }
+fn read_http_request(stream: &mut TcpStream) -> Option<String> {
+    stream.set_read_timeout(Some(Duration::from_secs(1))).ok()?;
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    loop {
+        let bytes_read = stream.read(&mut buffer).ok()?;
+        if bytes_read == 0 {
+            return None;
         }
-    });
-    (base_url, handle)
+        request.extend_from_slice(&buffer[..bytes_read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if request.len() > 16 * 1024 {
+            return None;
+        }
+    }
+    Some(String::from_utf8_lossy(&request).into_owned())
 }
 
 fn repo_body() -> String {

@@ -31,7 +31,7 @@ inbox/<id>/
         refs.json
 ```
 
-`handoff.json` remains canonical for prepared inbox items. The dispatch control plane can also persist the same handoff as an `IssueTaskPackage` artifact alongside dispatch runs, session links, approvals, events, and result artifacts. The preparation runtime fields are additive:
+`handoff.json` remains canonical for prepared inbox items. The dispatch control plane imports an approved handoff into an `IssueTaskPackage` v3 artifact alongside dispatch runs, session links, approvals, events, and result artifacts. Package v3 wraps the handoff with typed execution-agent contracts for reproduction, success criteria, change budget, environment, interaction policy, session resumability, and outcome reporting. The preparation runtime fields remain additive:
 
 - `agent_policy`: same content as `agent-policy.json`
 - `probe_pack`: same content as `probe.json`

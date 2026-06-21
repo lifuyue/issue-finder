@@ -599,11 +599,41 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
     );
     assert_eq!(
         review_approve.structured_content["issueReviewApproval"]["package"]["version"],
-        2
+        3
+    );
+    let package = &review_approve.structured_content["issueReviewApproval"]["package"];
+    assert_eq!(package["source"]["packageVersion"], 3);
+    assert_eq!(package["reproduction_contract"]["issueBodyAvailable"], true);
+    assert!(package["reproduction_contract"]["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value
+            .as_str()
+            .unwrap()
+            .contains("State whether reproduction was attempted")));
+    assert_eq!(
+        package["change_budget"]["preferredFiles"][0]["path"],
+        "src/main.rs"
     );
     assert_eq!(
-        review_approve.structured_content["issueReviewApproval"]["package"]
-            ["user_profile_snapshot"]["snapshot"]["profile"]["techStack"],
+        package["environment_contract"]["workspace"]["branch"],
+        "issue-finder/321-fix-rust-cli-parser-regression"
+    );
+    assert_eq!(
+        package["session_context"]["resumability"]["requiredResultArtifact"],
+        "fix_result.json"
+    );
+    assert!(package["outcome_contract"]["requiredFields"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("reproduction")));
+    assert!(package["outcome_contract"]["requiredFields"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("successCriteria")));
+    assert_eq!(
+        package["user_profile_snapshot"]["snapshot"]["profile"]["techStack"],
         serde_json::json!(["Rust", "TypeScript"])
     );
     assert_eq!(

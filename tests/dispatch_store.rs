@@ -6,11 +6,12 @@ use issue_finder::dispatch::{
     CapabilityStatus, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
     DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
     DispatchStore, DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
-    GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
-    IssueTaskStatus, MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
-    NewSessionTranscriptItem, TranscriptPayloadStorage,
+    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType,
+    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType,
+    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewAgentSessionLink,
+    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
+    NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision, NewIssueTask,
+    NewMemoryEvent, NewSessionTranscriptItem, TranscriptPayloadStorage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -174,6 +175,7 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     let package_artifact = store
         .write_task_package_artifact(&task.id, &package)
         .unwrap();
+    assert_eq!(package.version, 3);
     let packaged_task = store.get_issue_task(&task.id).unwrap();
     assert_eq!(
         packaged_task.current_package_artifact_id,
@@ -260,6 +262,38 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
             .unwrap()
             .len(),
         1
+    );
+    let github_decision = store
+        .create_github_interaction_decision(NewGitHubInteractionDecision {
+            issue_task_id: task.id.clone(),
+            run_id: Some(run.id.clone()),
+            decision_kind: GitHubInteractionDecisionKind::NoComment,
+            interaction_type: None,
+            github_interaction_id: None,
+            body_artifact_id: None,
+            reason_code: "tracking_default_silence".to_string(),
+            reasons_json: json!(["Tracking comments are silent by default."]),
+            inputs_json: json!({ "issueKey": task.issue_key }),
+        })
+        .unwrap();
+    assert_eq!(
+        github_decision.decision_kind,
+        GitHubInteractionDecisionKind::NoComment
+    );
+    assert_eq!(github_decision.run_id.as_deref(), Some(run.id.as_str()));
+    assert_eq!(
+        store
+            .list_github_interaction_decisions_for_issue_task(&task.id)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .list_github_interaction_decisions_for_run(&run.id)
+            .unwrap()[0]
+            .reason_code,
+        "tracking_default_silence"
     );
 
     let memory = store

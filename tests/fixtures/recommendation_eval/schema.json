@@ -130,7 +130,8 @@
         "preparedCount": { "type": "integer", "minimum": 0 },
         "dismissed": { "type": "boolean" },
         "done": { "type": "boolean" },
-        "feedbackAgeDays": { "type": "integer", "minimum": 0 }
+        "feedbackAgeDays": { "type": "integer", "minimum": 0 },
+        "lastSeenCommentsCount": { "type": "integer", "minimum": 0 }
       }
     },
     "dispatchOutcome": {
@@ -140,6 +141,7 @@
       "properties": {
         "approved": { "type": "boolean" },
         "repoFullName": { "type": "string" },
+        "agentId": { "type": "string" },
         "outcomeKind": {
           "type": "string",
           "enum": ["fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"]
@@ -169,8 +171,7 @@
             "dependency_upgrade",
             "unknown_task"
           ]
-        },
-        "weight": { "type": "number", "minimum": -1, "maximum": 1 }
+        }
       }
     },
     "expected": {
@@ -193,6 +194,10 @@
         "mustNotHaveRiskTags": { "type": "array", "items": { "type": "string" } },
         "minMemoryAdjustment": { "type": "integer", "minimum": -80, "maximum": 60 },
         "maxMemoryAdjustment": { "type": "integer", "minimum": -80, "maximum": 60 },
+        "minReactivationBoost": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "maxReactivationBoost": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "minFeedbackPenalty": { "type": "integer", "minimum": 0 },
+        "maxFeedbackPenalty": { "type": "integer", "minimum": 0 },
         "reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } }
       }
     }
