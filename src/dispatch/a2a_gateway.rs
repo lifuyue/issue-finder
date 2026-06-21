@@ -6,10 +6,12 @@ use serde_json::{json, Value};
 
 use crate::github::IssueRef;
 
+use super::events::dispatch_run_event;
 use super::model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, ApprovalRequest,
-    ApprovalStatus, ApprovalType, DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus,
-    NewAgentEvent, NewApprovalRequest, NewArtifact,
+    ApprovalStatus, ApprovalType, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
+    DispatchRun, DispatchRunOutcome, DispatchRunStatus, IssueTask, IssueTaskStatus,
+    NewApprovalRequest, NewArtifact,
 };
 use super::store::DispatchStore;
 
@@ -38,6 +40,7 @@ pub struct A2aApprovalResult {
 pub struct A2aResultImport {
     pub run: DispatchRun,
     pub artifact: AgentArtifact,
+    pub outcome: Option<DispatchRunOutcome>,
 }
 
 pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult> {
@@ -151,17 +154,17 @@ pub fn import_result(
         },
         contents,
     )?;
-    store.append_agent_event(NewAgentEvent {
-        run_id: Some(run.id.clone()),
-        session_link_id: run.selected_session_link_id.clone(),
-        event_type: "a2a_result_imported".to_string(),
-        native_event_id: None,
-        payload_json: json!({
+    store.append_dispatch_event(dispatch_run_event(
+        &run,
+        DispatchEventKind::A2aResultImported,
+        DispatchEventSource::A2a,
+        DispatchEventSeverity::Info,
+        json!({
             "artifactId": artifact.id,
             "kind": kind,
             "sourcePath": path.to_string_lossy()
         }),
-    })?;
+    ))?;
 
     if kind == "fix_result" {
         store.set_dispatch_run_result_artifact(&run.id, &artifact.id)?;
@@ -174,7 +177,11 @@ pub fn import_result(
         store.update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
     }
 
-    Ok(A2aResultImport { run, artifact })
+    Ok(A2aResultImport {
+        run,
+        artifact,
+        outcome: None,
+    })
 }
 
 fn resolve_send(

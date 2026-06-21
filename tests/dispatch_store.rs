@@ -2,11 +2,15 @@ use std::fs;
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, ApprovalType, CapabilityStatus,
-    DispatchRunStatus, DispatchStore, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType, NewAgentCapability,
-    NewAgentEvent, NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact,
-    NewDispatchRun, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    AdapterProbeStatus, AgentCapabilityName, AgentSessionStatus, ApprovalStatus, ApprovalType,
+    CapabilityStatus, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
+    DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
+    DispatchStore, DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
+    GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
+    IssueTaskStatus, MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
+    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
+    NewSessionTranscriptItem, TranscriptPayloadStorage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -114,16 +118,28 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     assert!(run.started_at.is_some());
 
     let event = store
-        .append_agent_event(NewAgentEvent {
+        .append_dispatch_event(NewDispatchEvent {
             run_id: Some(run.id.clone()),
             session_link_id: Some(session.id.clone()),
-            event_type: "thread_started".to_string(),
+            issue_task_id: Some(task.id.clone()),
+            event_kind: DispatchEventKind::SessionStarted,
+            subject_type: DispatchSubjectType::Session,
+            subject_id: Some(session.id.clone()),
+            source: DispatchEventSource::Adapter,
+            severity: DispatchEventSeverity::Info,
+            correlation_id: Some(run.id.clone()),
+            causation_id: None,
             native_event_id: Some("native_event_1".to_string()),
             payload_json: json!({ "status": "ok" }),
         })
         .unwrap();
     assert_eq!(event.payload_json["status"], "ok");
-    assert_eq!(store.list_agent_events_for_run(&run.id).unwrap().len(), 1);
+    assert_eq!(event.event_kind, DispatchEventKind::SessionStarted);
+    assert_eq!(event.sequence, 1);
+    assert_eq!(
+        store.list_dispatch_events_for_run(&run.id).unwrap().len(),
+        1
+    );
 
     let artifact = store
         .write_artifact(
@@ -263,6 +279,70 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         1
     );
 
+    let failure = store
+        .record_dispatch_failure(NewDispatchFailure {
+            run_id: run.id.clone(),
+            phase: "execute".to_string(),
+            failure_class: DispatchFailureClass::Adapter,
+            code: "adapter_error".to_string(),
+            retryable: true,
+            message: "codex app-server unavailable".to_string(),
+            details_json: json!({ "method": "turn/start" }),
+        })
+        .unwrap();
+    assert_eq!(failure.failure_class, DispatchFailureClass::Adapter);
+    assert_eq!(
+        store.list_dispatch_failures_for_run(&run.id).unwrap()[0].code,
+        "adapter_error"
+    );
+
+    let probe = store
+        .record_adapter_probe(NewAdapterProbeResult {
+            agent_id: agent.id.clone(),
+            adapter: "codex_app_server".to_string(),
+            capability: AgentCapabilityName::StartSession,
+            method: Some("thread/start".to_string()),
+            status: AdapterProbeStatus::Supported,
+            protocol_version: Some("codex_app_server_json_rpc".to_string()),
+            expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+            error_code: None,
+            details_json: json!({ "source": "test" }),
+        })
+        .unwrap();
+    assert_eq!(probe.status, AdapterProbeStatus::Supported);
+    assert_eq!(
+        store
+            .latest_adapter_probe(&agent.id, AgentCapabilityName::StartSession)
+            .unwrap()
+            .unwrap()
+            .id,
+        probe.id
+    );
+
+    let replay_item = store
+        .append_session_transcript_item(NewSessionTranscriptItem {
+            session_link_id: session.id.clone(),
+            turn_id: Some("turn_1".to_string()),
+            item_index: 0,
+            item_type: "message".to_string(),
+            text: Some("hello".to_string()),
+            payload_artifact_id: None,
+            payload_storage: TranscriptPayloadStorage::Inline,
+            metadata_json: json!({}),
+        })
+        .unwrap();
+    assert_eq!(
+        replay_item.payload_storage,
+        TranscriptPayloadStorage::Inline
+    );
+    assert_eq!(
+        store
+            .list_session_transcript_items(&session.id)
+            .unwrap()
+            .len(),
+        1
+    );
+
     let active_session = store
         .update_session_link_status(&session.id, AgentSessionStatus::Active)
         .unwrap();
@@ -279,6 +359,100 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         .update_issue_task_status(&task.id, IssueTaskStatus::Done)
         .unwrap();
     assert_eq!(done_task.status, IssueTaskStatus::Done);
+}
+
+#[test]
+fn dispatch_store_migrates_v1_agent_events_to_typed_dispatch_events() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    std::fs::create_dir_all(paths.dispatch_db_path().parent().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(paths.dispatch_db_path()).unwrap();
+    conn.execute_batch(
+        r#"
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE agent_profiles (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            adapter TEXT NOT NULL,
+            config_json TEXT NOT NULL,
+            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+        );
+        CREATE TABLE issue_tasks (
+            id TEXT PRIMARY KEY,
+            issue_key TEXT NOT NULL UNIQUE,
+            repo_full_name TEXT NOT NULL,
+            issue_number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority INTEGER,
+            category TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            current_package_artifact_id TEXT,
+            profile_snapshot_artifact_id TEXT
+        );
+        CREATE TABLE dispatch_runs (
+            id TEXT PRIMARY KEY,
+            issue_task_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            requested_by TEXT NOT NULL,
+            approval_state TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            selected_session_link_id TEXT,
+            result_artifact_id TEXT,
+            failure_reason TEXT
+        );
+        CREATE TABLE agent_session_links (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            native_session_id TEXT NOT NULL,
+            issue_task_id TEXT,
+            display_name TEXT NOT NULL,
+            goal TEXT,
+            status TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            archived_at TEXT
+        );
+        CREATE TABLE agent_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT,
+            session_link_id TEXT,
+            event_type TEXT NOT NULL,
+            native_event_id TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO agent_profiles VALUES ('codex','codex','Codex','codex_app_server','{}',1);
+        INSERT INTO issue_tasks VALUES ('task-1','owner/repo#1','owner/repo',1,'Fix bug','https://github.com/owner/repo/issues/1','discovered',NULL,NULL,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL,NULL);
+        INSERT INTO dispatch_runs VALUES ('run-1','task-1','codex','running','test','approved','2026-01-01T00:00:00Z',NULL,NULL,NULL,NULL,NULL);
+        INSERT INTO agent_events VALUES ('event-1','run-1',NULL,'dispatch_starting',NULL,'{"status":"ok"}','2026-01-01T00:00:01Z');
+        PRAGMA user_version = 1;
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = DispatchStore::open(paths.clone()).unwrap();
+    let events = store.list_dispatch_events_for_run("run-1").unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_kind, DispatchEventKind::DispatchStarting);
+    assert_eq!(events[0].source, DispatchEventSource::Migration);
+    let conn = rusqlite::Connection::open(paths.dispatch_db_path()).unwrap();
+    let legacy_table: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_events'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(legacy_table, None);
 }
 
 #[test]
@@ -339,6 +513,85 @@ fn artifact_write_cleans_file_when_database_insert_fails() {
         .unwrap_err();
     assert!(error.to_string().contains("FOREIGN KEY"));
     assert_eq!(count_files(&paths.dispatch_artifacts_dir()), 0);
+}
+
+#[test]
+fn dispatch_store_persists_outcomes_idempotently_and_rejects_conflicts() {
+    let dir = tempdir().unwrap();
+    let store = DispatchStore::open(test_paths(dir.path())).unwrap();
+    seed_agent(&store);
+    let task = store
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 99,
+            title: "Fix parser panic".to_string(),
+            url: "https://github.com/owner/repo/issues/99".to_string(),
+            status: IssueTaskStatus::UserApproved,
+            priority: Some(10),
+            category: Some("high_value_ready".to_string()),
+        })
+        .unwrap();
+    let run = store
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id,
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Running,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_session_link_id: None,
+        })
+        .unwrap();
+    let input = NewDispatchRunOutcome {
+        run_id: run.id.clone(),
+        idempotency_key: "outcome-key-1".to_string(),
+        outcome_kind: DispatchOutcomeKind::Failed,
+        failure_class: Some(DispatchOutcomeFailureClass::ValidationFailed),
+        failure_detail: Some("cargo test still fails".to_string()),
+        task_class: Some(DispatchTaskClass::RustCliPanic),
+        validation_outcome: Some(DispatchValidationOutcome::Failed),
+        result_artifact_id: None,
+        metadata_json: json!({ "source": "test" }),
+    };
+
+    let first = store.record_dispatch_run_outcome(input.clone()).unwrap();
+    let second = store.record_dispatch_run_outcome(input).unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(
+        store
+            .find_dispatch_run_outcome_by_run(&run.id)
+            .unwrap()
+            .unwrap()
+            .outcome_kind,
+        DispatchOutcomeKind::Failed
+    );
+    let conflict = store
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
+            run_id: run.id,
+            idempotency_key: "outcome-key-1".to_string(),
+            outcome_kind: DispatchOutcomeKind::FixReady,
+            failure_class: None,
+            failure_detail: None,
+            task_class: Some(DispatchTaskClass::RustCliPanic),
+            validation_outcome: Some(DispatchValidationOutcome::Passed),
+            result_artifact_id: None,
+            metadata_json: json!({ "source": "test" }),
+        })
+        .unwrap_err();
+    assert!(conflict.to_string().contains("already has outcome"));
+}
+
+fn seed_agent(store: &DispatchStore) {
+    store
+        .create_agent_profile(NewAgentProfile {
+            id: Some("codex".to_string()),
+            kind: "codex".to_string(),
+            display_name: "Codex".to_string(),
+            adapter: "codex_app_server".to_string(),
+            config_json: json!({}),
+            enabled: true,
+        })
+        .unwrap();
 }
 
 fn test_paths(root: &Path) -> IssueFinderPaths {

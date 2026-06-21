@@ -4,9 +4,9 @@ use issue_finder::dispatch::adapters::{
 };
 use issue_finder::dispatch::execution::execute_approved_dispatch;
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus,
-    DispatchProposalRequest, DispatchRunStatus, DispatchRuntime, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability, NewAgentProfile,
+    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchEventKind,
+    DispatchFailureClass, DispatchProposalRequest, DispatchRunStatus, DispatchRuntime,
+    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability, NewAgentProfile,
     NewAgentSessionLink, NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
@@ -65,15 +65,15 @@ fn execution_starts_new_native_session_after_approval() {
         .dispatch_events(&proposal.run.id)
         .unwrap()
         .into_iter()
-        .map(|event| event.event_type)
+        .map(|event| event.event_kind)
         .collect::<Vec<_>>();
     assert_eq!(
         event_types,
         vec![
-            "dispatch_approval_resolved",
-            "dispatch_starting",
-            "session_started",
-            "turn_started"
+            DispatchEventKind::DispatchApprovalResolved,
+            DispatchEventKind::DispatchStarting,
+            DispatchEventKind::SessionStarted,
+            DispatchEventKind::TurnStarted
         ]
     );
     assert_eq!(
@@ -235,7 +235,7 @@ fn dispatch_proposal_auto_imports_ready_handoff_from_inbox() {
     upsert_ready(&paths, &issue, 91, &written).unwrap();
 
     let runtime = DispatchRuntime::open(paths).unwrap();
-    let proposal = runtime
+    let error = runtime
         .propose_dispatch(DispatchProposalRequest {
             issue: "owner/repo#458".to_string(),
             agent_id: "codex".to_string(),
@@ -243,20 +243,26 @@ fn dispatch_proposal_auto_imports_ready_handoff_from_inbox() {
             selected_session_link_id: None,
             new_session: true,
         })
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(proposal.status, "pending_approval");
-    assert_eq!(proposal.issue_task.issue_key, "owner/repo#458");
-    assert!(proposal.issue_task.current_package_artifact_id.is_some());
+    assert!(error
+        .to_string()
+        .contains("is pending issue review approval"));
+    let issue_task = runtime
+        .store()
+        .get_issue_task_by_key("owner/repo#458")
+        .unwrap();
+    assert_eq!(issue_task.issue_key, "owner/repo#458");
+    assert!(issue_task.current_package_artifact_id.is_none());
     let artifact_kinds = runtime
         .store()
-        .list_artifacts_for_issue_task(&proposal.issue_task.id)
+        .list_artifacts_for_issue_task(&issue_task.id)
         .unwrap()
         .into_iter()
         .map(|artifact| artifact.kind)
         .collect::<Vec<_>>();
     assert!(artifact_kinds.contains(&"handoff_json".to_string()));
-    assert!(artifact_kinds.contains(&"issue_task_package".to_string()));
+    assert!(!artifact_kinds.contains(&"issue_task_package".to_string()));
     assert!(artifact_kinds.contains(&"user_profile_snapshot".to_string()));
 }
 
@@ -284,8 +290,9 @@ fn handoff_import_is_idempotent_for_same_inbox_item() {
 
     assert_eq!(second.issue_task.id, first.issue_task.id);
     assert_eq!(second.handoff_artifact.id, first.handoff_artifact.id);
-    assert_eq!(second.package_artifact.id, first.package_artifact.id);
-    assert_eq!(second.package, first.package);
+    assert_eq!(second.approval_request.id, first.approval_request.id);
+    assert_eq!(second.package_artifact, None);
+    assert_eq!(second.package, None);
     assert_eq!(artifacts_after_second.len(), artifacts_after_first.len());
 }
 
@@ -386,6 +393,57 @@ fn execution_requires_approved_dispatch() {
 }
 
 #[test]
+fn execution_records_structured_failure_and_trace_timeline() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths).unwrap();
+    create_packaged_task(&runtime, 790);
+    let proposal = runtime
+        .propose_dispatch(DispatchProposalRequest {
+            issue: "owner/repo#790".to_string(),
+            agent_id: "codex".to_string(),
+            requested_by: "test".to_string(),
+            selected_session_link_id: None,
+            new_session: true,
+        })
+        .unwrap();
+    runtime
+        .resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)
+        .unwrap();
+
+    let mut adapter = FakeNativeAdapter {
+        fail_start_turn: true,
+        ..FakeNativeAdapter::default()
+    };
+    let error =
+        execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id).unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("codex app-server adapter unavailable"));
+    let run = runtime.store().get_dispatch_run(&proposal.run.id).unwrap();
+    assert_eq!(run.status, DispatchRunStatus::Failed);
+    let failures = runtime
+        .store()
+        .list_dispatch_failures_for_run(&proposal.run.id)
+        .unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].failure_class, DispatchFailureClass::Adapter);
+    let trace = runtime.dispatch_trace(&proposal.run.id).unwrap();
+    assert_eq!(trace.failures.len(), 1);
+    assert!(trace
+        .timeline
+        .iter()
+        .any(|item| item.kind == "failure" && item.summary.contains("adapter_error")));
+    assert!(runtime
+        .dispatch_timeline(&proposal.run.id)
+        .unwrap()
+        .items
+        .iter()
+        .any(|item| item.kind == "event" && item.summary == "dispatch_failed"));
+}
+
+#[test]
 fn dispatch_approval_marks_issue_task_dispatched() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -409,6 +467,9 @@ fn dispatch_approval_marks_issue_task_dispatched() {
         runtime.store().get_issue_task(&task.id).unwrap().status,
         IssueTaskStatus::Dispatched
     );
+    let status = runtime.dispatch_status(&proposal.run.id).unwrap();
+    assert_eq!(status.approval_latencies.len(), 1);
+    assert!(status.approval_latencies[0].latency_ms.is_some());
 }
 
 #[test]
@@ -622,6 +683,7 @@ fn test_paths(root: &std::path::Path) -> IssueFinderPaths {
 struct FakeNativeAdapter {
     calls: Vec<String>,
     turn_status: Option<String>,
+    fail_start_turn: bool,
 }
 
 impl NativeExecutionAdapter for FakeNativeAdapter {
@@ -694,6 +756,9 @@ impl NativeExecutionAdapter for FakeNativeAdapter {
     fn adapter_start_turn(&mut self, native_session_id: &str, prompt: &str) -> Result<AdapterTurn> {
         self.calls.push(format!("start_turn:{native_session_id}"));
         assert!(prompt.contains("Task package artifact id:"));
+        if self.fail_start_turn {
+            anyhow::bail!("codex app-server adapter unavailable");
+        }
         Ok(AdapterTurn {
             native_turn_id: "turn_1".to_string(),
             status: Some(

@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    ApprovalStatus, ApprovalType, DispatchRunStatus, DispatchRuntime, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, NewDispatchRun, NewIssueTask,
+    ApprovalStatus, ApprovalType, DispatchEventKind, DispatchOutcomeKind, DispatchRunStatus,
+    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType,
+    NewDispatchRun, NewIssueTask,
 };
 use issue_finder::paths::IssueFinderPaths;
 use tempfile::tempdir;
@@ -85,10 +86,18 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
             "fix_result",
             "application/json",
             Some(DispatchRunStatus::Completed),
+            None,
         )
         .unwrap();
 
     assert_eq!(imported.run.status, DispatchRunStatus::Completed);
+    assert_eq!(
+        imported
+            .outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome_kind),
+        Some(DispatchOutcomeKind::FixReady)
+    );
     assert_eq!(
         imported.run.result_artifact_id.as_deref(),
         Some(imported.artifact.id.as_str())
@@ -97,13 +106,27 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
         runtime.store().get_issue_task(&task.id).unwrap().status,
         IssueTaskStatus::FixReady
     );
-    let events = runtime.store().list_agent_events_for_run(&run.id).unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_type, "a2a_result_imported");
+    let events = runtime
+        .store()
+        .list_dispatch_events_for_run(&run.id)
+        .unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].event_kind, DispatchEventKind::A2aResultImported);
+    assert_eq!(
+        events[1].event_kind,
+        DispatchEventKind::DispatchOutcomeRecorded
+    );
     assert_eq!(
         events[0].payload_json["artifactId"].as_str(),
         Some(imported.artifact.id.as_str())
     );
+    let memory = runtime
+        .store()
+        .list_memory_events_for_issue_task(&task.id)
+        .unwrap();
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0].event_type, MemoryEventType::PositiveSignal);
+    assert_eq!(memory[0].source, "dispatch_outcome");
 }
 
 fn create_packaged_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::IssueTask {

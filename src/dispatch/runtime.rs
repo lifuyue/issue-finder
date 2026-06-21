@@ -12,19 +12,26 @@ use super::a2a_gateway::{self, A2aApprovalResult, A2aExportResult, A2aResultImpo
 use super::adapters::codex_app_server::{
     codex_capability_mappings, default_codex_app_server_startup_metadata,
 };
+use super::capability_probe::{probe_agent, AgentProbeReport};
+use super::events::dispatch_run_event;
 use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
 use super::github_projection::{
     self, GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentWriter, GitHubPostResult,
     ReqwestGitHubCommentWriter,
 };
 use super::memory::record_dispatch_approval_signal;
+use super::memory::{ingest_dispatch_outcome_memory, DispatchOutcomeMemoryIngest};
 use super::model::{
-    AgentArtifact, AgentCapability, AgentCapabilityName, AgentEvent, AgentProfile,
-    AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
-    CapabilityStatus, DispatchRun, DispatchRunStatus, GitHubInteraction, IssueTaskStatus,
-    NewAgentCapability, NewAgentEvent, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
+    AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, AgentSessionLink,
+    AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus,
+    DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
+    DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRun, DispatchRunOutcome,
+    DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction,
+    IssueTaskStatus, NewAgentCapability, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
+    NewDispatchRunOutcome, PolicyAction, SessionTranscriptItem,
 };
-use super::packaging::{self, PackageImportResult};
+use super::packaging::{self, IssueReviewDetail, IssueReviewResolution, PackageImportResult};
+use super::policy::{classify_action, ensure_capability_preconditions};
 use super::session_approvals::{
     approve_session_mutation_with_adapter, pending_session_mutation, reject_session_mutation,
     request_session_archive, request_session_fork, request_session_rename, PendingSessionMutation,
@@ -35,6 +42,10 @@ use super::session_ops::{
     SessionsSyncRequest, SessionsSyncResult,
 };
 use super::store::DispatchStore;
+use super::timeline::{
+    approval_latency, dispatch_timeline, dispatch_trace, ApprovalLatency, DispatchTimeline,
+    DispatchTrace,
+};
 
 pub struct DispatchRuntime {
     store: DispatchStore,
@@ -63,7 +74,9 @@ pub struct DispatchStatusSnapshot {
     pub agent: AgentProfile,
     pub selected_session: Option<AgentSessionLink>,
     pub approval_requests: Vec<ApprovalRequest>,
+    pub approval_latencies: Vec<ApprovalLatency>,
     pub artifacts: Vec<AgentArtifact>,
+    pub failures: Vec<DispatchFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -80,6 +93,37 @@ pub struct DispatchProposal {
 pub struct DispatchApprovalResolution {
     pub run: DispatchRun,
     pub approval_request: ApprovalRequest,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchOutcomeRecordResult {
+    pub run: DispatchRun,
+    pub issue_task: super::model::IssueTask,
+    pub outcome: DispatchRunOutcome,
+    pub memory_ingest: Option<DispatchOutcomeMemoryIngestView>,
+    pub memory_ingest_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchOutcomeMemoryIngestView {
+    pub dispatch_memory_event_id: String,
+    pub memory_raw_event_ids: Vec<String>,
+    pub memory_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchOutcomeRecordRequest {
+    pub run_id: String,
+    pub idempotency_key: Option<String>,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchOutcomeFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,8 +216,12 @@ impl DispatchRuntime {
         &self,
         session_link_id: &str,
     ) -> Result<SessionTranscriptResult> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ReadTranscript)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ReadSessionTranscript)?;
         read_codex_session_transcript(&self.store, session_link_id)
+    }
+
+    pub fn session_replay(&self, session_link_id: &str) -> Result<Vec<SessionTranscriptItem>> {
+        self.store.list_session_transcript_items(session_link_id)
     }
 
     pub fn rename_session(
@@ -184,17 +232,17 @@ impl DispatchRuntime {
         if display_name.trim().is_empty() {
             anyhow::bail!("session display name cannot be empty");
         }
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::RenameSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?;
         request_session_rename(&self.store, session_link_id, display_name)
     }
 
     pub fn archive_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ArchiveSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?;
         request_session_archive(&self.store, session_link_id)
     }
 
     pub fn fork_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?;
+        self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?;
         request_session_fork(&self.store, session_link_id)
     }
 
@@ -206,17 +254,13 @@ impl DispatchRuntime {
         match &mutation {
             PendingSessionMutation::Rename {
                 session_link_id, ..
-            } => self.ensure_codex_session_adapter(
-                session_link_id,
-                AgentCapabilityName::RenameSession,
-            )?,
-            PendingSessionMutation::Fork { session_link_id } => self
-                .ensure_codex_session_adapter(session_link_id, AgentCapabilityName::ForkSession)?,
-            PendingSessionMutation::Archive { session_link_id } => self
-                .ensure_codex_session_adapter(
-                    session_link_id,
-                    AgentCapabilityName::ArchiveSession,
-                )?,
+            } => self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?,
+            PendingSessionMutation::Fork { session_link_id } => {
+                self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?
+            }
+            PendingSessionMutation::Archive { session_link_id } => {
+                self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?
+            }
         }
         let session = self.store.get_session_link(mutation.session_link_id())?;
         let agent = self.store.get_agent_profile(&session.agent_id)?;
@@ -249,7 +293,9 @@ impl DispatchRuntime {
             .map(|session_id| self.store.get_session_link(session_id))
             .transpose()?;
         let approval_requests = self.store.list_approval_requests_for_run(run_id)?;
+        let approval_latencies = approval_requests.iter().map(approval_latency).collect();
         let artifacts = self.store.list_artifacts_for_run(run_id)?;
+        let failures = self.store.list_dispatch_failures_for_run(run_id)?;
 
         Ok(DispatchStatusSnapshot {
             run,
@@ -257,20 +303,54 @@ impl DispatchRuntime {
             agent,
             selected_session,
             approval_requests,
+            approval_latencies,
             artifacts,
+            failures,
         })
     }
 
-    pub fn dispatch_events(&self, run_id: &str) -> Result<Vec<AgentEvent>> {
-        self.store.list_agent_events_for_run(run_id)
+    pub fn dispatch_events(&self, run_id: &str) -> Result<Vec<DispatchEvent>> {
+        self.store.list_dispatch_events_for_run(run_id)
     }
 
     pub fn dispatch_artifacts(&self, run_id: &str) -> Result<Vec<AgentArtifact>> {
         self.store.list_artifacts_for_run(run_id)
     }
 
+    pub fn dispatch_timeline(&self, run_id: &str) -> Result<DispatchTimeline> {
+        dispatch_timeline(&self.store, run_id)
+    }
+
+    pub fn dispatch_trace(&self, run_id: &str) -> Result<DispatchTrace> {
+        dispatch_trace(&self.store, run_id)
+    }
+
+    pub fn probe_agent(&self, agent_id: &str, refresh: bool) -> Result<AgentProbeReport> {
+        probe_agent(&self.store, agent_id, refresh)
+    }
+
     pub fn import_handoff_from_inbox(&self, inbox_id: &str) -> Result<PackageImportResult> {
         packaging::import_handoff_from_inbox(&self.store, inbox_id)
+    }
+
+    pub fn list_issue_reviews(&self) -> Result<Vec<IssueReviewDetail>> {
+        packaging::list_issue_reviews(&self.store)
+    }
+
+    pub fn show_issue_review(&self, approval_request_id: &str) -> Result<IssueReviewDetail> {
+        packaging::show_issue_review(&self.store, approval_request_id)
+    }
+
+    pub fn approve_issue_review(&self, approval_request_id: &str) -> Result<IssueReviewResolution> {
+        packaging::approve_issue_review(&self.store, approval_request_id)
+    }
+
+    pub fn reject_issue_review(
+        &self,
+        approval_request_id: &str,
+        reason: Option<String>,
+    ) -> Result<IssueReviewResolution> {
+        packaging::reject_issue_review(&self.store, approval_request_id, reason)
     }
 
     pub fn export_a2a_task(&self, issue: &str) -> Result<A2aExportResult> {
@@ -293,8 +373,44 @@ impl DispatchRuntime {
         kind: &str,
         content_type: &str,
         status: Option<DispatchRunStatus>,
+        outcome: Option<DispatchOutcomeRecordRequest>,
     ) -> Result<A2aResultImport> {
-        a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)
+        let mut result =
+            a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)?;
+        let outcome_request = outcome.or_else(|| {
+            status.and_then(|status| {
+                terminal_outcome_for_status(status).map(|outcome_kind| {
+                    DispatchOutcomeRecordRequest {
+                        run_id: run_id.to_string(),
+                        idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
+                        outcome_kind,
+                        failure_class: None,
+                        failure_detail: None,
+                        task_class: None,
+                        validation_outcome: None,
+                        result_artifact_id: Some(result.artifact.id.clone()),
+                        metadata_json: json!({
+                            "source": "a2a_import_result",
+                            "artifactKind": kind,
+                            "coarseTerminalOutcome": true
+                        }),
+                    }
+                })
+            })
+        });
+        if let Some(mut request) = outcome_request {
+            request.run_id = run_id.to_string();
+            if request.result_artifact_id.is_none() {
+                request.result_artifact_id = Some(result.artifact.id.clone());
+            }
+            if request.idempotency_key.is_none() {
+                request.idempotency_key = Some(format!("a2a_result_import:{}", result.artifact.id));
+            }
+            let recorded = self.record_dispatch_outcome(request)?;
+            result.run = recorded.run;
+            result.outcome = Some(recorded.outcome);
+        }
+        Ok(result)
     }
 
     pub fn propose_dispatch(&self, request: DispatchProposalRequest) -> Result<DispatchProposal> {
@@ -315,13 +431,12 @@ impl DispatchRuntime {
             .map(|session_link_id| self.store.get_session_link(session_link_id))
             .transpose()?;
         let dispatch_capability = if selected_session_link_id.is_some() {
-            AgentCapabilityName::ResumeSession
+            PolicyAction::ResumeDispatch
         } else {
-            AgentCapabilityName::StartSession
+            PolicyAction::StartDispatch
         };
-        self.ensure_agent_capability(&agent.id, dispatch_capability)?;
-        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetGoal)?;
-        self.ensure_agent_capability(&agent.id, AgentCapabilityName::SetMetadata)?;
+        let policy = classify_action(dispatch_capability);
+        ensure_capability_preconditions(&self.store, &agent.id, &policy)?;
 
         let run = self.store.create_dispatch_run(NewDispatchRun {
             issue_task_id: issue_task.id.clone(),
@@ -343,7 +458,8 @@ impl DispatchRuntime {
                 "newSession": selected_session.is_none(),
                 "requestedNewSession": request.new_session,
                 "selectedSessionLinkId": run.selected_session_link_id,
-                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str())
+                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str()),
+                "policy": policy
             }),
         })?;
 
@@ -397,22 +513,118 @@ impl DispatchRuntime {
                 .update_dispatch_run_status(&run.id, DispatchRunStatus::Canceled, None)?,
             ApprovalStatus::Pending => unreachable!(),
         };
-        self.store.append_agent_event(NewAgentEvent {
-            run_id: Some(run.id.clone()),
-            session_link_id: run.selected_session_link_id.clone(),
-            event_type: "dispatch_approval_resolved".to_string(),
-            native_event_id: None,
-            payload_json: json!({
+        self.store.append_dispatch_event(dispatch_run_event(
+            &run,
+            DispatchEventKind::DispatchApprovalResolved,
+            DispatchEventSource::Runtime,
+            DispatchEventSeverity::Info,
+            json!({
                 "approvalRequestId": approval_request.id,
                 "approvalStatus": status.as_str(),
                 "runStatus": run.status.as_str()
             }),
-        })?;
+        ))?;
         record_dispatch_approval_signal(&self.store, &run, &approval_request)?;
 
         Ok(DispatchApprovalResolution {
             run,
             approval_request,
+        })
+    }
+
+    pub fn record_dispatch_outcome(
+        &self,
+        request: DispatchOutcomeRecordRequest,
+    ) -> Result<DispatchOutcomeRecordResult> {
+        let run = self.store.get_dispatch_run(&request.run_id)?;
+        let already_recorded = self
+            .store
+            .find_dispatch_run_outcome_by_run(&run.id)?
+            .is_some();
+        let idempotency_key = request
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("dispatch_outcome:{}:{}", run.id, request.outcome_kind));
+        let outcome = self
+            .store
+            .record_dispatch_run_outcome(NewDispatchRunOutcome {
+                run_id: run.id.clone(),
+                idempotency_key,
+                outcome_kind: request.outcome_kind,
+                failure_class: request.failure_class,
+                failure_detail: request.failure_detail.clone(),
+                task_class: request.task_class,
+                validation_outcome: request.validation_outcome,
+                result_artifact_id: request.result_artifact_id.clone(),
+                metadata_json: request.metadata_json,
+            })?;
+        if already_recorded {
+            let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+            return Ok(DispatchOutcomeRecordResult {
+                run,
+                issue_task,
+                outcome,
+                memory_ingest: None,
+                memory_ingest_error: None,
+            });
+        }
+
+        if let Some(artifact_id) = outcome.result_artifact_id.as_deref() {
+            if run.result_artifact_id.as_deref() != Some(artifact_id) {
+                self.store
+                    .set_dispatch_run_result_artifact(&run.id, artifact_id)?;
+            }
+        }
+        let failure_reason = outcome.failure_detail.clone().or_else(|| {
+            outcome
+                .failure_class
+                .map(|class| class.as_str().to_string())
+        });
+        let mut run = self.store.update_dispatch_run_status(
+            &run.id,
+            outcome.outcome_kind.terminal_status(),
+            failure_reason,
+        )?;
+        if outcome.outcome_kind == DispatchOutcomeKind::FixReady {
+            self.store
+                .update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
+        }
+        run = self.store.get_dispatch_run(&run.id)?;
+        self.store.append_dispatch_event(dispatch_run_event(
+            &run,
+            DispatchEventKind::DispatchOutcomeRecorded,
+            DispatchEventSource::Runtime,
+            DispatchEventSeverity::Info,
+            json!({
+                "outcomeId": outcome.id,
+                "outcomeKind": outcome.outcome_kind,
+                "failureClass": outcome.failure_class,
+                "taskClass": outcome.task_class,
+                "validationOutcome": outcome.validation_outcome,
+            }),
+        ))?;
+
+        let memory_ingest = match ingest_dispatch_outcome_memory(&self.store, &run, &outcome) {
+            Ok(ingest) => (Some(memory_ingest_view(ingest)), None),
+            Err(error) => {
+                let message = error.to_string();
+                let _ = self.store.append_dispatch_event(dispatch_run_event(
+                    &run,
+                    DispatchEventKind::DispatchOutcomeMemoryIngestFailed,
+                    DispatchEventSource::Runtime,
+                    DispatchEventSeverity::Warning,
+                    json!({ "error": message }),
+                ));
+                (None, Some(message))
+            }
+        };
+        let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+        Ok(DispatchOutcomeRecordResult {
+            run,
+            issue_task,
+            outcome,
+            memory_ingest: memory_ingest.0,
+            memory_ingest_error: memory_ingest.1,
         })
     }
 
@@ -425,7 +637,7 @@ impl DispatchRuntime {
         issue: &str,
         body_override: Option<String>,
     ) -> Result<GitHubCommentDraftResult> {
-        packaging::ensure_issue_task_for_issue(&self.store, issue)?;
+        packaging::ensure_packaged_issue_task_for_issue(&self.store, issue)?;
         github_projection::draft_tracking_comment(&self.store, issue, body_override)
     }
 
@@ -515,11 +727,7 @@ impl DispatchRuntime {
         Ok(session.id)
     }
 
-    fn ensure_codex_session_adapter(
-        &self,
-        session_link_id: &str,
-        capability: AgentCapabilityName,
-    ) -> Result<()> {
+    fn ensure_session_policy(&self, session_link_id: &str, action: PolicyAction) -> Result<()> {
         let session = self.store.get_session_link(session_link_id)?;
         let agent = self.store.get_agent_profile(&session.agent_id)?;
         if agent.adapter != "codex_app_server" {
@@ -528,14 +736,8 @@ impl DispatchRuntime {
                 agent.adapter
             );
         }
-        let capability = self.store.get_agent_capability(&agent.id, capability)?;
-        if capability.status == CapabilityStatus::Unsupported {
-            anyhow::bail!(
-                "agent {} does not support capability {}",
-                agent.id,
-                capability.capability.as_str()
-            );
-        }
+        let decision = classify_action(action);
+        ensure_capability_preconditions(&self.store, &agent.id, &decision)?;
         Ok(())
     }
 
@@ -552,6 +754,23 @@ impl DispatchRuntime {
             );
         }
         Ok(())
+    }
+}
+
+fn memory_ingest_view(ingest: DispatchOutcomeMemoryIngest) -> DispatchOutcomeMemoryIngestView {
+    DispatchOutcomeMemoryIngestView {
+        dispatch_memory_event_id: ingest.dispatch_memory_event.id,
+        memory_raw_event_ids: ingest.memory_ingest.raw_event_ids,
+        memory_node_ids: ingest.memory_ingest.node_ids,
+    }
+}
+
+fn terminal_outcome_for_status(status: DispatchRunStatus) -> Option<DispatchOutcomeKind> {
+    match status {
+        DispatchRunStatus::Completed => Some(DispatchOutcomeKind::FixReady),
+        DispatchRunStatus::Failed => Some(DispatchOutcomeKind::Failed),
+        DispatchRunStatus::Canceled => Some(DispatchOutcomeKind::Canceled),
+        _ => None,
     }
 }
 

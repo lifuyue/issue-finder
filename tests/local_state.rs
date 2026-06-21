@@ -161,6 +161,7 @@ fn writes_handoff_inbox_and_report_under_issue_finder_home() {
             feedback_penalty: 0,
             quality_penalty: 0,
             reactivation_boost: 0,
+            memory_adjustment: 0,
             recommendation_visibility: "visible".to_string(),
             recommendation_reasons: Vec::new(),
             attention_score: 80,

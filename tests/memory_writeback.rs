@@ -48,7 +48,7 @@ fn good_graph_recall_reinforces_state_edges_and_audit_rows() {
     assert_eq!(report.recalled, 1);
     assert_eq!(report.resource_decremented, 1);
     assert_eq!(report.reinforced, 1);
-    assert_eq!(report.edge_reinforced, 2);
+    assert_eq!(report.edge_reinforced, seeded.reinforceable_edge_count);
     assert_eq!(state.recall_count, 1);
     assert_eq!(state.reinforce_count, 1);
     assert_eq!(state.resource, 0.8);
@@ -221,6 +221,7 @@ struct SeededGraph {
     raw_event_id: String,
     raw_node_id: String,
     edge_id: String,
+    reinforceable_edge_count: usize,
 }
 
 fn seed_dispatch_graph(store: &MemoryStore) -> SeededGraph {
@@ -230,9 +231,12 @@ fn seed_dispatch_graph(store: &MemoryStore) -> SeededGraph {
             id: "dispatch-writeback".to_string(),
             issue_key: IssueKey::new("owner/repo", 42),
             agent_id: "codex".to_string(),
+            outcome_kind: Some("fix_ready".to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded: true,
+            failure_class: None,
             failure_reason: None,
+            validation_outcome: Some("passed".to_string()),
             validation_paths: Vec::new(),
             artifact_refs: Vec::new(),
             occurred_at: NOW.to_string(),
@@ -241,9 +245,12 @@ fn seed_dispatch_graph(store: &MemoryStore) -> SeededGraph {
         .unwrap();
     MemoryGraphBuilder::rebuild_coactivation_edges(store, NOW).unwrap();
     let raw_node_id = ingested.node_ids[0].clone();
-    let edge = store
-        .list_edges()
-        .unwrap()
+    let edges = store.list_edges().unwrap();
+    let reinforceable_edge_count = edges
+        .iter()
+        .filter(|edge| edge.from_node_id == raw_node_id || edge.to_node_id == raw_node_id)
+        .count();
+    let edge = edges
         .into_iter()
         .find(|edge| {
             edge.relation == MemoryEdgeRelation::CoActivated && edge.from_node_id == raw_node_id
@@ -254,6 +261,7 @@ fn seed_dispatch_graph(store: &MemoryStore) -> SeededGraph {
         raw_event_id: ingested.raw_event_ids[0].clone(),
         raw_node_id,
         edge_id: edge.id,
+        reinforceable_edge_count,
     }
 }
 

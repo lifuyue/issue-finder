@@ -11,9 +11,11 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchRunStatus,
-    DispatchRuntime, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability,
-    NewAgentEvent, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchRun, NewIssueTask,
+    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchEventKind,
+    DispatchEventSeverity, DispatchEventSource, DispatchRunStatus, DispatchRuntime,
+    DispatchSubjectType, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus,
+    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchEvent,
+    NewDispatchRun, NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff, WrittenHandoff};
@@ -122,10 +124,12 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.memory_tombstone",
             "issue-finder.agents_list",
             "issue-finder.agent_capabilities",
+            "issue-finder.agent_probe",
             "issue-finder.sessions_list",
             "issue-finder.sessions_sync",
             "issue-finder.sessions_search",
             "issue-finder.sessions_read",
+            "issue-finder.sessions_replay",
             "issue-finder.sessions_rename",
             "issue-finder.sessions_fork",
             "issue-finder.sessions_archive",
@@ -133,12 +137,19 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.sessions_reject_mutation",
             "issue-finder.dispatch_status",
             "issue-finder.dispatch_events",
+            "issue-finder.dispatch_timeline",
+            "issue-finder.dispatch_trace",
             "issue-finder.dispatch_artifacts",
             "issue-finder.dispatch_import_handoff",
+            "issue-finder.dispatch_review_list",
+            "issue-finder.dispatch_review_show",
+            "issue-finder.dispatch_review_approve",
+            "issue-finder.dispatch_review_reject",
             "issue-finder.dispatch",
             "issue-finder.dispatch_approve",
             "issue-finder.dispatch_reject",
             "issue-finder.dispatch_execute",
+            "issue-finder.dispatch_record_outcome",
             "issue-finder.a2a_export_task",
             "issue-finder.a2a_approve_send",
             "issue-finder.a2a_reject_send",
@@ -268,10 +279,17 @@ async fn dispatch_read_tools_use_local_state_only() {
         .unwrap();
     runtime
         .store()
-        .append_agent_event(NewAgentEvent {
+        .append_dispatch_event(NewDispatchEvent {
             run_id: Some(run.id.clone()),
             session_link_id: Some(session.id),
-            event_type: "thread_linked".to_string(),
+            issue_task_id: Some(task.id.clone()),
+            event_kind: DispatchEventKind::Legacy,
+            subject_type: DispatchSubjectType::Session,
+            subject_id: run.selected_session_link_id.clone(),
+            source: DispatchEventSource::Runtime,
+            severity: DispatchEventSeverity::Info,
+            correlation_id: Some(run.id.clone()),
+            causation_id: None,
             native_event_id: Some("event_1".to_string()),
             payload_json: serde_json::json!({ "source": "test" }),
         })
@@ -366,6 +384,20 @@ async fn dispatch_read_tools_use_local_state_only() {
         );
     }
 
+    let probe = tool_runtime
+        .execute(invocation(
+            "issue-finder.agent_probe",
+            r#"{"agent":"codex","refresh":true}"#,
+            "agent_probe",
+        ))
+        .await;
+    assert!(probe.success, "{probe:?}");
+    assert!(probe.structured_content["agentProbe"]["probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["capability"] == "start_session"));
+
     let session_search = tool_runtime
         .execute(invocation(
             "issue-finder.sessions_search",
@@ -406,6 +438,38 @@ async fn dispatch_read_tools_use_local_state_only() {
     assert!(dispatch_events.success, "{dispatch_events:?}");
     assert_eq!(
         dispatch_events.structured_content["events"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let dispatch_timeline = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_timeline",
+            &status_args,
+            "dispatch_timeline",
+        ))
+        .await;
+    assert!(dispatch_timeline.success, "{dispatch_timeline:?}");
+    assert!(
+        dispatch_timeline.structured_content["dispatchTimeline"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["kind"] == "event")
+    );
+
+    let dispatch_trace = tool_runtime
+        .execute(invocation(
+            "issue-finder.dispatch_trace",
+            &status_args,
+            "dispatch_trace",
+        ))
+        .await;
+    assert!(dispatch_trace.success, "{dispatch_trace:?}");
+    assert_eq!(
+        dispatch_trace.structured_content["dispatchTrace"]["events"]
             .as_array()
             .unwrap()
             .len(),
@@ -470,26 +534,81 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
         ))
         .await;
     assert!(imported.success, "{imported:?}");
+    assert_eq!(imported.status, "pending_issue_review");
     assert_eq!(
-        imported.structured_content["packageImport"]["package"]["kind"],
-        "issue_finder_task_package"
+        imported.structured_content["packageImport"]["approvalRequest"]["approval_type"],
+        "issue_review"
     );
     assert_eq!(
         imported.structured_content["packageImport"]["issueTask"]["issue_key"],
         "owner/repo#321"
     );
-    assert_eq!(
-        imported.structured_content["packageImport"]["package"]["user_profile_snapshot"]
-            ["snapshot"]["profile"]["techStack"],
-        serde_json::json!(["Rust", "TypeScript"])
-    );
-    let profile_snapshot_id = imported.structured_content["packageImport"]["package"]
-        ["user_profile_snapshot"]["artifactId"]
+    assert!(imported.structured_content["packageImport"]["package"].is_null());
+    let profile_snapshot_id = imported.structured_content["packageImport"]
+        ["profileSnapshotArtifact"]["id"]
         .as_str()
         .unwrap();
     assert_eq!(
         imported.structured_content["packageImport"]["issueTask"]["profile_snapshot_artifact_id"],
         profile_snapshot_id
+    );
+    let review_id = imported.structured_content["packageImport"]["approvalRequest"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let review_list = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_list",
+            "{}",
+            "dispatch_review_list",
+        ))
+        .await;
+    assert!(review_list.success, "{review_list:?}");
+    assert_eq!(
+        review_list.structured_content["issueReviews"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let review_show_args = serde_json::json!({ "approvalRequestId": review_id }).to_string();
+    let review_show = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_show",
+            &review_show_args,
+            "dispatch_review_show",
+        ))
+        .await;
+    assert!(review_show.success, "{review_show:?}");
+    assert_eq!(
+        review_show.structured_content["issueReview"]["approvalRequest"]["status"],
+        "pending"
+    );
+    let review_approve = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_review_approve",
+            &review_show_args,
+            "dispatch_review_approve",
+        ))
+        .await;
+    assert!(review_approve.success, "{review_approve:?}");
+    assert_eq!(review_approve.status, "approved");
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]["kind"],
+        "issue_finder_task_package"
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]["version"],
+        2
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["package"]
+            ["user_profile_snapshot"]["snapshot"]["profile"]["techStack"],
+        serde_json::json!(["Rust", "TypeScript"])
+    );
+    assert_eq!(
+        review_approve.structured_content["issueReviewApproval"]["issueTask"]["status"],
+        "user_approved"
     );
 
     let proposal = runtime
@@ -604,6 +723,21 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
         imported_result.structured_content["a2aResultImport"]["artifact"]["kind"],
         "fix_result"
     );
+    assert_eq!(
+        imported_result.structured_content["a2aResultImport"]["outcome"]["outcome_kind"],
+        "fix_ready"
+    );
+    let invalid_outcome = runtime
+        .execute(invocation(
+            "issue-finder.dispatch_record_outcome",
+            r#"{"runId":"dispatch-run-missing","outcome":"not_real"}"#,
+            "dispatch_record_outcome",
+        ))
+        .await;
+    assert!(!invalid_outcome.success);
+    assert!(serde_json::to_string(&invalid_outcome.content_items)
+        .unwrap()
+        .contains("invalid dispatch outcome kind not_real"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -646,14 +780,11 @@ async fn dispatch_tool_auto_imports_ready_handoff_for_direct_proposal() {
         .await;
 
     assert!(proposal.success, "{proposal:?}");
-    assert_eq!(proposal.status, "pending_approval");
-    assert_eq!(
-        proposal.structured_content["dispatchProposal"]["issueTask"]["issue_key"],
-        "owner/auto#654"
-    );
-    assert!(proposal.structured_content["dispatchProposal"]["issueTask"]
-        ["current_package_artifact_id"]
-        .is_string());
+    assert_eq!(proposal.status, "pending_issue_review");
+    assert_eq!(proposal.structured_content["blocked"], true);
+    assert_eq!(proposal.structured_content["reviewRequired"], true);
+    assert_eq!(proposal.structured_content["issueKey"], "owner/auto#654");
+    assert!(proposal.structured_content["approvalRequestId"].is_string());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -699,15 +830,10 @@ async fn projection_tools_auto_import_ready_handoff_when_needed() {
         ))
         .await;
     assert!(a2a_export.success, "{a2a_export:?}");
-    assert_eq!(a2a_export.status, "pending_approval");
-    assert_eq!(
-        a2a_export.structured_content["a2aExport"]["issueTask"]["issue_key"],
-        "owner/a2a#655"
-    );
-    assert!(
-        a2a_export.structured_content["a2aExport"]["issueTask"]["current_package_artifact_id"]
-            .is_string()
-    );
+    assert_eq!(a2a_export.status, "pending_issue_review");
+    assert_eq!(a2a_export.structured_content["issueKey"], "owner/a2a#655");
+    assert_eq!(a2a_export.structured_content["reviewRequired"], true);
+    assert!(a2a_export.structured_content["approvalRequestId"].is_string());
 
     let github_draft = runtime
         .execute(invocation(
@@ -717,15 +843,13 @@ async fn projection_tools_auto_import_ready_handoff_when_needed() {
         ))
         .await;
     assert!(github_draft.success, "{github_draft:?}");
-    assert_eq!(github_draft.status, "pending_approval");
+    assert_eq!(github_draft.status, "pending_issue_review");
     assert_eq!(
-        github_draft.structured_content["githubDraft"]["issueTask"]["issue_key"],
+        github_draft.structured_content["issueKey"],
         "owner/track#656"
     );
-    assert_eq!(
-        github_draft.structured_content["githubDraft"]["approvalRequest"]["approval_type"],
-        "github_post"
-    );
+    assert_eq!(github_draft.structured_content["reviewRequired"], true);
+    assert!(github_draft.structured_content["approvalRequestId"].is_string());
 }
 
 #[tokio::test(flavor = "current_thread")]

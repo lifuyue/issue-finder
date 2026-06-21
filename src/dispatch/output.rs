@@ -1,16 +1,21 @@
 use anyhow::Result;
 
 use super::a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
+use super::capability_probe::AgentProbeReport;
 use super::execution::DispatchExecutionResult;
 use super::github_projection::{GitHubApprovalResult, GitHubCommentDraftResult, GitHubPostResult};
-use super::model::{AgentArtifact, AgentEvent, AgentProfile, AgentSessionLink, GitHubInteraction};
-use super::packaging::PackageImportResult;
+use super::model::{
+    AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
+    SessionTranscriptItem,
+};
+use super::packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchStatusSnapshot,
-    SessionSearchResult,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordResult,
+    DispatchProposal, DispatchStatusSnapshot, SessionSearchResult,
 };
 use super::session_approvals::{SessionMutationApprovalResolution, SessionMutationProposal};
 use super::session_ops::{SessionTranscriptResult, SessionsSyncResult};
+use super::timeline::{DispatchTimeline, DispatchTrace};
 
 pub(crate) fn render_cli_output<T: serde::Serialize>(
     json: bool,
@@ -48,6 +53,22 @@ pub(crate) fn render_agent_capabilities(view: &AgentCapabilitiesView) -> String 
         lines.push(format!(
             "- {}: {}",
             capability.capability, capability.status
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_agent_probe(report: &AgentProbeReport) -> String {
+    let mut lines = vec![format!(
+        "Probe results for {} (refreshed={}):",
+        report.agent_id, report.refreshed
+    )];
+    for probe in &report.probes {
+        lines.push(format!(
+            "- {}: {} method={}",
+            probe.capability,
+            probe.status,
+            probe.method.as_deref().unwrap_or("-")
         ));
     }
     lines.join("\n")
@@ -114,9 +135,30 @@ pub(crate) fn render_session_search(result: &SessionSearchResult) -> String {
 
 pub(crate) fn render_session_transcript(result: &SessionTranscriptResult) -> String {
     format!(
-        "Read session {} transcript into artifact {}.\nPath: {}",
-        result.session.id, result.transcript_artifact.id, result.transcript_artifact.path
+        "Read session {} transcript into artifact {}.\nReplay items: {}\nPath: {}",
+        result.session.id,
+        result.transcript_artifact.id,
+        result.replay_items.len(),
+        result.transcript_artifact.path
     )
+}
+
+pub(crate) fn render_session_replay(items: &[SessionTranscriptItem]) -> String {
+    if items.is_empty() {
+        return "No replay items found.".to_string();
+    }
+
+    let mut lines = vec!["Session replay:".to_string()];
+    for item in items {
+        lines.push(format!(
+            "- #{} type={} turn={} storage={}",
+            item.item_index,
+            item.item_type,
+            item.turn_id.as_deref().unwrap_or("-"),
+            item.payload_storage
+        ));
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn render_session_mutation_proposal(result: &SessionMutationProposal) -> String {
@@ -161,13 +203,14 @@ pub(crate) fn render_dispatch_status(status: &DispatchStatusSnapshot) -> String 
     }
     lines.push(format!("Approvals: {}", status.approval_requests.len()));
     lines.push(format!("Artifacts: {}", status.artifacts.len()));
+    lines.push(format!("Failures: {}", status.failures.len()));
     if let Some(reason) = &status.run.failure_reason {
         lines.push(format!("Failure: {reason}"));
     }
     lines.join("\n")
 }
 
-pub(crate) fn render_dispatch_events(events: &[AgentEvent]) -> String {
+pub(crate) fn render_dispatch_events(events: &[DispatchEvent]) -> String {
     if events.is_empty() {
         return "No dispatch events found.".to_string();
     }
@@ -175,13 +218,42 @@ pub(crate) fn render_dispatch_events(events: &[AgentEvent]) -> String {
     let mut lines = vec!["Dispatch events:".to_string()];
     for event in events {
         lines.push(format!(
-            "- {} {} native={}",
+            "- #{} {} {} native={}",
+            event.sequence,
             event.created_at,
-            event.event_type,
+            event.event_kind,
             event.native_event_id.as_deref().unwrap_or("-")
         ));
     }
     lines.join("\n")
+}
+
+pub(crate) fn render_dispatch_timeline(timeline: &DispatchTimeline) -> String {
+    if timeline.items.is_empty() {
+        return format!("No timeline items found for {}.", timeline.run.id);
+    }
+
+    let mut lines = vec![format!("Dispatch timeline for {}:", timeline.run.id)];
+    for item in &timeline.items {
+        lines.push(format!(
+            "- {} {} {}",
+            item.created_at, item.kind, item.summary
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_dispatch_trace(trace: &DispatchTrace) -> String {
+    format!(
+        "Dispatch trace for {}:\nEvents: {}\nApprovals: {}\nArtifacts: {}\nFailures: {}\nGitHub interactions: {}\nTimeline items: {}",
+        trace.run.id,
+        trace.events.len(),
+        trace.approvals.len(),
+        trace.artifacts.len(),
+        trace.failures.len(),
+        trace.github_interactions.len(),
+        trace.timeline.len()
+    )
 }
 
 pub(crate) fn render_dispatch_artifacts(artifacts: &[AgentArtifact]) -> String {
@@ -200,13 +272,76 @@ pub(crate) fn render_dispatch_artifacts(artifacts: &[AgentArtifact]) -> String {
 }
 
 pub(crate) fn render_package_import(result: &PackageImportResult) -> String {
+    let package_text = result
+        .package_artifact
+        .as_ref()
+        .map(|artifact| format!("\nPackage artifact: {}", artifact.path))
+        .unwrap_or_default();
     format!(
-        "Imported {}#{} into task package {}.\nHandoff artifact: {}\nPackage artifact: {}",
+        "Imported {}#{} as issue review candidate.\nReview: {} ({})\nHandoff artifact: {}{}",
         result.issue_task.repo_full_name,
         result.issue_task.issue_number,
-        result.package.issue.title,
+        result.approval_request.id,
+        result.approval_request.status,
         result.handoff_artifact.path,
-        result.package_artifact.path
+        package_text
+    )
+}
+
+pub(crate) fn render_issue_reviews(reviews: &[IssueReviewDetail]) -> String {
+    if reviews.is_empty() {
+        return "No issue review requests found.".to_string();
+    }
+    let mut lines = vec!["Issue reviews:".to_string()];
+    for review in reviews {
+        lines.push(format!(
+            "- {} {} {} package={}",
+            review.approval_request.id,
+            review.approval_request.status,
+            review.issue_task.issue_key,
+            review
+                .package_artifact
+                .as_ref()
+                .map(|artifact| artifact.id.as_str())
+                .unwrap_or("-")
+        ));
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_issue_review(review: &IssueReviewDetail) -> String {
+    format!(
+        "Issue review {}: {}\nIssue: {}\nHandoff artifact: {}\nPackage artifact: {}",
+        review.approval_request.id,
+        review.approval_request.status,
+        review.issue_task.issue_key,
+        review
+            .handoff_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-"),
+        review
+            .package_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-")
+    )
+}
+
+pub(crate) fn render_issue_review_resolution(
+    action: &str,
+    result: &IssueReviewResolution,
+) -> String {
+    format!(
+        "Issue review {} is {}.\nIssue: {}\nPackage artifact: {}",
+        result.approval_request.id,
+        action,
+        result.issue_task.issue_key,
+        result
+            .package_artifact
+            .as_ref()
+            .map(|artifact| artifact.path.as_str())
+            .unwrap_or("-")
     )
 }
 
@@ -225,6 +360,34 @@ pub(crate) fn render_dispatch_approval(result: &DispatchApprovalResolution) -> S
         "Dispatch run {} approval is {}.\nRun status: {}",
         result.run.id, result.run.approval_state, result.run.status
     )
+}
+
+pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResult) -> String {
+    let mut lines = vec![format!(
+        "Recorded dispatch outcome {} for run {}: {}",
+        result.outcome.id, result.run.id, result.outcome.outcome_kind
+    )];
+    if let Some(task_class) = result.outcome.task_class {
+        lines.push(format!("Task class: {task_class}"));
+    }
+    if let Some(failure_class) = result.outcome.failure_class {
+        lines.push(format!("Failure class: {failure_class}"));
+    }
+    if let Some(validation_outcome) = result.outcome.validation_outcome {
+        lines.push(format!("Validation: {validation_outcome}"));
+    }
+    if let Some(memory) = &result.memory_ingest {
+        lines.push(format!(
+            "Memory ingest: dispatch={} rawEvents={} nodes={}",
+            memory.dispatch_memory_event_id,
+            memory.memory_raw_event_ids.len(),
+            memory.memory_node_ids.len()
+        ));
+    }
+    if let Some(error) = &result.memory_ingest_error {
+        lines.push(format!("Memory ingest failed: {error}"));
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> String {

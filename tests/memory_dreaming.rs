@@ -131,6 +131,56 @@ fn dreaming_generates_stale_and_conflict_candidates_without_mutating_old_hint() 
 }
 
 #[test]
+fn dreaming_separates_dispatch_agent_hints_from_ranking_trend_hints() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let store = MemoryStore::open(&paths).unwrap();
+    seed_dispatch(&store, "dispatch-success", true);
+    seed_dispatch(&store, "dispatch-failure", false);
+    seed_policy_blocked_dispatch(&store);
+
+    let result = MemoryDreamEngine::dream(
+        &store,
+        &MemoryDreamRequest {
+            run_id: "dream-run-ranking-trend".to_string(),
+            trigger: MemoryDreamTrigger::AfterDispatch,
+            scope: MemoryDreamScope::Global,
+            scope_ref: None,
+            input_activation_run_ids: Vec::new(),
+            created_at: NOW.to_string(),
+        },
+        None,
+    )
+    .unwrap();
+
+    assert!(result
+        .hints
+        .iter()
+        .any(|hint| hint.hint_type == MemoryHintType::Dispatch
+            && hint.policy_json["kind"] == "agent_performance"));
+    let ranking_hints = result
+        .hints
+        .iter()
+        .filter(|hint| {
+            hint.hint_type == MemoryHintType::Ranking
+                && hint.policy_json["kind"] == "dispatch_outcome_trend"
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        ranking_hints
+            .iter()
+            .any(|hint| hint.scope_type == MemoryHintScopeType::Repo
+                && hint.scope_ref == "owner/repo")
+    );
+    assert!(ranking_hints.iter().any(|hint| {
+        hint.scope_type == MemoryHintScopeType::IssueType && hint.scope_ref == "rust_cli_panic"
+    }));
+    assert!(ranking_hints
+        .iter()
+        .all(|hint| hint.policy_json["failures"].as_u64().unwrap_or(0) <= 1));
+}
+
+#[test]
 fn optional_llm_synthesis_stores_candidates_and_failure_does_not_block_deterministic_dreams() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -234,9 +284,12 @@ fn seed_dispatch(store: &MemoryStore, id: &str, succeeded: bool) -> SeededDispat
             id: id.to_string(),
             issue_key: IssueKey::new("owner/repo", 42),
             agent_id: "codex".to_string(),
+            outcome_kind: Some(if succeeded { "fix_ready" } else { "failed" }.to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded,
+            failure_class: (!succeeded).then(|| "validation_failed".to_string()),
             failure_reason: (!succeeded).then(|| "panic still reproduces".to_string()),
+            validation_outcome: Some(if succeeded { "passed" } else { "failed" }.to_string()),
             validation_paths: vec!["cargo test".to_string()],
             artifact_refs: Vec::new(),
             occurred_at: NOW.to_string(),
@@ -327,6 +380,26 @@ fn seed_approved_success_hint(store: &MemoryStore) {
             created_at: OLD.to_string(),
             approved_at: Some(OLD.to_string()),
             expires_at: Some(OLD.to_string()),
+        })
+        .unwrap();
+}
+
+fn seed_policy_blocked_dispatch(store: &MemoryStore) {
+    MemoryIngestor::new(store)
+        .ingest_dispatch_outcome(&DispatchMemoryOutcome {
+            id: "dispatch-policy-blocked".to_string(),
+            issue_key: IssueKey::new("owner/repo", 77),
+            agent_id: "codex".to_string(),
+            outcome_kind: Some("blocked".to_string()),
+            task_type: "rust_cli_panic".to_string(),
+            succeeded: false,
+            failure_class: Some("policy_blocked".to_string()),
+            failure_reason: Some("prepare gate rejected".to_string()),
+            validation_outcome: None,
+            validation_paths: Vec::new(),
+            artifact_refs: Vec::new(),
+            occurred_at: NOW.to_string(),
+            metadata: json!({}),
         })
         .unwrap();
 }

@@ -4,10 +4,12 @@ use crate::tool_specs::IssueFinderToolSpec;
 
 pub const TOOL_AGENTS_LIST: &str = "issue-finder.agents_list";
 pub const TOOL_AGENT_CAPABILITIES: &str = "issue-finder.agent_capabilities";
+pub const TOOL_AGENT_PROBE: &str = "issue-finder.agent_probe";
 pub const TOOL_SESSIONS_LIST: &str = "issue-finder.sessions_list";
 pub const TOOL_SESSIONS_SYNC: &str = "issue-finder.sessions_sync";
 pub const TOOL_SESSIONS_SEARCH: &str = "issue-finder.sessions_search";
 pub const TOOL_SESSIONS_READ: &str = "issue-finder.sessions_read";
+pub const TOOL_SESSIONS_REPLAY: &str = "issue-finder.sessions_replay";
 pub const TOOL_SESSIONS_RENAME: &str = "issue-finder.sessions_rename";
 pub const TOOL_SESSIONS_FORK: &str = "issue-finder.sessions_fork";
 pub const TOOL_SESSIONS_ARCHIVE: &str = "issue-finder.sessions_archive";
@@ -15,13 +17,20 @@ pub const TOOL_SESSIONS_APPROVE_MUTATION: &str = "issue-finder.sessions_approve_
 pub const TOOL_SESSIONS_REJECT_MUTATION: &str = "issue-finder.sessions_reject_mutation";
 pub const TOOL_DISPATCH_STATUS: &str = "issue-finder.dispatch_status";
 pub const TOOL_DISPATCH_EVENTS: &str = "issue-finder.dispatch_events";
+pub const TOOL_DISPATCH_TIMELINE: &str = "issue-finder.dispatch_timeline";
+pub const TOOL_DISPATCH_TRACE: &str = "issue-finder.dispatch_trace";
 pub const TOOL_DISPATCH_ARTIFACTS: &str = "issue-finder.dispatch_artifacts";
 pub const TOOL_DISPATCH_IMPORT_HANDOFF: &str = "issue-finder.dispatch_import_handoff";
+pub const TOOL_DISPATCH_REVIEW_LIST: &str = "issue-finder.dispatch_review_list";
+pub const TOOL_DISPATCH_REVIEW_SHOW: &str = "issue-finder.dispatch_review_show";
+pub const TOOL_DISPATCH_REVIEW_APPROVE: &str = "issue-finder.dispatch_review_approve";
+pub const TOOL_DISPATCH_REVIEW_REJECT: &str = "issue-finder.dispatch_review_reject";
 pub const TOOL_DISPATCH: &str = "issue-finder.dispatch";
 pub const TOOL_DISPATCH_PROPOSE: &str = "issue-finder.dispatch_propose";
 pub const TOOL_DISPATCH_APPROVE: &str = "issue-finder.dispatch_approve";
 pub const TOOL_DISPATCH_REJECT: &str = "issue-finder.dispatch_reject";
 pub const TOOL_DISPATCH_EXECUTE: &str = "issue-finder.dispatch_execute";
+pub const TOOL_DISPATCH_RECORD_OUTCOME: &str = "issue-finder.dispatch_record_outcome";
 pub const TOOL_A2A_EXPORT_TASK: &str = "issue-finder.a2a_export_task";
 pub const TOOL_A2A_APPROVE_SEND: &str = "issue-finder.a2a_approve_send";
 pub const TOOL_A2A_REJECT_SEND: &str = "issue-finder.a2a_reject_send";
@@ -49,6 +58,12 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             false,
         ),
         dispatch_tool_spec(
+            "agent_probe",
+            "Probe one execution agent's adapter capabilities and cache the result.",
+            agent_probe_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "sessions_list",
             "List local links to native execution agent sessions.",
             sessions_list_schema(),
@@ -71,6 +86,12 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             "Read one native session transcript into a local dispatch artifact.",
             session_link_read_schema(),
             true,
+        ),
+        dispatch_tool_spec(
+            "sessions_replay",
+            "List normalized replay items for one local session link.",
+            session_link_read_schema(),
+            false,
         ),
         dispatch_tool_spec(
             "sessions_rename",
@@ -115,6 +136,18 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             false,
         ),
         dispatch_tool_spec(
+            "dispatch_timeline",
+            "List a merged chronological timeline for a local dispatch run.",
+            dispatch_run_read_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_trace",
+            "Read diagnostic trace records for a local dispatch run.",
+            dispatch_run_read_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "dispatch_artifacts",
             "List persisted artifacts for a local dispatch run.",
             dispatch_run_read_schema(),
@@ -122,13 +155,37 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_import_handoff",
-            "Import an existing inbox handoff as a local IssueTaskPackage artifact.",
+            "Import an existing inbox handoff as a review-gated local issue task candidate.",
             dispatch_import_handoff_schema(),
             false,
         ),
         dispatch_tool_spec(
+            "dispatch_review_list",
+            "List issue review approval requests created from imported handoffs.",
+            empty_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_show",
+            "Show one issue review approval request and its local artifacts.",
+            issue_review_approval_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_approve",
+            "Approve an issue review and create an IssueTaskPackage v2 artifact.",
+            issue_review_approval_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
+            "dispatch_review_reject",
+            "Reject an issue review without dismissing the recommendation.",
+            issue_review_reject_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "dispatch",
-            "Create a pending dispatch approval without starting a native agent session; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Create a pending dispatch approval without starting a native agent session; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             dispatch_propose_schema(),
             false,
         ),
@@ -151,8 +208,14 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             false,
         ),
         dispatch_tool_spec(
+            "dispatch_record_outcome",
+            "Record a normalized dispatch outcome and best-effort memory signal for one dispatch run.",
+            dispatch_record_outcome_schema(),
+            false,
+        ),
+        dispatch_tool_spec(
             "a2a_export_task",
-            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             a2a_export_task_schema(),
             false,
         ),
@@ -176,7 +239,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "github_draft_tracking_comment",
-            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns missing_task_package when no package source exists.",
+            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             github_draft_tracking_comment_schema(),
             false,
         ),
@@ -247,6 +310,18 @@ fn agent_capabilities_schema() -> Value {
         "type": "object",
         "properties": {
             "agent": { "type": "string" }
+        },
+        "required": ["agent"],
+        "additionalProperties": false
+    })
+}
+
+fn agent_probe_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "agent": { "type": "string" },
+            "refresh": { "type": "boolean", "default": false }
         },
         "required": ["agent"],
         "additionalProperties": false
@@ -343,6 +418,29 @@ fn dispatch_import_handoff_schema() -> Value {
     })
 }
 
+fn issue_review_approval_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "approvalRequestId": { "type": "string" }
+        },
+        "required": ["approvalRequestId"],
+        "additionalProperties": false
+    })
+}
+
+fn issue_review_reject_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "approvalRequestId": { "type": "string" },
+            "reason": { "type": ["string", "null"], "default": null }
+        },
+        "required": ["approvalRequestId"],
+        "additionalProperties": false
+    })
+}
+
 fn dispatch_propose_schema() -> Value {
     json!({
         "type": "object",
@@ -402,10 +500,81 @@ fn a2a_import_result_schema() -> Value {
                     "canceled"
                 ],
                 "default": null
-            }
+            },
+            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
+            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
+            "failureReason": { "type": ["string", "null"], "default": null },
+            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
+            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
+            "idempotencyKey": { "type": ["string", "null"], "default": null }
         },
         "required": ["runId", "path"],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": dispatch_outcome_defs()
+    })
+}
+
+fn dispatch_record_outcome_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "runId": { "type": "string" },
+            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
+            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
+            "failureReason": { "type": ["string", "null"], "default": null },
+            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
+            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
+            "resultArtifactId": { "type": ["string", "null"], "default": null },
+            "idempotencyKey": { "type": ["string", "null"], "default": null }
+        },
+        "required": ["runId", "outcome"],
+        "additionalProperties": false,
+        "$defs": dispatch_outcome_defs()
+    })
+}
+
+fn dispatch_outcome_defs() -> Value {
+    json!({
+        "dispatchOutcomeKind": {
+            "type": ["string", "null"],
+            "enum": [null, "fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"],
+            "default": null
+        },
+        "dispatchFailureClass": {
+            "type": ["string", "null"],
+            "enum": [
+                null,
+                "validation_failed",
+                "reproduction_failed",
+                "dependency_unavailable",
+                "workspace_unavailable",
+                "context_insufficient",
+                "agent_runtime_error",
+                "external_service_error",
+                "policy_blocked",
+                "user_canceled",
+                "unknown"
+            ],
+            "default": null
+        },
+        "dispatchTaskClass": {
+            "type": ["string", "null"],
+            "enum": [
+                null,
+                "rust_cli_panic",
+                "frontend_ui_bug",
+                "docs_update",
+                "test_coverage",
+                "dependency_upgrade",
+                "unknown_task"
+            ],
+            "default": null
+        },
+        "dispatchValidationOutcome": {
+            "type": ["string", "null"],
+            "enum": [null, "not_run", "passed", "failed", "unknown"],
+            "default": null
+        }
     })
 }
 

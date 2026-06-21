@@ -32,6 +32,8 @@ pub struct PreparedReportItem {
     #[serde(default)]
     pub reactivation_boost: i32,
     #[serde(default)]
+    pub memory_adjustment: i32,
+    #[serde(default)]
     pub recommendation_visibility: String,
     #[serde(default)]
     pub recommendation_reasons: Vec<String>,
@@ -115,7 +117,7 @@ impl DailyReport {
         } else {
             for item in &self.prepared {
                 lines.push(format!(
-                    "- [{}] {}#{} | feed {} | rank {} | freshness +{} | feedback -{} | quality -{} | reactivation +{} | attention {} | execution {} | fit {} | risk {} | readiness {} ({}) | probe {} | probe warnings: {} | category {} | visibility {} | tags: {} | risk detail: {} | recommendation detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {} | Policy: {} | Probe: {} | Events: {}",
+                    "- [{}] {}#{} | feed {} | rank {} | freshness +{} | feedback -{} | quality -{} | reactivation +{} | memory {:+} | attention {} | execution {} | fit {} | risk {} | readiness {} ({}) | probe {} | probe warnings: {} | category {} | visibility {} | tags: {} | risk detail: {} | recommendation detail: {} | missing: {} | JSON: {} | Markdown: {} | Codex: {} | Policy: {} | Probe: {} | Events: {}",
                     item.id,
                     item.repo_full_name,
                     item.issue_number,
@@ -125,6 +127,7 @@ impl DailyReport {
                     item.feedback_penalty,
                     item.quality_penalty,
                     item.reactivation_boost,
+                    item.memory_adjustment,
                     item.attention_score,
                     item.execution_score,
                     item.profile_fit_score,
@@ -285,6 +288,7 @@ mod tests {
                 feedback_penalty: 0,
                 quality_penalty: 0,
                 reactivation_boost: 0,
+                memory_adjustment: 0,
                 recommendation_visibility: "visible".to_string(),
                 recommendation_reasons: Vec::new(),
                 attention_score: 80,

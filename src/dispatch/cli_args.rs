@@ -14,6 +14,8 @@ pub enum AgentsCommand {
     List(AgentsListArgs),
     /// List one agent's declared native capabilities.
     Capabilities(AgentCapabilitiesArgs),
+    /// Probe and cache one agent's adapter capabilities.
+    Probe(AgentProbeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -28,6 +30,18 @@ pub struct AgentCapabilitiesArgs {
     /// Agent id, for example codex.
     pub agent: String,
     /// Print capabilities as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentProbeArgs {
+    /// Agent id, for example codex.
+    pub agent: String,
+    /// Force a fresh probe instead of using a successful cache entry.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Print probe result as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -48,6 +62,8 @@ pub enum SessionsCommand {
     Search(SessionsSearchArgs),
     /// Read a native session transcript into a local artifact.
     Read(SessionReadArgs),
+    /// List normalized replay items for a local session link.
+    Replay(SessionReadArgs),
     /// Create an approval request to rename a native session.
     Rename(SessionRenameArgs),
     /// Create an approval request to fork a native session.
@@ -154,6 +170,8 @@ pub struct DispatchArgs {
 pub enum DispatchCommand {
     /// Import prepared handoffs into dispatch task packages.
     Package(DispatchPackageArgs),
+    /// Review imported handoffs before creating task packages.
+    Review(DispatchReviewArgs),
     /// Create an approval-gated dispatch proposal without starting an agent.
     Propose(DispatchProposeArgs),
     /// Approve a pending dispatch proposal.
@@ -164,12 +182,18 @@ pub enum DispatchCommand {
     Execute(DispatchExecuteArgs),
     /// Map task packages and results to local A2A artifacts.
     A2a(DispatchA2aArgs),
+    /// Record a normalized dispatch outcome.
+    Outcome(DispatchOutcomeArgs),
     /// Draft, approve, and post GitHub issue comments from dispatch state.
     Github(DispatchGithubArgs),
     /// Show one dispatch run summary.
     Status(DispatchStatusArgs),
     /// List persisted events for a dispatch run.
     Events(DispatchRunReadArgs),
+    /// Show merged dispatch timeline for a run.
+    Timeline(DispatchRunReadArgs),
+    /// Show diagnostic dispatch trace for a run.
+    Trace(DispatchRunReadArgs),
     /// List persisted artifacts for a dispatch run.
     Artifacts(DispatchRunReadArgs),
 }
@@ -209,6 +233,52 @@ pub struct DispatchImportHandoffArgs {
     /// Inbox item id.
     pub inbox_id: String,
     /// Print import result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewArgs {
+    #[command(subcommand)]
+    pub command: DispatchReviewCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DispatchReviewCommand {
+    /// List issue review requests.
+    List(DispatchReviewListArgs),
+    /// Show one issue review request.
+    Show(DispatchReviewReadArgs),
+    /// Approve one issue review and create a task package.
+    Approve(DispatchReviewReadArgs),
+    /// Reject one issue review without dismissing the recommendation.
+    Reject(DispatchReviewRejectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewListArgs {
+    /// Print reviews as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewReadArgs {
+    /// Issue review approval request id.
+    pub approval_request_id: String,
+    /// Print result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchReviewRejectArgs {
+    /// Issue review approval request id.
+    pub approval_request_id: String,
+    /// Optional rejection reason for memory signal payload.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Print result as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -264,7 +334,7 @@ pub enum DispatchA2aCommand {
     /// Reject an outbound A2A task artifact.
     Reject(DispatchA2aApprovalArgs),
     /// Import a local A2A result file as a dispatch artifact.
-    ImportResult(DispatchA2aImportResultArgs),
+    ImportResult(Box<DispatchA2aImportResultArgs>),
 }
 
 #[derive(Debug, Args)]
@@ -301,7 +371,67 @@ pub struct DispatchA2aImportResultArgs {
     /// Optional dispatch run status to set after import.
     #[arg(long)]
     pub status: Option<String>,
+    /// Optional normalized outcome kind to record.
+    #[arg(long)]
+    pub outcome: Option<String>,
+    /// Optional normalized failure class.
+    #[arg(long)]
+    pub failure_class: Option<String>,
+    /// Optional human-readable failure detail.
+    #[arg(long)]
+    pub failure_reason: Option<String>,
+    /// Optional normalized task class.
+    #[arg(long)]
+    pub task_class: Option<String>,
+    /// Optional normalized validation outcome.
+    #[arg(long)]
+    pub validation_outcome: Option<String>,
+    /// Optional idempotency key for outcome recording.
+    #[arg(long)]
+    pub idempotency_key: Option<String>,
     /// Print import result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchOutcomeArgs {
+    #[command(subcommand)]
+    pub command: DispatchOutcomeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DispatchOutcomeCommand {
+    /// Record a normalized terminal or blocked dispatch outcome.
+    Record(DispatchOutcomeRecordArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchOutcomeRecordArgs {
+    /// Dispatch run id.
+    pub run_id: String,
+    /// Normalized outcome kind.
+    #[arg(long)]
+    pub outcome: String,
+    /// Optional normalized failure class.
+    #[arg(long)]
+    pub failure_class: Option<String>,
+    /// Optional human-readable failure detail.
+    #[arg(long)]
+    pub failure_reason: Option<String>,
+    /// Optional normalized task class.
+    #[arg(long)]
+    pub task_class: Option<String>,
+    /// Optional normalized validation outcome.
+    #[arg(long)]
+    pub validation_outcome: Option<String>,
+    /// Optional dispatch artifact id associated with this outcome.
+    #[arg(long)]
+    pub result_artifact_id: Option<String>,
+    /// Optional idempotency key.
+    #[arg(long)]
+    pub idempotency_key: Option<String>,
+    /// Print result as JSON.
     #[arg(long)]
     pub json: bool,
 }

@@ -81,6 +81,59 @@ string_enum!(DispatchRunStatus {
     Canceled => "canceled",
 });
 
+string_enum!(DispatchOutcomeKind {
+    FixReady => "fix_ready",
+    CompletedNoChange => "completed_no_change",
+    NeedsUser => "needs_user",
+    Blocked => "blocked",
+    Failed => "failed",
+    Canceled => "canceled",
+});
+
+impl DispatchOutcomeKind {
+    pub fn is_positive(self) -> bool {
+        matches!(self, Self::FixReady | Self::CompletedNoChange)
+    }
+
+    pub fn terminal_status(self) -> DispatchRunStatus {
+        match self {
+            Self::FixReady | Self::CompletedNoChange => DispatchRunStatus::Completed,
+            Self::NeedsUser => DispatchRunStatus::NeedsUser,
+            Self::Blocked | Self::Failed => DispatchRunStatus::Failed,
+            Self::Canceled => DispatchRunStatus::Canceled,
+        }
+    }
+}
+
+string_enum!(DispatchOutcomeFailureClass {
+    ValidationFailed => "validation_failed",
+    ReproductionFailed => "reproduction_failed",
+    DependencyUnavailable => "dependency_unavailable",
+    WorkspaceUnavailable => "workspace_unavailable",
+    ContextInsufficient => "context_insufficient",
+    AgentRuntimeError => "agent_runtime_error",
+    ExternalServiceError => "external_service_error",
+    PolicyBlocked => "policy_blocked",
+    UserCanceled => "user_canceled",
+    Unknown => "unknown",
+});
+
+string_enum!(DispatchTaskClass {
+    RustCliPanic => "rust_cli_panic",
+    FrontendUiBug => "frontend_ui_bug",
+    DocsUpdate => "docs_update",
+    TestCoverage => "test_coverage",
+    DependencyUpgrade => "dependency_upgrade",
+    UnknownTask => "unknown_task",
+});
+
+string_enum!(DispatchValidationOutcome {
+    NotRun => "not_run",
+    Passed => "passed",
+    Failed => "failed",
+    Unknown => "unknown",
+});
+
 string_enum!(AgentSessionStatus {
     Linked => "linked",
     Active => "active",
@@ -105,6 +158,7 @@ string_enum!(GitHubInteractionStatus {
 });
 
 string_enum!(ApprovalType {
+    IssueReview => "issue_review",
     Dispatch => "dispatch",
     ContinueSession => "continue_session",
     GithubPost => "github_post",
@@ -125,6 +179,88 @@ string_enum!(MemoryEventType {
     NegativeSignal => "negative_signal",
     ProfileAdjustmentCandidate => "profile_adjustment_candidate",
     AgentPerformanceSignal => "agent_performance_signal",
+});
+
+string_enum!(DispatchEventKind {
+    DispatchApprovalResolved => "dispatch_approval_resolved",
+    DispatchOutcomeRecorded => "dispatch_outcome_recorded",
+    DispatchOutcomeMemoryIngestFailed => "dispatch_outcome_memory_ingest_failed",
+    DispatchStarting => "dispatch_starting",
+    DispatchFailed => "dispatch_failed",
+    SessionSynced => "session_synced",
+    SessionTranscriptRead => "session_transcript_read",
+    SessionStarted => "session_started",
+    SessionResumed => "session_resumed",
+    SessionRenamed => "session_renamed",
+    SessionForked => "session_forked",
+    SessionArchived => "session_archived",
+    TurnStarted => "turn_started",
+    A2aResultImported => "a2a_result_imported",
+    Legacy => "legacy",
+});
+
+string_enum!(DispatchEventSeverity {
+    Info => "info",
+    Warning => "warning",
+    Error => "error",
+});
+
+string_enum!(DispatchEventSource {
+    Runtime => "runtime",
+    Adapter => "adapter",
+    Tool => "tool",
+    A2a => "a2a",
+    Github => "github",
+    Migration => "migration",
+});
+
+string_enum!(DispatchSubjectType {
+    DispatchRun => "dispatch_run",
+    Session => "session",
+    IssueTask => "issue_task",
+    Approval => "approval",
+    Artifact => "artifact",
+    Adapter => "adapter",
+    System => "system",
+});
+
+string_enum!(PolicyAction {
+    StartDispatch => "start_dispatch",
+    ResumeDispatch => "resume_dispatch",
+    ReadSessionTranscript => "read_session_transcript",
+    RenameSession => "rename_session",
+    ForkSession => "fork_session",
+    ArchiveSession => "archive_session",
+    SendA2aTask => "send_a2a_task",
+    PostGithubComment => "post_github_comment",
+    OpenPr => "open_pr",
+});
+
+string_enum!(PolicyRequirement {
+    Allowed => "allowed",
+    RequiresApproval => "requires_approval",
+    Forbidden => "forbidden",
+});
+
+string_enum!(AdapterProbeStatus {
+    Supported => "supported",
+    Unsupported => "unsupported",
+    Failed => "failed",
+});
+
+string_enum!(DispatchFailureClass {
+    Adapter => "adapter",
+    Capability => "capability",
+    Policy => "policy",
+    External => "external",
+    Storage => "storage",
+    Validation => "validation",
+    Unknown => "unknown",
+});
+
+string_enum!(TranscriptPayloadStorage {
+    Inline => "inline",
+    Artifact => "artifact",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -218,6 +354,34 @@ pub struct NewDispatchRun {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DispatchRunOutcome {
+    pub id: String,
+    pub run_id: String,
+    pub idempotency_key: String,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchOutcomeFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: Value,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewDispatchRunOutcome {
+    pub run_id: String,
+    pub idempotency_key: String,
+    pub outcome_kind: DispatchOutcomeKind,
+    pub failure_class: Option<DispatchOutcomeFailureClass>,
+    pub failure_detail: Option<String>,
+    pub task_class: Option<DispatchTaskClass>,
+    pub validation_outcome: Option<DispatchValidationOutcome>,
+    pub result_artifact_id: Option<String>,
+    pub metadata_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentSessionLink {
     pub id: String,
     pub agent_id: String,
@@ -244,23 +408,116 @@ pub struct NewAgentSessionLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentEvent {
+pub struct DispatchEvent {
     pub id: String,
+    pub sequence: i64,
     pub run_id: Option<String>,
     pub session_link_id: Option<String>,
-    pub event_type: String,
+    pub issue_task_id: Option<String>,
+    pub event_kind: DispatchEventKind,
+    pub subject_type: DispatchSubjectType,
+    pub subject_id: Option<String>,
+    pub source: DispatchEventSource,
+    pub severity: DispatchEventSeverity,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
     pub native_event_id: Option<String>,
     pub payload_json: Value,
     pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct NewAgentEvent {
+pub struct NewDispatchEvent {
     pub run_id: Option<String>,
     pub session_link_id: Option<String>,
-    pub event_type: String,
+    pub issue_task_id: Option<String>,
+    pub event_kind: DispatchEventKind,
+    pub subject_type: DispatchSubjectType,
+    pub subject_id: Option<String>,
+    pub source: DispatchEventSource,
+    pub severity: DispatchEventSeverity,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
     pub native_event_id: Option<String>,
     pub payload_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DispatchFailure {
+    pub id: String,
+    pub run_id: String,
+    pub phase: String,
+    pub failure_class: DispatchFailureClass,
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+    pub details_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewDispatchFailure {
+    pub run_id: String,
+    pub phase: String,
+    pub failure_class: DispatchFailureClass,
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AdapterProbeResult {
+    pub id: String,
+    pub agent_id: String,
+    pub adapter: String,
+    pub capability: AgentCapabilityName,
+    pub method: Option<String>,
+    pub status: AdapterProbeStatus,
+    pub protocol_version: Option<String>,
+    pub checked_at: String,
+    pub expires_at: Option<String>,
+    pub error_code: Option<String>,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewAdapterProbeResult {
+    pub agent_id: String,
+    pub adapter: String,
+    pub capability: AgentCapabilityName,
+    pub method: Option<String>,
+    pub status: AdapterProbeStatus,
+    pub protocol_version: Option<String>,
+    pub expires_at: Option<String>,
+    pub error_code: Option<String>,
+    pub details_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptItem {
+    pub id: String,
+    pub session_link_id: String,
+    pub turn_id: Option<String>,
+    pub item_index: i64,
+    pub item_type: String,
+    pub text: Option<String>,
+    pub payload_artifact_id: Option<String>,
+    pub payload_storage: TranscriptPayloadStorage,
+    pub metadata_json: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewSessionTranscriptItem {
+    pub session_link_id: String,
+    pub turn_id: Option<String>,
+    pub item_index: i64,
+    pub item_type: String,
+    pub text: Option<String>,
+    pub payload_artifact_id: Option<String>,
+    pub payload_storage: TranscriptPayloadStorage,
+    pub metadata_json: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -350,14 +607,22 @@ pub struct IssueTaskPackage {
     pub kind: String,
     pub version: u8,
     pub issue: IssueTaskPackageIssue,
+    #[serde(default)]
+    pub source: Value,
     pub evidence: Value,
     pub llm_confirmation: Value,
+    #[serde(default)]
+    pub human_review: Value,
     pub user_profile_snapshot: Value,
     pub workspace_policy: Value,
     pub context_pack: Value,
     pub validation_hints: Value,
+    #[serde(default)]
+    pub memory_context: Value,
     pub expected_outputs: Vec<String>,
     pub callback_policy: Value,
+    #[serde(default)]
+    pub outcome_contract: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -372,42 +637,57 @@ impl IssueTaskPackage {
     pub fn new(issue: IssueTaskPackageIssue) -> Self {
         Self {
             kind: "issue_finder_task_package".to_string(),
-            version: 1,
+            version: 2,
             issue,
+            source: Value::Null,
             evidence: Value::Null,
             llm_confirmation: Value::Null,
+            human_review: Value::Null,
             user_profile_snapshot: Value::Null,
             workspace_policy: Value::Null,
             context_pack: Value::Null,
             validation_hints: Value::Null,
+            memory_context: Value::Null,
             expected_outputs: vec!["fix_result.json".to_string()],
             callback_policy: Value::Null,
+            outcome_contract: default_outcome_contract(),
         }
     }
 
-    pub fn from_handoff(
+    pub fn from_reviewed_handoff(
         handoff: &Handoff,
         handoff_artifact_id: &str,
         user_profile_snapshot: Value,
+        review_approval: &ApprovalRequest,
     ) -> Self {
+        let expected_outputs = normalized_expected_outputs(&handoff.instructions.expected_output);
         Self {
             kind: "issue_finder_task_package".to_string(),
-            version: 1,
+            version: 2,
             issue: IssueTaskPackageIssue {
                 repo_full_name: handoff.issue.repo_full_name.clone(),
                 number: handoff.issue.number,
                 title: handoff.issue.title.clone(),
                 url: handoff.issue.url.clone(),
             },
+            source: serde_json::json!({
+                "sourceHandoffId": handoff.id,
+                "handoffArtifactId": handoff_artifact_id,
+                "packagedByApprovalRequestId": review_approval.id,
+                "packageVersion": 2
+            }),
             evidence: serde_json::json!({
                 "handoffArtifactId": handoff_artifact_id,
                 "valueAssessment": handoff.value_assessment,
                 "recommendation": handoff.recommendation,
                 "evidencePack": handoff.evidence_pack
             }),
-            llm_confirmation: serde_json::json!({
-                "llmEnhancement": handoff.llm_enhancement,
-                "llmReview": handoff.llm_review
+            llm_confirmation: serde_json::json!(handoff.llm_confirmation),
+            human_review: serde_json::json!({
+                "approvalRequestId": review_approval.id,
+                "status": review_approval.status,
+                "resolvedAt": review_approval.resolved_at,
+                "details": review_approval.details_json
             }),
             user_profile_snapshot,
             workspace_policy: serde_json::json!({
@@ -423,14 +703,54 @@ impl IssueTaskPackage {
                 "readiness": handoff.readiness,
                 "validationCommands": handoff.context.validation_commands
             }),
-            expected_outputs: handoff.instructions.expected_output.clone(),
+            memory_context: serde_json::json!(handoff.memory_context),
+            expected_outputs,
             callback_policy: serde_json::json!({
                 "expectedArtifacts": ["fix_result.json"],
                 "optionalArtifacts": ["patch", "pr_link", "session_link"],
-                "sourceHandoffId": handoff.id
+                "sourceHandoffId": handoff.id,
+                "importMode": "local_artifact_only"
             }),
+            outcome_contract: default_outcome_contract(),
         }
     }
+}
+
+fn normalized_expected_outputs(values: &[String]) -> Vec<String> {
+    let mut outputs = values
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if !outputs.iter().any(|value| value == "fix_result.json") {
+        outputs.insert(0, "fix_result.json".to_string());
+    }
+    outputs
+}
+
+fn default_outcome_contract() -> Value {
+    serde_json::json!({
+        "version": 1,
+        "requiredArtifact": "fix_result.json",
+        "requiredFields": [
+            "status",
+            "summary",
+            "changedFiles",
+            "validation",
+            "residualRisks",
+            "failureReason",
+            "suggestedGitHubReply"
+        ],
+        "statusValues": ["success", "partial", "failed", "needs_user"],
+        "optionalArtifacts": ["patch", "pr_link", "session_link"],
+        "memoryInputs": {
+            "agentId": true,
+            "taskType": "fix_github_issue",
+            "validationPaths": true,
+            "failureReason": true,
+            "artifactRefs": true
+        }
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
