@@ -102,7 +102,7 @@ fn codex_adapter_session_operations_call_json_rpc_thread_methods() {
     assert!(transport.calls[8].1["input"][0]["text"]
         .as_str()
         .unwrap()
-        .contains("Issue Finder task package"));
+        .contains("Issue Finder task package v3"));
 }
 
 #[test]

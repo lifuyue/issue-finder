@@ -403,7 +403,7 @@ pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> Str
 
 pub(crate) fn render_a2a_export(result: &A2aExportResult) -> String {
     format!(
-        "Created local A2A task artifact for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
+        "Created local A2A task artifact from IssueTaskPackage v3 for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
         result.task.task.issue_key,
         result.task.task.task_type,
         result.export_artifact.path,
@@ -420,7 +420,7 @@ pub(crate) fn render_a2a_approval(action: &str, result: &A2aApprovalResult) -> S
 
 pub(crate) fn render_a2a_result_import(result: &A2aResultImport) -> String {
     format!(
-        "Imported A2A result artifact {} for dispatch run {}.\nRun status: {}",
+        "Imported A2A result artifact {} for dispatch run {} against the package outcome contract.\nRun status: {}",
         result.artifact.id, result.run.id, result.run.status
     )
 }

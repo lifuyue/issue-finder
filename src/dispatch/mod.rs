@@ -16,6 +16,7 @@ pub mod runtime;
 pub mod session_approvals;
 pub mod session_ops;
 pub mod store;
+pub mod task_package;
 pub mod timeline;
 pub mod tool_specs;
 pub mod tools;
@@ -35,12 +36,11 @@ pub use model::{
     DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind,
     DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
     DispatchValidationOutcome, GitHubInteraction, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTask, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEvent,
-    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
-    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewIssueTask, NewMemoryEvent,
-    NewSessionTranscriptItem, PolicyAction, PolicyRequirement, SessionTranscriptItem,
-    TranscriptPayloadStorage,
+    IssueTask, IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult,
+    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact,
+    NewDispatchEvent, NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome,
+    NewGitHubInteraction, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem, PolicyAction,
+    PolicyRequirement, SessionTranscriptItem, TranscriptPayloadStorage,
 };
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
@@ -56,6 +56,7 @@ pub use session_ops::{
     SessionMutationResult, SessionTranscriptResult, SessionsSyncRequest, SessionsSyncResult,
 };
 pub use store::DispatchStore;
+pub use task_package::{IssueTaskPackage, IssueTaskPackageIssue};
 pub use timeline::{ApprovalLatency, DispatchTimeline, DispatchTrace, TimelineItem};
 
 pub use cli::{handle_agents_cli, handle_dispatch_cli, handle_sessions_cli};

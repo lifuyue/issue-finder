@@ -173,7 +173,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_review_approve",
-            "Approve an issue review and create an IssueTaskPackage v2 artifact.",
+            "Approve an issue review and create an IssueTaskPackage v3 artifact.",
             issue_review_approval_schema(),
             false,
         ),
@@ -215,7 +215,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "a2a_export_task",
-            "Create a local A2A task artifact and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
+            "Create a local A2A task artifact from the approved IssueTaskPackage v3 and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
             a2a_export_task_schema(),
             false,
         ),
@@ -233,7 +233,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "a2a_import_result",
-            "Import a local A2A result file as a dispatch artifact.",
+            "Import a local A2A result file that satisfies the IssueTaskPackage v3 outcome contract.",
             a2a_import_result_schema(),
             false,
         ),

@@ -19,14 +19,34 @@ fn a2a_export_creates_local_task_artifact_and_pending_send_approval() {
     assert_eq!(export.status, "pending_approval");
     assert_eq!(export.task.task.task_type, "fix_github_issue");
     assert_eq!(export.task.task.issue_key, "owner/repo#123");
+    assert_eq!(
+        export.task.input_artifacts[0].name,
+        "issue_task_package_v3.json"
+    );
+    assert!(export
+        .task
+        .expected_artifacts
+        .contains(&"validation_log".to_string()));
     assert_eq!(export.task.callback.import_mode, "local_artifact_only");
     assert_eq!(export.export_artifact.kind, "a2a_task_export");
+    assert_eq!(
+        export.export_artifact.metadata_json["packageContractVersion"],
+        3
+    );
     assert_eq!(export.approval_request.approval_type, ApprovalType::A2aSend);
     assert_eq!(export.approval_request.status, ApprovalStatus::Pending);
     assert_eq!(export.approval_request.run_id, None);
     assert_eq!(
         export.approval_request.details_json["a2aTaskArtifactId"],
         export.export_artifact.id
+    );
+    assert_eq!(
+        export.approval_request.details_json["packageContractVersion"],
+        3
+    );
+    assert_eq!(
+        export.approval_request.details_json["expectedResultArtifact"],
+        "fix_result.json"
     );
 
     let artifact_bytes = runtime
