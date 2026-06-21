@@ -21,11 +21,12 @@ Discover good first issues
 
 - Rust toolchain and Cargo
 - Git
-- GitHub Personal Access Token
+- GitHub Personal Access Token with read access for discovery
 
 Optional:
 
 - GitHub CLI (`gh`), useful for reusing an existing GitHub token
+- GitHub issue write permission, needed only if you explicitly approve and post GitHub comments through dispatch projection commands
 - OpenAI-compatible API key, used only when optional LLM summaries are enabled
 - Codex CLI, required only when using the experimental native Codex app-server adapter
 
@@ -46,7 +47,7 @@ cargo run -- --help
 
 ## GitHub Token
 
-Issue Finder uses the GitHub REST API to discover issues and read repository metadata. Local use only needs read access.
+Issue Finder uses the GitHub REST API to discover issues and read repository metadata. Discovery, assessment, preparation, and local dispatch state only need read access.
 
 You can enter a token during `issue-finder init`, or provide one through the environment:
 
@@ -54,7 +55,7 @@ You can enter a token during `issue-finder init`, or provide one through the env
 export GITHUB_TOKEN="$(gh auth token)"
 ```
 
-Issue Finder does not need GitHub write permissions.
+GitHub write permission is optional. It is used only by `issue-finder dispatch github post <interaction-id>` after a local interaction policy decision creates a draft and a human approves the `github_post` approval request.
 
 ## Common Commands
 
@@ -196,8 +197,8 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder dispatch a2a approve <approval-request-id>` | Approve an outbound A2A task artifact for external use |
 | `issue-finder dispatch a2a reject <approval-request-id>` | Reject an outbound A2A task artifact |
 | `issue-finder dispatch a2a import-result <run-id> --path <file>` | Import a local A2A result file as a dispatch artifact |
-| `issue-finder dispatch github draft-tracking owner/repo#123` | Draft a tracking comment and create a local GitHub post approval; imports a ready inbox handoff when needed |
-| `issue-finder dispatch github draft-final <run-id>` | Draft a final GitHub comment from the run's fix result artifact |
+| `issue-finder dispatch github draft-tracking owner/repo#123` | Evaluate tracking-comment policy; default is `no_comment`, and allowed drafts create a local GitHub post approval |
+| `issue-finder dispatch github draft-final <run-id>` | Evaluate final/clarification policy from the run's outcome and result artifact; only explicit suggested replies create a local GitHub post approval |
 | `issue-finder dispatch github approve <interaction-id>` | Approve a drafted GitHub comment for posting |
 | `issue-finder dispatch github reject <interaction-id>` | Reject a drafted GitHub comment |
 | `issue-finder dispatch github post <interaction-id>` | Post an approved GitHub comment through the configured GitHub token |
@@ -320,7 +321,7 @@ By default it does not read complete conversation bodies, system prompts, tool o
 
 `probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
 
-When dispatch state is used, `handoff.json` can be copied into a broader `IssueTaskPackage` artifact. Issue-based dispatch and projection commands import the matching ready inbox handoff automatically when local dispatch state does not exist yet; `dispatch package import-handoff` remains available for explicit inspection or scripting. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, agent events, result artifacts, and GitHub comment interactions. The current CLI can manage linked native sessions, create and approve or reject dispatch proposals, execute approved runs through the native adapter, create local A2A task artifacts with explicit `a2a_send` approval before external use, import local A2A result artifacts, and draft approval-gated GitHub tracking or final comments. Execution first performs local approval, package, and capability checks, then uses the isolated Codex app-server JSON-RPC adapter to start or resume a thread and send the first turn. The adapter starts or connects through `codex app-server daemon start` and `codex app-server proxy` by default, and records local startup metadata in agent capability details. Session read uses the same isolated adapter boundary and persists transcript artifacts locally. Session rename, fork, and archive are approval-gated mutations: the request creates a local approval first, and `sessions approve` performs the native mutation after approval. GitHub posting is a separate projection step: Issue Finder drafts comment bodies as local artifacts, requires explicit approval, then posts through the configured GitHub token.
+When dispatch state is used, `handoff.json` can be copied into a broader `IssueTaskPackage` artifact. Issue-based dispatch and projection commands import the matching ready inbox handoff automatically when local dispatch state does not exist yet; `dispatch package import-handoff` remains available for explicit inspection or scripting. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, agent events, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes. The current CLI can manage linked native sessions, create and approve or reject dispatch proposals, execute approved runs through the native adapter, create local A2A task artifacts with explicit `a2a_send` approval before external use, import local A2A result artifacts, and evaluate conservative GitHub interaction policy before drafting tracking, clarification, or final comments. Execution first performs local approval, package, and capability checks, then uses the isolated Codex app-server JSON-RPC adapter to start or resume a thread and send the first turn. The adapter starts or connects through `codex app-server daemon start` and `codex app-server proxy` by default, and records local startup metadata in agent capability details. Session read uses the same isolated adapter boundary and persists transcript artifacts locally. Session rename, fork, and archive are approval-gated mutations: the request creates a local approval first, and `sessions approve` performs the native mutation after approval. GitHub posting is a separate projection step: Issue Finder drafts comment bodies as local artifacts only when interaction policy finds clear public value, requires explicit approval, then posts through the configured GitHub token.
 
 Runtime topic docs:
 

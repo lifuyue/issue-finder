@@ -3,7 +3,9 @@ use anyhow::Result;
 use super::a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 use super::capability_probe::AgentProbeReport;
 use super::execution::DispatchExecutionResult;
-use super::github_projection::{GitHubApprovalResult, GitHubCommentDraftResult, GitHubPostResult};
+use super::github_projection::{
+    GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubPostResult,
+};
 use super::model::{
     AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
     SessionTranscriptItem,
@@ -435,6 +437,24 @@ pub(crate) fn render_github_draft(result: &GitHubCommentDraftResult) -> String {
         result.approval_request.id,
         result.body_artifact.path
     )
+}
+
+pub(crate) fn render_github_policy_result(result: &GitHubCommentPolicyResult) -> String {
+    match &result.draft {
+        Some(draft) => format!(
+            "{}\nPolicy decision: {} ({})",
+            render_github_draft(draft),
+            result.decision.decision_kind,
+            result.decision.reason_code
+        ),
+        None => format!(
+            "GitHub interaction policy decided {} for {}#{}.\nReason: {}",
+            result.decision.decision_kind,
+            result.issue_task.repo_full_name,
+            result.issue_task.issue_number,
+            result.decision.reason_code
+        ),
+    }
 }
 
 pub(crate) fn render_github_approval(action: &str, result: &GitHubApprovalResult) -> String {

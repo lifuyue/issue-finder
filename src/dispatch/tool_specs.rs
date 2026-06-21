@@ -239,13 +239,13 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "github_draft_tracking_comment",
-            "Draft a GitHub tracking comment and create a post approval request; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
+            "Evaluate GitHub tracking-comment policy for an imported issue; default policy returns no_comment, while an allowed draft creates a post approval request.",
             github_draft_tracking_comment_schema(),
             false,
         ),
         dispatch_tool_spec(
             "github_draft_final_comment",
-            "Draft a final GitHub comment from a dispatch result artifact and create a post approval request.",
+            "Evaluate GitHub final/clarification comment policy from a dispatch result artifact; only explicit suggested replies create post approval requests.",
             github_draft_final_comment_schema(),
             false,
         ),
