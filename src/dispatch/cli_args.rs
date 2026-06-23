@@ -224,7 +224,7 @@ pub struct DispatchPackageArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DispatchPackageCommand {
-    /// Import an existing inbox handoff as an IssueTaskPackage v3 artifact.
+    /// Import an existing inbox handoff as an issue review candidate.
     ImportHandoff(DispatchImportHandoffArgs),
 }
 

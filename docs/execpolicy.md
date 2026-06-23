@@ -1,6 +1,6 @@
 # Execution Policy
 
-Issue Finder execution policy is a manifest, not an executor. `agent-policy.json` describes what downstream agents may consider safe, what needs user approval, and what is outside the handoff boundary.
+Issue Finder execution policy is a handoff manifest, not an executor. `agent-policy.json` describes what downstream agents may consider safe, what needs user approval, and what is outside the prepared handoff boundary. Dispatch execution is a separate approval-gated control-plane path; native agent runtimes still enforce their own sandbox and approval behavior.
 
 ## Manifest Shape
 
@@ -32,7 +32,7 @@ Issue Finder execution policy is a manifest, not an executor. `agent-policy.json
 - `write_roots`: the prepared workspace.
 - `protected_roots`: workspace metadata and Issue Finder-generated handoff files.
 
-`write_roots` is descriptive. It tells a downstream agent where task work belongs, but Issue Finder itself does not edit target source during prepare.
+`write_roots` is descriptive. It tells a downstream agent where task work belongs, but Issue Finder itself does not edit target source.
 
 ## Network Policy
 

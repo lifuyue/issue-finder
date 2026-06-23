@@ -93,7 +93,7 @@
 <rect x="645" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
 <text x="747.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_session_links</text>
 <rect x="895" y="1060" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
-<text x="997.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_events</text>
+<text x="997.5" y="1084.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">dispatch_events</text>
 <rect x="145" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>
 <text x="247.5" y="1139.0" text-anchor="middle" font-size="15" font-weight="750" fill="#172033">agent_artifacts</text>
 <rect x="395" y="1115" width="205" height="36" rx="999" fill="#ffffff" stroke="#c0c7d5" stroke-width="1.5"/>

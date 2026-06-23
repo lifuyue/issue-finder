@@ -2,7 +2,7 @@
 
 Issue Finder prepares coding-agent handoffs without becoming a coding agent itself. The agent-safe preparation runtime adds structured safety, probe, and audit artifacts to each prepared inbox item so Codex, Cursor, Claude Code, or a human developer can start from a clearer boundary.
 
-Issue Finder still does not modify target repository source, install dependencies, run full validation, commit, push, or create pull requests.
+Issue Finder prepare still does not modify target repository source, install dependencies, run full validation, commit, push, or create pull requests. Later dispatch commands can start or resume native execution-agent sessions only after explicit local approvals; the Issue Finder process itself remains outside target source edits.
 
 ## What It Writes
 
@@ -31,7 +31,7 @@ inbox/<id>/
         refs.json
 ```
 
-`handoff.json` remains canonical for prepared inbox items. The dispatch control plane imports an approved handoff into an `IssueTaskPackage` v3 artifact alongside dispatch runs, session links, approvals, events, and result artifacts. Package v3 wraps the handoff with typed execution-agent contracts for reproduction, success criteria, change budget, environment, interaction policy, session resumability, and outcome reporting. The preparation runtime fields remain additive:
+`handoff.json` remains canonical for prepared inbox items. The dispatch control plane imports a ready handoff as an issue review candidate; approval writes an `IssueTaskPackage` v3 artifact alongside dispatch runs, session links, approvals, events, and result artifacts. Package v3 wraps the handoff with typed execution-agent contracts for reproduction, success criteria, change budget, environment, interaction policy, session resumability, and outcome reporting. The preparation runtime fields remain additive:
 
 - `agent_policy`: same content as `agent-policy.json`
 - `probe_pack`: same content as `probe.json`

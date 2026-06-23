@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Issue Finder</strong> 会发现值得交给编码代理处理的 GitHub issue，准备本地上下文，跟踪分派状态，并在代码变更前停止。
+  <strong>Issue Finder</strong> 会发现值得交给编码代理处理的 GitHub issue，准备本地上下文，并协调带审批的分派；Issue Finder 自身不修改目标仓库源码。
 </p>
 
 <p align="center">
@@ -16,23 +16,13 @@
 
 ## 快速开始
 
-### 安装 Issue Finder
+### 安装并运行 Issue Finder
 
 ```bash
 cargo install issue-finder
 ```
 
-如果希望主编码代理代为完成首次设置，可以给它这段提示词：
-
-```text
-帮我安装 cargo issue-finder 到本地并启动。请运行
-`issue-finder profile bootstrap --json`，审阅报告中的技术栈、关键词和项目证据，
-结合我的实际偏好去噪后，更新 `~/.issue-finder/config.toml` 的 `[profile]`。
-不要把会话正文、密钥、系统提示或工具输出写进配置。完成后运行
-`issue-finder doctor` 和 `issue-finder scout --limit 10` 验证。
-```
-
-然后配置 GitHub 访问并检查本地就绪状态：
+配置 GitHub 访问并检查本地就绪状态：
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
@@ -49,42 +39,16 @@ issue-finder prepare owner/repo#123
 issue-finder handoff <inbox-id> --print
 ```
 
-查看本地分派控制面：
-
-```bash
-issue-finder agents list
-issue-finder agents capabilities codex
-issue-finder sessions list --agent codex
-issue-finder sessions sync --agent codex --limit 20
-issue-finder sessions search --issue owner/repo#123
-issue-finder sessions rename <session-link-id> --name "issue-finder: owner/repo#123 - short title"
-issue-finder sessions fork <session-link-id>
-issue-finder sessions approve <approval-request-id>
-issue-finder dispatch owner/repo#123 --agent codex --new-session
-issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
-issue-finder dispatch package import-handoff <inbox-id>
-issue-finder dispatch approve <run-id>
-issue-finder dispatch execute <run-id>
-issue-finder dispatch a2a export owner/repo#123
-issue-finder dispatch a2a approve <approval-request-id>
-issue-finder dispatch github draft-tracking owner/repo#123
-issue-finder dispatch github approve <interaction-id>
-issue-finder dispatch github post <interaction-id>
-issue-finder dispatch github retry <interaction-id>
-```
-
-基于 issue 的 dispatch 和 projection 命令会在需要时把匹配的 ready inbox handoff 导入为 `IssueTaskPackage`。`dispatch package import-handoff` 是显式检查路径。
-
 Issue Finder 默认将本地状态写入 `~/.issue-finder`。使用 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` 进行隔离运行。
 
-### 工具契约
+### 分派与工具契约
+
+Issue Finder 包含带审批的 dispatch 控制面，可管理原生 agent session、A2A task artifact 和 GitHub comment projection。当前命令流程见 [使用指南](./docs/usage.md)。
 
 Issue Finder 也为编码代理暴露 JSON 工具契约：
 
 ```bash
 issue-finder tools list
-issue-finder tools call issue-finder.scout --arguments '{"limit":10}'
-issue-finder tools call issue-finder.scout --arguments '{"repo":"owner/repo","limit":10}'
 ```
 
 ## 文档
@@ -92,6 +56,7 @@ issue-finder tools call issue-finder.scout --arguments '{"repo":"owner/repo","li
 - [**使用指南**](./docs/usage.md)
 - [**代理安全的准备运行时**](./docs/agent-safe-preparation-runtime.md)
 - [**安全探测**](./docs/safe-probes.md)
+- [**历史设计档案**](./docs/superpowers/README.md)
 - [**面向编码代理的仓库指南**](./AGENTS.md)
 
 ## 开发
