@@ -6,7 +6,7 @@ Issue Finder is a Rust rewrite inspired by the current OpenMeta project, but it 
 
 The command name is `issue-finder`. The repository and package name should be `issue-finder`.
 
-Current implementation note: this document records the first Rust product boundary. The original handoff model has since been extended by the agent-safe preparation runtime and the staged agent dispatch control plane. See [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md) for the current prepared artifact structure and [`superpowers/specs/2026-06-18-agent-dispatch-control-plane-design.md`](./superpowers/specs/2026-06-18-agent-dispatch-control-plane-design.md) for the dispatch architecture.
+Current implementation note: this document records the first Rust product boundary. The original handoff model has since been extended by the agent-safe preparation runtime, contribution memory, and the staged agent dispatch control plane. See [`agent-safe-preparation-runtime.md`](./agent-safe-preparation-runtime.md) for the current prepared artifact structure, [`usage.md`](./usage.md) for the current CLI, and [`superpowers/README.md`](./superpowers/README.md) before using historical specs as reference material.
 
 ## Product Positioning
 
@@ -371,7 +371,7 @@ Issue Finder only suggests these commands in the handoff. It does not run them i
 
 `handoff.json` is the canonical payload.
 
-Current prepared items add `context_pack`, `agent_policy`, `probe_pack`, `readiness`, `value_assessment`, and `evidence_pack` to the first-version payload. The additive fields are documented in [`../agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md).
+Current prepared items add `context_pack`, `agent_policy`, `probe_pack`, `readiness`, `value_assessment`, `recommendation`, `evidence_pack`, `memory_context`, and typed LLM confirmation fields to the first-version payload. The additive fields are documented in [`agent-safe-preparation-runtime.md`](./agent-safe-preparation-runtime.md).
 
 Example shape:
 

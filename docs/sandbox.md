@@ -1,6 +1,6 @@
 # Sandbox & Approvals
 
-Issue Finder does not implement an operating system sandbox or a model tool loop. It writes a handoff contract that downstream agent runtimes can read and enforce with their own sandbox and approval systems.
+Issue Finder does not implement an operating system sandbox or a model tool loop. During prepare it writes a handoff contract that downstream agent runtimes can read and enforce with their own sandbox and approval systems. The dispatch control plane can later start or resume native agent sessions only after local approvals; native runtimes still own their sandbox and approval behavior.
 
 ## Issue Finder Boundary
 
@@ -12,10 +12,11 @@ Issue Finder may:
 - Scan repository files within bounded limits
 - Run fixed low-risk probes
 - Write Issue Finder state under `~/.issue-finder` or `ISSUE_FINDER_HOME`
+- Track approval-gated dispatch/session/A2A/GitHub projection state
 
 Issue Finder must not:
 
-- Modify target repository source during prepare
+- Modify target repository source itself
 - Install dependencies
 - Run repository tests, lint, build, or project-defined scripts
 - Commit, push, or create pull requests

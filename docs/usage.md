@@ -81,6 +81,7 @@ issue-finder doctor
 Check JSON tool readiness before an agent calls discovery or prepare:
 
 ```bash
+issue-finder tools list
 issue-finder tools call issue-finder.status --arguments '{}'
 ```
 
@@ -90,6 +91,7 @@ Discover and rank candidate issues:
 issue-finder scout --limit 10
 issue-finder scout --repo owner/repo --limit 10
 issue-finder scout --refresh
+issue-finder assess owner/repo#123
 ```
 
 Prepare a specific issue:
@@ -111,18 +113,24 @@ Inspect local dispatch state:
 ```bash
 issue-finder agents list
 issue-finder agents capabilities codex
+issue-finder agents probe codex
 issue-finder sessions list --agent codex
 issue-finder sessions sync --agent codex --limit 20
 issue-finder sessions search --issue owner/repo#123
 issue-finder sessions read <session-link-id>
+issue-finder sessions replay <session-link-id>
 issue-finder sessions rename <session-link-id> --name "issue-finder: owner/repo#123 - short title"
 issue-finder sessions fork <session-link-id>
 issue-finder sessions archive <session-link-id>
 issue-finder sessions approve <approval-request-id>
 issue-finder sessions reject <approval-request-id>
+issue-finder dispatch package import-handoff <inbox-id>
+issue-finder dispatch review list
+issue-finder dispatch review show <approval-request-id>
+issue-finder dispatch review approve <approval-request-id>
+issue-finder dispatch review reject <approval-request-id> --reason "..."
 issue-finder dispatch owner/repo#123 --agent codex --new-session
 issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
-issue-finder dispatch package import-handoff <inbox-id>
 issue-finder dispatch approve <run-id>
 issue-finder dispatch execute <run-id>
 issue-finder dispatch a2a export owner/repo#123
@@ -132,13 +140,18 @@ issue-finder dispatch a2a import-result <run-id> --path ./fix_result.json --stat
 issue-finder dispatch github draft-tracking owner/repo#123
 issue-finder dispatch github draft-final <run-id>
 issue-finder dispatch github approve <interaction-id>
+issue-finder dispatch github reject <interaction-id>
 issue-finder dispatch github post <interaction-id>
 issue-finder dispatch github retry <interaction-id>
 issue-finder dispatch github list --issue owner/repo#123
 issue-finder dispatch status <run-id>
 issue-finder dispatch events <run-id>
+issue-finder dispatch timeline <run-id>
+issue-finder dispatch trace <run-id>
 issue-finder dispatch artifacts <run-id>
 ```
+
+`dispatch package import-handoff` creates an `issue_review` approval request and stores the handoff/profile snapshot as artifacts. It does not create an `IssueTaskPackage` until `dispatch review approve <approval-request-id>` resolves the review. Direct dispatch, A2A, and GitHub projection commands may auto-import a matching ready inbox handoff, but they return `pending_issue_review` until that approval creates the package.
 
 Manage local inbox items:
 
@@ -147,6 +160,34 @@ issue-finder inbox
 issue-finder inbox --json
 issue-finder inbox archive <inbox-id>
 issue-finder inbox done <inbox-id>
+```
+
+Record or inspect recommendation feedback:
+
+```bash
+issue-finder feedback read owner/repo#123
+issue-finder feedback dismiss owner/repo#123
+issue-finder feedback restore owner/repo#123
+issue-finder feedback show owner/repo#123
+```
+
+Inspect and control contribution memory:
+
+```bash
+issue-finder memory status
+issue-finder memory events --issue owner/repo#123
+issue-finder memory recall --issue owner/repo#123 --kind scout-ranking
+issue-finder memory dreams list
+issue-finder memory dreams show <dream-id>
+issue-finder memory hints list
+issue-finder memory hints approve <hint-id>
+issue-finder memory hints reject <hint-id>
+issue-finder memory hints pin <hint-id>
+issue-finder memory hints deprioritize <hint-id>
+issue-finder memory suppress --scope repo:owner/repo
+issue-finder memory tombstone <event-or-node-or-hint-id>
+issue-finder memory dream --scope global
+issue-finder memory eval --offline --output <dir>
 ```
 
 Run the daily preparation flow:
@@ -159,6 +200,13 @@ issue-finder report
 issue-finder report --date YYYY-MM-DD
 ```
 
+Run deterministic evaluation workflows:
+
+```bash
+issue-finder eval recommendation --offline --output <dir>
+issue-finder eval agent-loop --offline --output <dir>
+```
+
 ## Command Reference
 
 | Command | Purpose |
@@ -166,11 +214,14 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder init` | Create local config and Issue Finder state directories |
 | `issue-finder profile bootstrap --json` | Scan supported local Agent indexes and project manifests, then print a profile bootstrap report |
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
+| `issue-finder tools list` | Print the current Issue Finder JSON tool catalog |
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
 | `issue-finder scout --json` | Print ranked candidates as JSON |
+| `issue-finder assess owner/repo#123` | Assess one issue without preparing workspace or handoff state |
+| `issue-finder assess --url <url>` | Assess one issue from a GitHub issue URL |
 | `issue-finder prepare owner/repo#123` | Prepare one issue and write it to the inbox |
 | `issue-finder prepare --url <url>` | Prepare one issue from a GitHub issue URL |
 | `issue-finder handoff <id>` | Display an existing handoff |
@@ -178,27 +229,34 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder handoff <id> --json` | Print canonical `handoff.json` |
 | `issue-finder agents list` | List local execution agent profiles |
 | `issue-finder agents capabilities codex` | List one agent's declared native capabilities; wired Codex app-server session capabilities are experimental, while unwired capabilities such as `stream_events`, `interrupt_run`, `review_mode`, and `open_pr` are reported as unsupported |
+| `issue-finder agents probe codex` | Probe one agent adapter capability surface and cache the result |
 | `issue-finder sessions list --agent codex` | List local links to native sessions for one agent |
 | `issue-finder sessions sync --agent codex --limit 20` | Sync recent native Codex sessions into local session links |
 | `issue-finder sessions search --issue owner/repo#123` | Search local session links for a GitHub issue |
 | `issue-finder sessions read <session-link-id>` | Read a native session transcript into a local artifact |
+| `issue-finder sessions replay <session-link-id>` | List normalized replay items for a local session link |
 | `issue-finder sessions rename <session-link-id> --name <name>` | Create an approval request to rename a native session |
 | `issue-finder sessions fork <session-link-id>` | Create an approval request to fork a native session into a new local session link |
 | `issue-finder sessions archive <session-link-id>` | Create an approval request to archive a native session |
 | `issue-finder sessions approve <approval-request-id>` | Approve and execute a pending native session mutation |
 | `issue-finder sessions reject <approval-request-id>` | Reject a pending native session mutation |
-| `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Create a pending approval request for future dispatch without starting Codex; imports a ready inbox handoff into an `IssueTaskPackage` v3 contract when needed |
-| `issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>` | Create a pending approval request to continue an existing local session link or native session; imports a ready inbox handoff when needed |
-| `issue-finder dispatch package import-handoff <id>` | Explicitly import an existing inbox handoff as an `IssueTaskPackage` v3 artifact before other dispatch operations |
+| `issue-finder dispatch package import-handoff <id>` | Import an existing inbox handoff as an `issue_review` candidate and create an approval request |
+| `issue-finder dispatch review list` | List pending and resolved issue review requests |
+| `issue-finder dispatch review show <approval-request-id>` | Show one issue review request, including imported handoff/package evidence |
+| `issue-finder dispatch review approve <approval-request-id>` | Approve one issue review and create the `IssueTaskPackage` v3 artifact |
+| `issue-finder dispatch review reject <approval-request-id>` | Reject one issue review without dismissing the recommendation |
+| `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Create a pending dispatch approval without starting Codex; returns `pending_issue_review` first if the package has not been review-approved |
+| `issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>` | Create a pending approval to continue an existing local session link or native session; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch propose owner/repo#123 --agent codex --new-session` | Explicit subcommand form for the same approval-gated dispatch proposal |
 | `issue-finder dispatch approve <run-id>` | Resolve a pending dispatch approval and move the run to `approved` |
 | `issue-finder dispatch reject <run-id>` | Reject a pending dispatch approval and cancel the run |
 | `issue-finder dispatch execute <run-id>` | Connect to the run's native adapter and start the first turn after local approval |
-| `issue-finder dispatch a2a export owner/repo#123` | Create a local A2A task artifact from the approved package v3 contract and an `a2a_send` approval request without network I/O; imports a ready inbox handoff when needed |
+| `issue-finder dispatch outcome record <run-id> --outcome <kind>` | Record a normalized terminal or blocked dispatch outcome |
+| `issue-finder dispatch a2a export owner/repo#123` | Create a local A2A task artifact from the approved package v3 contract and an `a2a_send` approval request without network I/O; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch a2a approve <approval-request-id>` | Approve an outbound A2A task artifact for external use |
 | `issue-finder dispatch a2a reject <approval-request-id>` | Reject an outbound A2A task artifact |
 | `issue-finder dispatch a2a import-result <run-id> --path <file>` | Import a local A2A result file that satisfies the package outcome contract |
-| `issue-finder dispatch github draft-tracking owner/repo#123` | Evaluate tracking-comment policy; default is `no_comment`, and allowed drafts create a local GitHub post approval; imports a ready inbox handoff when needed |
+| `issue-finder dispatch github draft-tracking owner/repo#123` | Evaluate tracking-comment policy; default is `no_comment`, and allowed drafts create a local GitHub post approval; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch github draft-final <run-id>` | Evaluate final/clarification policy from the run's outcome and result artifact; only explicit suggested replies create a local GitHub post approval |
 | `issue-finder dispatch github approve <interaction-id>` | Approve a drafted GitHub comment for posting |
 | `issue-finder dispatch github reject <interaction-id>` | Reject a drafted GitHub comment |
@@ -207,14 +265,34 @@ issue-finder report --date YYYY-MM-DD
 | `issue-finder dispatch github list --issue owner/repo#123` | List local GitHub comment interactions for an issue task |
 | `issue-finder dispatch status <run-id>` | Show one local dispatch run summary |
 | `issue-finder dispatch events <run-id>` | List persisted events for a local dispatch run |
+| `issue-finder dispatch timeline <run-id>` | Show the merged timeline for a local dispatch run |
+| `issue-finder dispatch trace <run-id>` | Show diagnostic trace data for a local dispatch run |
 | `issue-finder dispatch artifacts <run-id>` | List persisted artifacts for a local dispatch run |
 | `issue-finder inbox` | List local inbox items |
 | `issue-finder inbox archive <id>` | Mark an inbox item as archived |
 | `issue-finder inbox done <id>` | Mark an inbox item as done |
+| `issue-finder feedback read <issue>` | Mark an issue as read |
+| `issue-finder feedback dismiss <issue>` | Hide an issue from future recommendation feed results |
+| `issue-finder feedback restore <issue>` | Restore a done or dismissed issue to the recommendation feed |
+| `issue-finder feedback show <issue>` | Show derived recommendation feedback state for an issue |
+| `issue-finder memory status` | Show memory store status, state DB path, and decision-eligible hints |
+| `issue-finder memory events --issue owner/repo#123` | List memory events without raw payloads |
+| `issue-finder memory recall --issue owner/repo#123 --kind scout-ranking` | Recall contribution memory for an issue and query kind |
+| `issue-finder memory dreams list` | List candidate and reviewed memory dreams |
+| `issue-finder memory dreams show <dream-id>` | Show one memory dream and its hints |
+| `issue-finder memory hints list` | List memory hints and decision-eligible hints |
+| `issue-finder memory hints approve/reject/pin/deprioritize <hint-id>` | Review or adjust a memory hint |
+| `issue-finder memory suppress --scope repo:owner/repo` | Suppress memory hints for one scope |
+| `issue-finder memory tombstone <id>` | Tombstone a raw event, node, or hint |
+| `issue-finder memory dream --scope global` | Run deterministic memory dreaming for a scope |
+| `issue-finder memory eval --offline --output <dir>` | Run offline memory evaluation |
 | `issue-finder daily --top 3` | Scout, prepare Top N issues, and write a daily report |
 | `issue-finder daily --repo owner/repo --top 3` | Prepare Top N issues from one repository without cross-repo fallback |
 | `issue-finder report` | Display today's report |
 | `issue-finder report --date YYYY-MM-DD` | Display a report for a specific date |
+| `issue-finder eval recommendation --offline --output <dir>` | Generate deterministic recommendation evaluation reports |
+| `issue-finder eval recommendation --live --output <dir>` | Run the fixed six-profile live recommendation evaluation |
+| `issue-finder eval agent-loop --offline --output <dir>` | Generate deterministic agent loop evaluation reports |
 
 ## Local State Directory
 
@@ -223,8 +301,13 @@ Issue Finder stores local state under `~/.issue-finder` by default:
 ```text
 ~/.issue-finder/
   config.toml
+  state.sqlite3
   cache/
     github-issues.json
+    discovery/
+    enrichment/
+    recommendation/
+      scout-result/
   workspaces/
     owner__repo/
   inbox/
@@ -259,6 +342,8 @@ Issue Finder stores local state under `~/.issue-finder` by default:
   reports/
     YYYY-MM-DD.md
 ```
+
+`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`.
 
 Use `ISSUE_FINDER_HOME` for isolated testing or demos:
 
@@ -313,8 +398,12 @@ By default it does not read complete conversation bodies, system prompts, tool o
 - Agent policy manifest
 - Safe probe pack
 - Preparation readiness score
+- Value assessment and recommendation assessment
+- Evidence pack
+- Approved memory context, when available
+- Typed LLM confirmation status
 - Instructions for a coding agent or human contributor
-- Optional LLM summary status
+- Legacy optional LLM review fields, when present
 
 `handoff.md` is a short readable summary that points back to `handoff.json`, `agent-policy.json`, and `probe.json`.
 
@@ -324,7 +413,7 @@ By default it does not read complete conversation bodies, system prompts, tool o
 
 `probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
 
-When dispatch state is used, `handoff.json` is imported into a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, session/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands import the matching ready inbox handoff automatically when local dispatch state does not exist yet; `dispatch package import-handoff` remains available for explicit inspection or scripting. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, agent events, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes. The current CLI can manage linked native sessions, create and approve or reject dispatch proposals, execute approved runs through the native adapter, create local A2A task artifacts with explicit `a2a_send` approval before external use, import local A2A result artifacts that satisfy the package outcome contract, and evaluate conservative GitHub interaction policy before drafting tracking, clarification, or final comments. Execution first performs local approval, package, and capability checks, then uses the isolated Codex app-server JSON-RPC adapter to start or resume a thread and send the first turn. The adapter starts or connects through `codex app-server daemon start` and `codex app-server proxy` by default, and records local startup metadata in agent capability details. Session read uses the same isolated adapter boundary and persists transcript artifacts locally. Session rename, fork, and archive are approval-gated mutations: the request creates a local approval first, and `sessions approve` performs the native mutation after approval. GitHub posting is a separate projection step: Issue Finder drafts comment bodies as local artifacts only when interaction policy finds clear public value, requires explicit approval, then posts through the configured GitHub token.
+When dispatch state is used, `handoff.json` is imported as an issue review candidate first. Review approval writes a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, session/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands can import the matching ready inbox handoff automatically when local dispatch state does not exist yet, but they return `pending_issue_review` until `dispatch review approve <approval-request-id>` creates the package. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, typed `dispatch_events`, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes. The current CLI can manage linked native sessions, create and approve or reject issue reviews and dispatch proposals, execute approved runs through the native adapter, create local A2A task artifacts with explicit `a2a_send` approval before external use, import local A2A result artifacts that satisfy the package outcome contract, record normalized outcomes, and evaluate conservative GitHub interaction policy before drafting tracking, clarification, or final comments. Execution first performs local approval, package, and capability checks, then uses the isolated Codex app-server JSON-RPC adapter to start or resume a thread and send the first turn. The adapter starts or connects through `codex app-server daemon start` and `codex app-server proxy` by default, and records local startup metadata in agent capability details. Session read uses the same isolated adapter boundary and persists transcript artifacts and replay items locally. Session rename, fork, and archive are approval-gated mutations: the request creates a local approval first, and `sessions approve` performs the native mutation after approval. GitHub posting is a separate projection step: Issue Finder drafts comment bodies as local artifacts only when interaction policy finds clear public value, requires explicit approval, then posts through the configured GitHub token.
 
 The candidate task board is a derived library-level read model over recommendation events, inbox items, and dispatch state. It is a query surface, not a persisted source of truth. Dispatch terminal outcomes remain visible as terminal board status even if an inbox item was marked done or archived; archive and dismiss feedback only affect display state. Reactivation is also projected locally and does not change recommendation feed score or memory ranking adjustments.
 
@@ -334,6 +423,7 @@ Runtime topic docs:
 - [Execution policy](./execpolicy.md)
 - [Safe probes](./safe-probes.md)
 - [Skills and context pack](./skills.md)
+- [Superpowers design archive](./superpowers/README.md)
 
 ## Safety Boundary
 
@@ -347,8 +437,9 @@ Allowed:
 - Scan repository files within a limited scope
 - Run fixed low-risk probes such as `git status --porcelain`, `git branch --show-current`, `git ls-files`, and package script metadata reads
 - Write Issue Finder state under `~/.issue-finder` or `ISSUE_FINDER_HOME`
+- After explicit local approvals, start or resume a native execution-agent session, approve outbound A2A artifacts, or post a drafted GitHub comment
 
-Not allowed:
+Not allowed for the Issue Finder process itself:
 
 - Modify target repository source
 - Automatically run target repository validation commands

@@ -2,7 +2,7 @@
 
 ## 项目结构与模块划分
 
-本仓库是一个 Rust 2021 命令行程序包。二进制入口在 `src/main.rs`，可复用逻辑从 `src/lib.rs` 导出。命令解析位于 `src/cli.rs`；工作流编排和 issue 选择位于 `src/workflow.rs`；tool contract runtime、结构化输出 DTO 和上下文读取安全边界分别位于 `src/tool_runtime.rs`、`src/tool_outputs.rs` 和 `src/tool_context.rs`；prepare gate 的唯一策略实现位于 `src/prepare_gate.rs`。状态路径、收件箱、报告、GitHub 访问、工作区准备、评分、扫描、配置、诊断检查和大模型支持分别放在职责对应的 `src/*.rs` 模块中。集成测试位于 `tests/`。设计说明位于 `docs/superpowers/specs/`，历史 Rust 设计说明位于 `docs/issue-finder-rust-design.md`。被忽略的 `reference/` 目录是外部参考资料。
+本仓库是一个 Rust 2021 命令行程序包。二进制入口在 `src/main.rs`，可复用逻辑从 `src/lib.rs` 导出。命令解析位于 `src/cli.rs`；工作流编排和 issue 选择位于 `src/workflow.rs`；tool contract runtime、结构化输出 DTO 和上下文读取安全边界分别位于 `src/tool_runtime.rs`、`src/tool_outputs.rs` 和 `src/tool_context.rs`；prepare gate 的唯一策略实现位于 `src/prepare_gate.rs`。状态路径、收件箱、报告、GitHub 访问、工作区准备、评分、扫描、配置、诊断检查和大模型支持分别放在职责对应的 `src/*.rs` 模块中。集成测试位于 `tests/`。历史设计抉择位于 `docs/superpowers/specs/`，使用前先读 `docs/superpowers/README.md`；历史 Rust 设计说明位于 `docs/issue-finder-rust-design.md`。被忽略的 `reference/` 目录是外部参考资料。
 
 ## 面向编码代理的设计方向
 
@@ -28,7 +28,7 @@
 - `cargo clippy --all-targets -- -D warnings`：对所有目标执行代码检查，并把警告视为错误。
 - `cargo fmt --all`：提交前格式化整个程序包。
 - `cargo install --path .`：把当前 checkout 安装为 `issue-finder`。
-- `cargo run -- tools list`：本地冒烟验证 JSON tool contract 是否能列出五个 Issue Finder tool specs。
+- `cargo run -- tools list`：本地冒烟验证 JSON tool contract 是否能列出当前完整的 Issue Finder tool specs。
 
 进行隔离的手动运行时，设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo`，避免生成的状态写入 `~/.issue-finder`。
 
