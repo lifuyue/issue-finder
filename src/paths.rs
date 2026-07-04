@@ -39,6 +39,7 @@ impl IssueFinderPaths {
         fs::create_dir_all(&self.inbox_dir)?;
         fs::create_dir_all(&self.reports_dir)?;
         fs::create_dir_all(self.recommendation_dir())?;
+        fs::create_dir_all(self.agent_dir())?;
         Ok(())
     }
 
@@ -107,6 +108,14 @@ impl IssueFinderPaths {
 
     pub fn dispatch_artifacts_dir(&self) -> PathBuf {
         self.dispatch_dir().join("artifacts")
+    }
+
+    pub fn agent_dir(&self) -> PathBuf {
+        self.home.join("agent")
+    }
+
+    pub fn agent_db_path(&self) -> PathBuf {
+        self.agent_dir().join("agent.sqlite3")
     }
 
     pub fn workspace_path_for(&self, repo_full_name: &str) -> PathBuf {

@@ -22,7 +22,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "1.0"
-tokio = { version = "1.38", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.38", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
