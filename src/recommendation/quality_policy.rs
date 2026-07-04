@@ -199,6 +199,7 @@ fn apply_competition_constraints(
         || text.contains("can be closed")
         || text.contains("no longer reproduce")
         || text.contains("should we close this issue since fixed");
+    let possibly_resolved = has_possible_resolution_evidence(&text);
     let claimed = enriched.competition.attempt_comments > 0
         || enriched.competition.claim_comments > 0
         || enriched.competition.working_comments > 0
@@ -270,12 +271,13 @@ fn apply_competition_constraints(
         || text.contains("feel free to fork")
         || text.contains("looking forward to your contribution");
 
-    if has_open_pr {
+    if has_open_pr || possibly_resolved {
         assessment.visibility = Some(RecommendationVisibility::HiddenQuality);
         assessment.penalty += 200;
-        assessment
-            .reasons
-            .push("Quality policy: issue appears to have an open or submitted PR".to_string());
+        assessment.reasons.push(
+            "Quality policy: issue appears to have PR or resolution-verification evidence"
+                .to_string(),
+        );
         return;
     }
 
@@ -295,6 +297,28 @@ fn apply_competition_constraints(
             "Quality policy: issue appears claimed or already guided to a contributor".to_string(),
         );
     }
+}
+
+fn has_possible_resolution_evidence(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "already fixed",
+            "closed by",
+            "closed via",
+            "covered by",
+            "could be verified",
+            "could verify",
+            "fixed in",
+            "fixed via",
+            "looks fixed",
+            "needs verification",
+            "resolved by",
+            "resolved in",
+            "verify on",
+            "verified fixed",
+        ],
+    )
 }
 
 fn apply_low_depth_constraints(
@@ -378,7 +402,7 @@ fn apply_scope_constraints(
         assessment.penalty += 75;
         assessment
             .reasons
-            .push("Quality policy: broad audit or campaign task needs scoping first".to_string());
+            .push("Quality policy: scope remains ambiguous and needs scoping first".to_string());
     }
 }
 

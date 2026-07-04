@@ -3,7 +3,7 @@ pub use crate::value_model::{
     ScoreBand, ValueAssessment, ValueEvidence, ValueGates, ValueScores,
 };
 
-use crate::competition::CompetitionBand;
+use crate::competition::{is_issue_finder_projection_comment, CompetitionBand};
 use crate::config::ProfileConfig;
 use crate::github_enrichment::EnrichedIssue;
 use crate::value_gates::{
@@ -264,8 +264,17 @@ fn add_scope_risk_tag(enriched: &EnrichedIssue, risk_tags: &mut Vec<RiskTag>) {
 }
 
 fn has_scope_risk(enriched: &EnrichedIssue) -> bool {
-    let text =
-        crate::scoring::normalize(&format!("{} {}", enriched.issue.title, enriched.issue.body));
+    let comment_text = enriched
+        .comments
+        .iter()
+        .filter(|comment| !is_issue_finder_projection_comment(&comment.body_excerpt))
+        .map(|comment| comment.body_excerpt.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text = crate::scoring::normalize(&format!(
+        "{} {} {}",
+        enriched.issue.title, enriched.issue.body, comment_text
+    ));
     text.contains("multiple repositories")
         || text.contains("multiple repos")
         || text.contains("two template")
@@ -275,6 +284,20 @@ fn has_scope_risk(enriched: &EnrichedIssue) -> bool {
         || text.contains("three fixes required")
         || text.contains("briefcase windows visualstudio template")
         || text.contains("briefcase windows app template")
+        || text.contains("not that simple")
+        || text.contains("don t think it s that simple")
+        || text.contains("it s not that simple")
+        || text.contains("requires design")
+        || text.contains("needs design")
+        || text.contains("requires discussion")
+        || text.contains("still need to decide")
+        || text.contains("semantics unclear")
+        || text.contains("semantic discussion")
+        || text.contains("is it still valid")
+        || text.contains("issue is old")
+        || text.contains("would it not be as intuitive")
+        || text.contains("is there a reason you are using")
+        || text.contains("rare cases")
         || text.matches("github com").count() >= 2
 }
 
@@ -422,7 +445,7 @@ mod tests {
     use crate::competition::{CompetitionBand, CompetitionFacts};
     use crate::config::ProfileConfig;
     use crate::github::GitHubIssue;
-    use crate::github_enrichment::EnrichedIssue;
+    use crate::github_enrichment::{EnrichedComment, EnrichedIssue};
     use crate::value_model::{GateBand, RecommendationCategory, RiskTag};
 
     fn issue(title: &str, body: &str, stars: u64) -> EnrichedIssue {
@@ -470,6 +493,32 @@ mod tests {
             RecommendationCategory::HighValueReady
         );
         assert!(is_daily_prepare_candidate(&assessment));
+    }
+
+    #[test]
+    fn comment_scope_pushback_blocks_high_value_ready() {
+        let mut enriched = issue(
+            "Fix Rust CLI parser",
+            "Steps to reproduce: run cargo test. Expected graceful behavior, actual panic in src/main.rs. Suggested fix: guard empty input and verify with tests.",
+            2_500,
+        );
+        enriched.comments.push(EnrichedComment {
+            source_ref: "issue:comments.0".to_string(),
+            author: Some("maintainer".to_string()),
+            author_association: "MEMBER".to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            body_excerpt:
+                "EDIT: I don't think it's that simple because the arguments still need design."
+                    .to_string(),
+        });
+
+        let assessment = assess_issue(&enriched, &profile());
+
+        assert_eq!(
+            assessment.recommendation_category,
+            RecommendationCategory::HighValueNeedsScoping
+        );
+        assert!(assessment.risk_tags.contains(&RiskTag::ScopeRisk));
     }
 
     #[test]
