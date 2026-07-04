@@ -34,6 +34,43 @@
       }
     },
     {
+      "id": "core_possibly_resolved_status_verification_should_hide",
+      "sourceTier": "profile_trusted",
+      "issue": {
+        "repoFullName": "example/python-installer",
+        "number": 4988,
+        "title": "Support platform-specific dependency resolution for musl builds",
+        "body": "Feature request: the CLI should resolve dependencies correctly on musl Linux. Expected behavior: musl wheels are selected without forcing glibc artifacts. Suggested fix: extend the resolver platform marker checks and add integration coverage.",
+        "labels": ["help wanted", "cli"],
+        "createdAgeDays": 724,
+        "updatedAgeDays": 40
+      },
+      "repository": {
+        "description": "Fast Python package manager and project tooling",
+        "language": "Rust",
+        "stars": 41000,
+        "forks": 1200,
+        "watchers": 400,
+        "openIssues": 900,
+        "topics": ["python", "packaging", "cli", "rust"],
+        "pushedAgeDays": 1
+      },
+      "comments": [
+        {
+          "body": "Closed by #5036 (glibc), could verify on musl by #12121, with --all-arches added in #9782.",
+          "authorAssociation": "CONTRIBUTOR",
+          "createdAgeDays": 40
+        }
+      ],
+      "competition": { "timelineMissing": false, "closedPrRefs": 1 },
+      "expected": {
+        "quality": "reject",
+        "behavior": "hidden",
+        "rejectReasons": ["claimed_or_pr"],
+        "reasons": ["A recent comment says the issue is at least partially closed and needs status verification before recommendation."]
+      }
+    },
+    {
       "id": "core_completion_open_pr_should_hide",
       "sourceTier": "profile_trusted",
       "issue": {
@@ -91,6 +128,48 @@
         "behavior": "visible",
         "minProfileFit": 80,
         "reasons": ["Represents V4 completion finding no competition and preserving an actionable trusted candidate."]
+      }
+    },
+    {
+      "id": "core_scope_pushback_visible_but_not_ready",
+      "sourceTier": "profile_trusted",
+      "issue": {
+        "repoFullName": "example/shell",
+        "number": 7792,
+        "title": "Error: parser extra positional for start browser command",
+        "body": "Steps to reproduce: run `start browser example.com`. Actual behavior: the parser reports an extra positional argument. Expected behavior: open the browser with the URL. Suggested fix: pass extra arguments through the command implementation and verify with parser tests.",
+        "labels": ["good first issue", "category:enhancement"],
+        "createdAgeDays": 900,
+        "updatedAgeDays": 210
+      },
+      "repository": {
+        "description": "Rust shell and command parser",
+        "language": "Rust",
+        "stars": 39000,
+        "forks": 2200,
+        "watchers": 200,
+        "openIssues": 780,
+        "topics": ["rust", "shell", "cli"],
+        "pushedAgeDays": 1
+      },
+      "comments": [
+        {
+          "body": "EDIT: I don't think it's that simple because the arguments still need to be passed to the spawned program.",
+          "authorAssociation": "MEMBER",
+          "createdAgeDays": 200
+        },
+        {
+          "body": "Is there a reason you are using `start browser <url>` instead of `start <url>`?",
+          "authorAssociation": "MEMBER",
+          "createdAgeDays": 190
+        }
+      ],
+      "competition": { "timelineMissing": false, "closedPrRefs": 1 },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "mustHaveRiskTags": ["scope_risk"],
+        "reasons": ["Maintainer comments keep the task visible but mark it as needing scoping before ready recommendation."]
       }
     },
     {

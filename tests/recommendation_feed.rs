@@ -331,6 +331,33 @@ fn fixed_or_no_longer_reproduced_issue_is_hidden_by_quality_policy() {
 }
 
 #[test]
+fn possibly_resolved_status_verification_issue_is_hidden_by_quality_policy() {
+    let mut ranked = ranked_issue(
+        "owner/status-verification",
+        RecommendationCategory::HighValueNeedsScoping,
+        88,
+        0,
+    );
+    add_comment(
+        &mut ranked,
+        "Closed by #5036 (glibc), could verify on musl by #12121, with --all-arches added in #9782.",
+    );
+
+    apply_recommendation_assessments(std::slice::from_mut(&mut ranked), &HashMap::new());
+
+    assert_eq!(
+        ranked.recommendation.visibility,
+        RecommendationVisibility::HiddenQuality
+    );
+    assert!(ranked.recommendation.quality_penalty >= 200);
+    assert!(ranked
+        .recommendation
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("resolution-verification")));
+}
+
+#[test]
 fn trivial_docs_polish_is_hidden_by_quality_policy() {
     let mut ranked = ranked_issue("owner/docs", RecommendationCategory::NeedsTriage, 82, 0);
     set_issue_text(

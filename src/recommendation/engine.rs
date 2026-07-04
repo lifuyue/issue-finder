@@ -13,7 +13,10 @@ use crate::discovery::{
 };
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
-use crate::github_enrichment::{competition_timeline_missing, GitHubEnrichmentClient};
+use crate::github_enrichment::{
+    canonicalize_enriched_issue_repo, competition_timeline_missing, EnrichedIssue,
+    GitHubEnrichmentClient,
+};
 use crate::memory::apply_ranking_hints_to_ranked;
 use crate::paths::IssueFinderPaths;
 use crate::value_scoring::{assess_issue, RankedValueIssue};
@@ -156,6 +159,7 @@ impl<'a> RecommendationEngine<'a> {
             if let Some(cached) = load_cached_scout_result(self.paths, &scout_cache_key)? {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
                 let mut ranked = cached.ranked;
+                canonicalize_ranked_issues(&mut ranked);
                 let _ = apply_ranking_hints_to_ranked(self.paths, &mut ranked);
                 sort_by_feed(&mut ranked);
                 return Ok(ScoutResult {
@@ -288,7 +292,7 @@ impl<'a> RecommendationEngine<'a> {
             .complete_competition_evidence(enrichment, &mut ranked, refresh, limit)
             .await;
         self.apply_feed_ranking(&mut ranked);
-        append_discovery_reasons(&mut ranked, &discovery_by_key);
+        append_discovery_reasons(&mut ranked, &mut discovery_by_key);
         competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
 
         if competition_limited_display_count(&ranked, limit, false, DisplayMode::Global) < hard_pass
@@ -313,7 +317,7 @@ impl<'a> RecommendationEngine<'a> {
                     .await,
             );
             self.apply_feed_ranking(&mut ranked);
-            append_discovery_reasons(&mut ranked, &discovery_by_key);
+            append_discovery_reasons(&mut ranked, &mut discovery_by_key);
             competition_completion::append_completion_explanations(
                 &mut ranked,
                 &completion_statuses,
@@ -342,7 +346,7 @@ impl<'a> RecommendationEngine<'a> {
                         .await,
                 );
                 self.apply_feed_ranking(&mut ranked);
-                append_discovery_reasons(&mut ranked, &discovery_by_key);
+                append_discovery_reasons(&mut ranked, &mut discovery_by_key);
                 competition_completion::append_completion_explanations(
                     &mut ranked,
                     &completion_statuses,
@@ -494,7 +498,7 @@ impl<'a> RecommendationEngine<'a> {
         diagnostics.fallback_exhausted =
             display_count(&ranked, limit, include_filtered, DisplayMode::Repository) < limit;
         self.apply_feed_ranking(&mut ranked);
-        append_discovery_reasons(&mut ranked, &discovery_by_key);
+        append_discovery_reasons(&mut ranked, &mut discovery_by_key);
         competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
 
         let filtered_count = ranked
@@ -652,7 +656,7 @@ impl<'a> RecommendationEngine<'a> {
             ENRICHED_SCOUT_CANDIDATE_LIMIT,
             display_mode,
         );
-        let discovery_by_key = selected
+        let mut discovery_by_key = selected
             .iter()
             .map(|candidate| (candidate_key(&candidate.issue), candidate.clone()))
             .collect::<HashMap<_, _>>();
@@ -679,7 +683,7 @@ impl<'a> RecommendationEngine<'a> {
 
             ranked.extend(ranked_batch);
             self.apply_feed_ranking(&mut ranked);
-            append_discovery_reasons(&mut ranked, &discovery_by_key);
+            append_discovery_reasons(&mut ranked, &mut discovery_by_key);
 
             if display_count(&ranked, limit, false, display_mode)
                 >= completion_prefill_visible_count(limit)
@@ -825,6 +829,7 @@ impl<'a> RecommendationEngine<'a> {
                 continue;
             };
             item.enriched_issue = enriched.clone();
+            canonicalize_ranked_issue(item);
             item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
             item.score = item.value_assessment.final_rank_score;
             item.explanation = item.value_assessment.explanation.clone();
@@ -840,9 +845,10 @@ impl<'a> RecommendationEngine<'a> {
         refresh: bool,
         include_competition_timeline: bool,
     ) -> Result<RankedValueIssue> {
-        let enriched = enrichment
+        let mut enriched = enrichment
             .enrich_issue_with_options(self.paths, &issue, refresh, include_competition_timeline)
             .await;
+        canonicalize_enriched_issue_repo(&mut enriched);
         let value_assessment = assess_issue(&enriched, &self.config.profile);
         let mut ranked = RankedValueIssue {
             issue,
@@ -852,6 +858,7 @@ impl<'a> RecommendationEngine<'a> {
             explanation: Vec::new(),
             recommendation: Default::default(),
         };
+        canonicalize_ranked_issue(&mut ranked);
         ranked.explanation = ranked.value_assessment.explanation.clone();
         self.apply_feed_ranking(std::slice::from_mut(&mut ranked));
         Ok(ranked)
@@ -867,8 +874,9 @@ impl<'a> RecommendationEngine<'a> {
 
 fn append_discovery_reasons(
     ranked: &mut [RankedValueIssue],
-    discovery_by_key: &HashMap<String, DiscoveryCandidate>,
+    discovery_by_key: &mut HashMap<String, DiscoveryCandidate>,
 ) {
+    canonicalize_discovery_keys(ranked, discovery_by_key);
     for item in ranked {
         let key = candidate_key(&item.issue);
         let Some(candidate) = discovery_by_key.get(&key) else {
@@ -880,6 +888,39 @@ fn append_discovery_reasons(
             }
         }
     }
+}
+
+fn canonicalize_discovery_keys(
+    ranked: &[RankedValueIssue],
+    discovery_by_key: &mut HashMap<String, DiscoveryCandidate>,
+) {
+    let additions = ranked
+        .iter()
+        .filter_map(|item| {
+            let canonical_key = candidate_key(&item.issue);
+            if discovery_by_key.contains_key(&canonical_key) {
+                return None;
+            }
+            let (_, candidate) = discovery_by_key
+                .iter()
+                .find(|(_, candidate)| matches_canonicalized_candidate(candidate, item))?;
+            let mut candidate = candidate.clone();
+            candidate.issue = item.issue.clone();
+            Some((canonical_key, candidate))
+        })
+        .collect::<Vec<_>>();
+
+    discovery_by_key.extend(additions);
+}
+
+fn matches_canonicalized_candidate(
+    candidate: &DiscoveryCandidate,
+    item: &RankedValueIssue,
+) -> bool {
+    candidate.issue.number == item.issue.number
+        && (candidate.issue.url == item.issue.url
+            || (candidate.issue.repo_name == item.issue.repo_name
+                && candidate.issue.title == item.issue.title))
 }
 
 fn select_enrichment_candidates_for_mode(
@@ -919,6 +960,35 @@ fn annotate_diagnostics(
 
 fn candidate_key(issue: &GitHubIssue) -> String {
     format!("{}#{}", issue.repo_full_name, issue.number)
+}
+
+fn canonicalize_ranked_issue(item: &mut RankedValueIssue) {
+    canonicalize_github_issue_from_enriched(&mut item.issue, &item.enriched_issue);
+}
+
+fn canonicalize_ranked_issues(ranked: &mut [RankedValueIssue]) {
+    for item in ranked {
+        canonicalize_ranked_issue(item);
+    }
+}
+
+fn canonicalize_github_issue_from_enriched(issue: &mut GitHubIssue, enriched: &EnrichedIssue) {
+    let canonical = enriched.issue.repo_full_name.trim();
+    if canonical.is_empty() || issue.repo_full_name == canonical {
+        return;
+    }
+
+    let repo_name = canonical
+        .split('/')
+        .nth(1)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| issue.repo_name.clone());
+
+    issue.repo_full_name = canonical.to_string();
+    issue.repo_name = repo_name;
+    issue.url = enriched.issue.url.clone();
+    issue.repo_description = enriched.repository.description.clone();
+    issue.repo_stars = enriched.repository.stars;
 }
 
 fn display_count(

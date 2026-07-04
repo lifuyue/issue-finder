@@ -10,7 +10,7 @@ fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
     let report = evaluate_named_datasets(builtin_datasets());
 
     assert_eq!(report.datasets.len(), 10);
-    assert_eq!(report.overall.samples, 105);
+    assert_eq!(report.overall.samples, 107);
     assert!(report.overall.visible <= report.overall.samples);
     assert!((0.0..=1.0).contains(&report.overall.precision_at5));
     assert!((0.0..=1.0).contains(&report.overall.precision_at10));

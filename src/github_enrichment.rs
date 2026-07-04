@@ -260,8 +260,9 @@ impl GitHubEnrichmentClient {
         include_competition_timeline: bool,
     ) -> EnrichedIssue {
         if !refresh {
-            if let Ok(Some(cached)) = load_cached_enrichment(paths, issue) {
+            if let Ok(Some(mut cached)) = load_cached_enrichment(paths, issue) {
                 if !include_competition_timeline || !competition_timeline_missing(&cached) {
+                    canonicalize_enriched_issue_repo(&mut cached);
                     return cached;
                 }
             }
@@ -276,7 +277,10 @@ impl GitHubEnrichmentClient {
         };
 
         match self.fetch_repo_cached(paths, &owner, &repo, refresh).await {
-            Ok(repo_facts) => enriched.repository = repo_facts,
+            Ok(repo_facts) => {
+                enriched.repository = repo_facts;
+                canonicalize_enriched_issue_repo(&mut enriched);
+            }
             Err(error) => enriched
                 .warnings
                 .push(format!("Repository metadata enrichment failed: {error}")),
@@ -414,12 +418,15 @@ impl GitHubEnrichmentClient {
         refresh: bool,
     ) -> EnrichedIssue {
         if !competition_timeline_missing(current) {
-            return current.clone();
+            let mut current = current.clone();
+            canonicalize_enriched_issue_repo(&mut current);
+            return current;
         }
 
         if !refresh {
-            if let Ok(Some(cached)) = load_cached_enrichment(paths, issue) {
+            if let Ok(Some(mut cached)) = load_cached_enrichment(paths, issue) {
                 if !competition_timeline_missing(&cached) {
+                    canonicalize_enriched_issue_repo(&mut cached);
                     return cached;
                 }
             }
@@ -504,6 +511,7 @@ impl GitHubEnrichmentClient {
             }
         }
         enriched.source_fetched_at = Utc::now().to_rfc3339();
+        canonicalize_enriched_issue_repo(&mut enriched);
         let _ = save_cached_enrichment(paths, issue, &enriched);
         enriched
     }
@@ -936,6 +944,19 @@ impl GitHubEnrichmentClient {
     }
 }
 
+pub fn canonicalize_enriched_issue_repo(enriched: &mut EnrichedIssue) {
+    let canonical = enriched.repository.full_name.trim();
+    if canonical.is_empty() || enriched.issue.repo_full_name == canonical {
+        return;
+    }
+
+    enriched.issue.repo_full_name = canonical.to_string();
+    enriched.issue.url = format!(
+        "https://github.com/{canonical}/issues/{}",
+        enriched.issue.number
+    );
+}
+
 impl EnrichedIssue {
     pub fn from_issue(issue: &GitHubIssue) -> Self {
         Self {
@@ -1239,8 +1260,9 @@ mod tests {
     use crate::github::GitHubIssue;
 
     use super::{
-        competition_timeline_missing, competition_timeline_not_fetched, fork_velocity,
-        star_velocity, tail_limited, trailing_sample_pages, EnrichedIssue, TimestampedSample,
+        canonicalize_enriched_issue_repo, competition_timeline_missing,
+        competition_timeline_not_fetched, fork_velocity, star_velocity, tail_limited,
+        trailing_sample_pages, EnrichedIssue, TimestampedSample,
     };
 
     fn sample(timestamp: &str) -> TimestampedSample {
@@ -1311,6 +1333,25 @@ mod tests {
         };
         assert!(competition_timeline_missing(&enriched));
         assert!(!competition_timeline_not_fetched(&enriched));
+    }
+
+    #[test]
+    fn canonicalizes_issue_repo_from_repository_full_name() {
+        let mut enriched = EnrichedIssue::from_issue(&GitHubIssue {
+            repo_full_name: "old-owner/repo".to_string(),
+            repo_name: "repo".to_string(),
+            url: "https://github.com/old-owner/repo/issues/1".to_string(),
+            ..issue()
+        });
+        enriched.repository.full_name = "new-owner/repo".to_string();
+
+        canonicalize_enriched_issue_repo(&mut enriched);
+
+        assert_eq!(enriched.issue.repo_full_name, "new-owner/repo");
+        assert_eq!(
+            enriched.issue.url,
+            "https://github.com/new-owner/repo/issues/1"
+        );
     }
 
     fn issue() -> GitHubIssue {
