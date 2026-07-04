@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use issue_finder::agent::handle_agent_cli;
 use issue_finder::cli::{
     Cli, Command, FeedbackCommand, InboxCommand, MemoryDreamsCommand, MemoryHintsCommand,
     ProfileCommand, ToolsCommand,
@@ -419,6 +420,13 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string(&output)?);
             }
         },
+        Command::Agent(args) => {
+            let config = Config::load_or_default(&paths)?;
+            let output = handle_agent_cli(&paths, config, args).await?;
+            if !output.is_empty() {
+                println!("{output}");
+            }
+        }
         Command::Doctor => {
             doctor::ensure_paths(&paths)?;
             let config = Config::load_or_default(&paths)?;

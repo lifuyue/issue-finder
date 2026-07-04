@@ -11,6 +11,8 @@ Discover good first issues
   -> Run fixed low-risk preparation probes
   -> Generate handoff, policy, probe, event, and context artifacts
   -> Store the task in the local inbox
+  -> Import handoff for issue review when dispatch or projection is requested
+  -> Create IssueTaskPackage v3 only after review approval
   -> Track optional dispatch state, session links, and result artifacts
   -> Project local candidate/task board state for queries
   -> Generate a daily report
@@ -85,12 +87,26 @@ issue-finder tools list
 issue-finder tools call issue-finder.status --arguments '{}'
 ```
 
+Run the local Issue Finder agent daemon and push a natural-language A2A task to it:
+
+```bash
+issue-finder agent daemon
+issue-finder agent card
+issue-finder agent send "Search global repositories and recommend issues" --limit 5 --wait
+issue-finder agent list
+issue-finder agent show <agent-task-id>
+issue-finder agent events <agent-task-id>
+```
+
+`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/tasks/send`, `/a2a/tasks`, `/a2a/tasks/{taskId}`, and `/a2a/tasks/{taskId}/events` over local HTTP. A sent task is a high-level natural-language goal; the daemon asks the configured LLM to choose allowed Issue Finder tools, runs only the first-version read-only tool set (`issue-finder.status` and `issue-finder.scout`), and persists the task, messages, tool calls, events, and final answer in `agent/agent.sqlite3`. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
+
 Discover and rank candidate issues:
 
 ```bash
 issue-finder scout --limit 10
 issue-finder scout --repo owner/repo --limit 10
 issue-finder scout --refresh
+issue-finder scout --stats-json
 issue-finder assess owner/repo#123
 ```
 
@@ -129,6 +145,7 @@ issue-finder dispatch review list
 issue-finder dispatch review show <approval-request-id>
 issue-finder dispatch review approve <approval-request-id>
 issue-finder dispatch review reject <approval-request-id> --reason "..."
+issue-finder dispatch owner/repo#123 --agent codex
 issue-finder dispatch owner/repo#123 --agent codex --new-session
 issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
 issue-finder dispatch approve <run-id>
@@ -152,6 +169,10 @@ issue-finder dispatch artifacts <run-id>
 ```
 
 `dispatch package import-handoff` creates an `issue_review` approval request and stores the handoff/profile snapshot as artifacts. It does not create an `IssueTaskPackage` until `dispatch review approve <approval-request-id>` resolves the review. Direct dispatch, A2A, and GitHub projection commands may auto-import a matching ready inbox handoff, but they return `pending_issue_review` until that approval creates the package.
+
+Direct dispatch creates a new native session proposal when `--session` is omitted. `--new-session` is the explicit form of that same start-session request and cannot be combined with `--session`; dispatch state records both the actual execution mode and whether the caller explicitly requested a new session.
+
+For JSON tool callers, prefer the public `issue-finder.dispatch` tool. The runtime still accepts `issue-finder.dispatch_propose` as a compatibility alias, but `tools list` does not advertise it.
 
 Manage local inbox items:
 
@@ -216,10 +237,17 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
 | `issue-finder tools list` | Print the current Issue Finder JSON tool catalog |
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
+| `issue-finder agent daemon` | Start the local HTTP A2A Issue Finder agent daemon |
+| `issue-finder agent card` | Read the running daemon's A2A agent card |
+| `issue-finder agent send "<goal>" --limit 5 --wait` | Push a natural-language task to the running daemon and optionally poll until completion |
+| `issue-finder agent list` | List recent daemon tasks through the local A2A endpoint |
+| `issue-finder agent show <agent-task-id>` | Show one daemon task, including persisted messages, tool calls, and result metadata |
+| `issue-finder agent events <agent-task-id>` | Show ordered persisted events for one daemon task |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
 | `issue-finder scout --json` | Print ranked candidates as JSON |
+| `issue-finder scout --stats-json` | Print ranked candidates plus discovery, filter, cache, and API budget stats as JSON |
 | `issue-finder assess owner/repo#123` | Assess one issue without preparing workspace or handoff state |
 | `issue-finder assess --url <url>` | Assess one issue from a GitHub issue URL |
 | `issue-finder prepare owner/repo#123` | Prepare one issue and write it to the inbox |
@@ -245,7 +273,8 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder dispatch review show <approval-request-id>` | Show one issue review request, including imported handoff/package evidence |
 | `issue-finder dispatch review approve <approval-request-id>` | Approve one issue review and create the `IssueTaskPackage` v3 artifact |
 | `issue-finder dispatch review reject <approval-request-id>` | Reject one issue review without dismissing the recommendation |
-| `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Create a pending dispatch approval without starting Codex; returns `pending_issue_review` first if the package has not been review-approved |
+| `issue-finder dispatch owner/repo#123 --agent codex` | Create a pending dispatch approval for a new native session by default; returns `pending_issue_review` first if the package has not been review-approved |
+| `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Explicit form of the default new-session dispatch proposal; returns `pending_issue_review` first if the package has not been review-approved |
 | `issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>` | Create a pending approval to continue an existing local session link or native session; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch propose owner/repo#123 --agent codex --new-session` | Explicit subcommand form for the same approval-gated dispatch proposal |
 | `issue-finder dispatch approve <run-id>` | Resolve a pending dispatch approval and move the run to `approved` |
@@ -337,13 +366,15 @@ Issue Finder stores local state under `~/.issue-finder` by default:
   dispatch/
     dispatch.sqlite3
     artifacts/
+  agent/
+    agent.sqlite3
   recommendation/
     events.jsonl
   reports/
     YYYY-MM-DD.md
 ```
 
-`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`.
+`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon tasks, conversation messages, tool calls, events, and final results for natural-language A2A tasks sent to the running Issue Finder agent.
 
 Use `ISSUE_FINDER_HOME` for isolated testing or demos:
 
