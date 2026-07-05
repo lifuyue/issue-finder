@@ -5,8 +5,11 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config::{Config, GitHubTokenSource};
+use crate::discovery::sort_candidates;
 use crate::dispatch::tools::{execute_dispatch_tool, is_dispatch_tool, DispatchToolError};
 use crate::github::{GitHubClient, GitHubIssue};
+use crate::github_budget::GitHubApiBudget;
+use crate::github_enrichment::GitHubEnrichmentClient;
 use crate::memory::{
     memory_dream_show, memory_dreams_list, memory_hint_update, memory_hints_list, memory_recall,
     memory_status, memory_tombstone, parse_query_kind, MemoryHintStatus,
@@ -18,17 +21,22 @@ use crate::recommendation::{
 };
 use crate::tool_context::{read_context_section, ReadContextError, ReadContextToolArgs};
 use crate::tool_outputs::{
-    assess_structured_output, assessment_output, candidate_output, failure_output,
-    gate_bypass_output, handoff_output, issue_output, prepare_blocked_structured_output,
-    prepare_failed_structured_output, prepare_gate_output, prepare_prepared_structured_output,
-    readiness_output, scout_structured_output, status_structured_output, to_value,
-    AssessmentOutput, GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput,
-    StatusGitHubAuthOutput, StatusGitHubOutput,
+    assess_structured_output, assessment_output, candidate_output,
+    discover_candidates_structured_output, discovery_candidate_output, failure_output,
+    gate_bypass_output, handoff_output, inspect_candidate_structured_output,
+    inspect_discussion_structured_output, inspect_repo_health_structured_output, issue_output,
+    prepare_blocked_structured_output, prepare_failed_structured_output, prepare_gate_output,
+    prepare_prepared_structured_output, rank_shortlist_structured_output, readiness_output,
+    scout_structured_output, status_structured_output, to_value, AssessmentOutput,
+    GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput, StatusGitHubAuthOutput,
+    StatusGitHubOutput,
 };
 use crate::tool_specs::{
-    TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST,
-    TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS, TOOL_MEMORY_TOMBSTONE,
-    TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+    TOOL_ASSESS, TOOL_DISCOVER_CANDIDATES, TOOL_INSPECT_CANDIDATE, TOOL_INSPECT_DISCUSSION,
+    TOOL_INSPECT_REPO_HEALTH, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW,
+    TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS,
+    TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE, TOOL_RANK_SHORTLIST, TOOL_READ_CONTEXT, TOOL_SCOUT,
+    TOOL_STATUS,
 };
 use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
@@ -228,6 +236,11 @@ impl IssueFinderToolRuntime {
 
         let result = match invocation.tool_name.as_str() {
             TOOL_STATUS => self.call_status(&invocation).await,
+            TOOL_DISCOVER_CANDIDATES => self.call_discover_candidates(&invocation).await,
+            TOOL_INSPECT_CANDIDATE => self.call_inspect_candidate(&invocation).await,
+            TOOL_INSPECT_DISCUSSION => self.call_inspect_discussion(&invocation).await,
+            TOOL_INSPECT_REPO_HEALTH => self.call_inspect_repo_health(&invocation).await,
+            TOOL_RANK_SHORTLIST => self.call_rank_shortlist(&invocation).await,
             TOOL_SCOUT => self.call_scout(&invocation).await,
             TOOL_ASSESS => self.call_assess(&invocation).await,
             TOOL_PREPARE => self.call_prepare(&invocation).await,
@@ -381,6 +394,294 @@ impl IssueFinderToolRuntime {
                 result.filtered_count,
                 result.diagnostics,
             ),
+        ))
+    }
+
+    async fn call_discover_candidates(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: DiscoverCandidatesToolArgs = parse_arguments(&invocation.arguments)?;
+        let limit = args.limit.unwrap_or(5).clamp(1, 20);
+        let lane_limit = args.lane_limit.unwrap_or(4).clamp(1, 10);
+        let budget = GitHubApiBudget::from_env();
+        let github = GitHubClient::with_budget(&self.config, budget.clone())?;
+        let scope = scout_scope(args.repo)?;
+        let (scope_name, repository, mut candidates) = match scope {
+            DiscoveryScope::Global => {
+                let candidates = github
+                    .discover_agent_global_candidates(
+                        &self.paths,
+                        args.refresh,
+                        &self.config.profile,
+                        lane_limit,
+                    )
+                    .await
+                    .map_err(RuntimeFailure::System)?;
+                ("global".to_string(), None, candidates)
+            }
+            DiscoveryScope::Repository { repository } => {
+                let output = github
+                    .discover_repository_beginner_candidates(
+                        &self.paths,
+                        args.refresh,
+                        &repository,
+                        &self.config.profile,
+                    )
+                    .await
+                    .map_err(RuntimeFailure::System)?;
+                (
+                    "repository".to_string(),
+                    Some(repository.full_name()),
+                    output.candidates,
+                )
+            }
+        };
+        sort_candidates(&mut candidates);
+        let discovered_count = candidates.len();
+        let candidate_outputs = candidates
+            .iter()
+            .take(limit)
+            .map(|candidate| discovery_candidate_output(candidate, 600))
+            .collect::<Vec<_>>();
+        let candidate_count = candidate_outputs.len();
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!(
+                "Discovered {candidate_count} lightweight candidates ({discovered_count} total before limit)."
+            ),
+            discover_candidates_structured_output(
+                TOOL_DISCOVER_CANDIDATES,
+                scope_name,
+                repository,
+                candidate_outputs,
+                discovered_count,
+                lane_limit,
+                to_value(github.request_stats()),
+            ),
+        ))
+    }
+
+    async fn call_inspect_candidate(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: InspectCandidateToolArgs = parse_arguments(&invocation.arguments)?;
+        let selector = issue_selector(args.issue, args.url)?;
+        let issue_ref = selector
+            .issue_ref()
+            .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string()))?;
+        let budget = GitHubApiBudget::from_env();
+        let github = GitHubClient::with_budget(&self.config, budget)?;
+        let issue = github
+            .fetch_issue(&issue_ref)
+            .await
+            .map_err(RuntimeFailure::System)?;
+        let body_limit = args.max_body_chars.unwrap_or(4_000).min(12_000);
+        let issue_label = issue_label(&issue);
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Inspected {issue_label}."),
+            inspect_candidate_structured_output(TOOL_INSPECT_CANDIDATE, &issue, body_limit),
+        ))
+    }
+
+    async fn call_inspect_discussion(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: InspectDiscussionToolArgs = parse_arguments(&invocation.arguments)?;
+        let selector = issue_selector(args.issue, args.url)?;
+        let issue_ref = selector
+            .issue_ref()
+            .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string()))?;
+        let budget = GitHubApiBudget::from_env();
+        let github = GitHubClient::with_budget(&self.config, budget.clone())?;
+        let issue = github
+            .fetch_issue(&issue_ref)
+            .await
+            .map_err(RuntimeFailure::System)?;
+        let enrichment = GitHubEnrichmentClient::with_budget(&self.config, budget.clone())?;
+        let enriched = enrichment
+            .enrich_issue_with_options(&self.paths, &issue, args.refresh, true)
+            .await;
+        let max_comments = args.max_comments.unwrap_or(12).min(30);
+        let issue_label = issue_label(&issue);
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!(
+                "Inspected discussion for {issue_label}: {} comments returned, competition band {}.",
+                enriched.comments.iter().take(max_comments).count(),
+                enriched.competition.competition_band
+            ),
+            inspect_discussion_structured_output(
+                TOOL_INSPECT_DISCUSSION,
+                &issue,
+                &enriched,
+                max_comments,
+                to_value(enrichment.request_stats()),
+            ),
+        ))
+    }
+
+    async fn call_inspect_repo_health(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: InspectRepoHealthToolArgs = parse_arguments(&invocation.arguments)?;
+        let budget = GitHubApiBudget::from_env();
+        let repository_scope = if let Some(repo) = normalized_optional(args.repo.clone()) {
+            Some(
+                RepositoryScope::parse(&repo)
+                    .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        if let Some(repository) = repository_scope {
+            let github = GitHubClient::with_budget(&self.config, budget.clone())?;
+            let recent_window = args.recent_window.unwrap_or(30).clamp(1, 100);
+            let recent = github
+                .discover_repository_recent_candidates(
+                    &self.paths,
+                    args.refresh,
+                    &repository,
+                    &self.config.profile,
+                    recent_window,
+                )
+                .await
+                .map_err(RuntimeFailure::System)?;
+            let signal = github
+                .discover_repository_signal_candidates(
+                    &self.paths,
+                    args.refresh,
+                    &repository,
+                    &self.config.profile,
+                )
+                .await;
+            let sample_candidates = recent
+                .candidates
+                .iter()
+                .chain(signal.candidates.iter())
+                .take(8)
+                .map(|candidate| discovery_candidate_output(candidate, 300))
+                .collect::<Vec<_>>();
+            let recent_count = recent.candidates.len();
+            let signal_count = signal.candidates.len();
+            let repository_name = repository.full_name();
+
+            return Ok(IssueFinderToolOutput::success(
+                invocation,
+                "ok",
+                format!(
+                    "Inspected {repository_name}: {recent_count} recent candidates and {signal_count} signal candidates."
+                ),
+                inspect_repo_health_structured_output(
+                    TOOL_INSPECT_REPO_HEALTH,
+                    repository_name,
+                    None,
+                    None,
+                    None,
+                    Some(recent_count),
+                    Some(signal_count),
+                    sample_candidates,
+                    vec![recent.diagnostics, signal.diagnostics],
+                    Vec::new(),
+                    to_value(github.request_stats()),
+                ),
+            ));
+        }
+
+        let selector = issue_selector(args.issue, args.url)?;
+        let issue_ref = selector
+            .issue_ref()
+            .map_err(|error| RuntimeFailure::InvalidArguments(error.to_string()))?;
+        let github = GitHubClient::with_budget(&self.config, budget.clone())?;
+        let issue = github
+            .fetch_issue(&issue_ref)
+            .await
+            .map_err(RuntimeFailure::System)?;
+        let enrichment = GitHubEnrichmentClient::with_budget(&self.config, budget.clone())?;
+        let enriched = enrichment
+            .enrich_issue_with_options(&self.paths, &issue, args.refresh, false)
+            .await;
+        let repository_name = enriched.repository.full_name.clone();
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!(
+                "Inspected repository health for {repository_name}: stars {}, forks {}.",
+                enriched.repository.stars, enriched.repository.forks
+            ),
+            inspect_repo_health_structured_output(
+                TOOL_INSPECT_REPO_HEALTH,
+                repository_name,
+                Some(to_value(&enriched.repository)),
+                Some(to_value(&enriched.activity)),
+                Some(to_value(&enriched.growth)),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                enriched.warnings,
+                to_value(enrichment.request_stats()),
+            ),
+        ))
+    }
+
+    async fn call_rank_shortlist(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let args: RankShortlistToolArgs = parse_arguments(&invocation.arguments)?;
+        let issues = args
+            .issues
+            .into_iter()
+            .map(|issue| issue.trim().to_string())
+            .filter(|issue| !issue.is_empty())
+            .take(5)
+            .collect::<Vec<_>>();
+        if issues.is_empty() {
+            return Err(RuntimeFailure::InvalidArguments(
+                "issues must contain at least one non-empty issue reference".to_string(),
+            ));
+        }
+
+        let mut ranked = Vec::new();
+        for issue in issues {
+            ranked.push(
+                self.assess_selection(
+                    IssueSelector::new(Some(issue), None),
+                    args.refresh,
+                    args.record_read.unwrap_or(true),
+                    RecommendationEventSource::ToolAssess,
+                )
+                .await?,
+            );
+        }
+        ranked.sort_by(|left, right| {
+            right
+                .value_assessment
+                .final_rank_score
+                .cmp(&left.value_assessment.final_rank_score)
+                .then_with(|| left.issue.url.cmp(&right.issue.url))
+        });
+        let candidates = ranked.iter().map(candidate_output).collect::<Vec<_>>();
+        let count = candidates.len();
+
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            format!("Ranked {count} shortlist candidates."),
+            rank_shortlist_structured_output(TOOL_RANK_SHORTLIST, candidates, json!({})),
         ))
     }
 
@@ -874,6 +1175,67 @@ struct ScoutToolArgs {
     include_filtered: bool,
     #[serde(default)]
     record_exposure: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DiscoverCandidatesToolArgs {
+    limit: Option<usize>,
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    refresh: bool,
+    #[serde(default)]
+    lane_limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InspectCandidateToolArgs {
+    #[serde(default)]
+    issue: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    max_body_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InspectDiscussionToolArgs {
+    #[serde(default)]
+    issue: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    refresh: bool,
+    #[serde(default)]
+    max_comments: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InspectRepoHealthToolArgs {
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    issue: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    refresh: bool,
+    #[serde(default)]
+    recent_window: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RankShortlistToolArgs {
+    issues: Vec<String>,
+    #[serde(default)]
+    refresh: bool,
+    #[serde(default)]
+    record_read: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

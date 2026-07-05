@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::tool_specs::IssueFinderToolSpec;
+use crate::tool_specs::{agent_metadata_for_tool, IssueFinderToolSpec};
 
 pub const TOOL_AGENTS_LIST: &str = "issue-finder.agents_list";
 pub const TOOL_AGENT_CAPABILITIES: &str = "issue-finder.agent_capabilities";
@@ -294,6 +294,7 @@ fn dispatch_tool_spec(
         description: description.to_string(),
         input_schema,
         defer_loading,
+        agent: agent_metadata_for_tool(&format!("issue-finder.{name}")),
     }
 }
 

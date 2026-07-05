@@ -94,6 +94,12 @@ issue-finder agent daemon
 issue-finder agent card
 issue-finder agent thread-start "Search global repositories and recommend issues" --limit 5 --wait
 issue-finder agent thread-send <agent-thread-id> "Assess the first candidate more deeply" --wait
+issue-finder agent thread-steer <agent-thread-id> <agent-turn-id> "Prefer the second candidate"
+issue-finder agent thread-inject <agent-thread-id> "User-side agent says comments are important"
+issue-finder agent thread-compact <agent-thread-id>
+issue-finder agent thread-interrupt <agent-thread-id> <agent-turn-id>
+issue-finder agent approval-approve <agent-thread-id> <approval-request-id>
+issue-finder agent approval-reject <agent-thread-id> <approval-request-id>
 issue-finder agent threads
 issue-finder agent thread-show <agent-thread-id>
 issue-finder agent thread-events <agent-thread-id>
@@ -103,7 +109,7 @@ issue-finder agent show <agent-task-id>
 issue-finder agent events <agent-task-id>
 ```
 
-`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/threads/start`, `/a2a/threads/{threadId}/turns/send`, `/a2a/threads`, `/a2a/threads/{threadId}`, `/a2a/threads/{threadId}/events`, and the older one-shot `/a2a/tasks/*` endpoints over local HTTP. Prefer `agent thread-start` and `agent thread-send` for resumable work: the daemon stores the thread, turns, bounded model-visible items, events, and final turn results in `agent/agent.sqlite3`, so a later daemon process can continue the same thread by id. `agent send` remains a compatibility-oriented one-shot task helper. The first agent runtime still runs only the read-only tool set (`issue-finder.status` and `issue-finder.scout`). This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
+`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/threads/start`, `/a2a/threads/{threadId}/turns/send`, `/a2a/threads/{threadId}/turns/{turnId}/steer`, `/a2a/threads/{threadId}/turns/{turnId}/interrupt`, `/a2a/threads/{threadId}/inject-items`, `/a2a/threads/{threadId}/compact-context`, `/a2a/threads/{threadId}/approvals/{approvalRequestId}/approve`, `/a2a/threads/{threadId}/approvals/{approvalRequestId}/reject`, `/a2a/threads`, `/a2a/threads/{threadId}`, `/a2a/threads/{threadId}/items`, `/a2a/threads/{threadId}/events`, `/a2a/threads/{threadId}/subscribe?since=<sequence>`, and the older one-shot `/a2a/tasks/*` endpoints over local HTTP. Prefer `agent thread-start` and `agent thread-send` for resumable work: the daemon stores the thread, turns, mailbox inputs, approval requests, bounded model-visible items, events, artifact refs, and final turn results in `agent/agent.sqlite3`, so a later daemon process can continue the same thread by id. When `thread-send` targets a running thread, the input is queued as a steer mailbox item instead of being rejected. `agent send` remains a compatibility-oriented one-shot task helper and is marked `legacy: true` in task metadata. The agent card returns both direct tool names and compact `toolDefinitions` with schema/exposure metadata. `tools list` also marks each tool with `agent.exposure`, `agent.visibleByDefault`, `agent.supportsParallel`, and `agent.sideEffects`, so external agents can distinguish direct, deferred, and approval-required tools without reading Issue Finder internals. The first agent runtime runs the read-only recommendation loop tools (`issue-finder.status`, `issue-finder.discover_candidates`, `issue-finder.inspect_candidate`, `issue-finder.inspect_discussion`, `issue-finder.inspect_repo_health`, `issue-finder.rank_shortlist`, and `issue-finder.assess`). The heavier `issue-finder.scout` pipeline remains available as a deferred batch CLI/tool-contract command, but it is not the agent daemon's default direct tool. The agent does not expose workspace preparation, dispatch, GitHub posting, or memory mutation tools by default; if an approval-required tool is called, the daemon records an approval request and only executes it through the owner tool runtime after `agent approval-approve`. `subscribe` is resumable polling; if a client asks to replay too many events at once, it returns a `lagged` 409 instead of streaming an unbounded backlog. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
 
 Discover and rank candidate issues:
 
@@ -246,6 +252,12 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder agent card` | Read the running daemon's A2A agent card |
 | `issue-finder agent thread-start "<goal>" --limit 5 --wait` | Start a resumable daemon thread and optionally poll until its first turn completes |
 | `issue-finder agent thread-send <agent-thread-id> "<input>" --wait` | Append a follow-up turn to a resumable daemon thread |
+| `issue-finder agent thread-steer <agent-thread-id> <agent-turn-id> "<input>"` | Queue steering input for a running daemon turn |
+| `issue-finder agent thread-inject <agent-thread-id> "<input>"` | Queue injected context for the thread mailbox |
+| `issue-finder agent thread-compact <agent-thread-id>` | Request deterministic context compaction for a persisted daemon thread |
+| `issue-finder agent thread-interrupt <agent-thread-id> <agent-turn-id>` | Request cancellation of a running daemon turn |
+| `issue-finder agent approval-approve <agent-thread-id> <approval-request-id>` | Approve and execute an approval-gated agent tool request through the owner runtime |
+| `issue-finder agent approval-reject <agent-thread-id> <approval-request-id>` | Reject an approval-gated agent tool request |
 | `issue-finder agent threads` | List recent resumable daemon threads |
 | `issue-finder agent thread-show <agent-thread-id>` | Show one persisted daemon thread, including turns, items, events, and last result |
 | `issue-finder agent thread-events <agent-thread-id>` | Show ordered persisted events for one daemon thread |
@@ -384,7 +396,7 @@ Issue Finder stores local state under `~/.issue-finder` by default:
     YYYY-MM-DD.md
 ```
 
-`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon threads, turns, bounded model-visible items, events, final turn results, and compatibility task rows for natural-language A2A work sent to the running Issue Finder agent.
+`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon threads, turns, mailbox items, approval requests, bounded model-visible items, context compaction items, events, final turn results, artifact refs, and compatibility task rows for natural-language A2A work sent to the running Issue Finder agent. Large agent payloads spill to `agent/artifacts/` with SHA-256 metadata retained in SQLite.
 
 Use `ISSUE_FINDER_HOME` for isolated testing or demos:
 
@@ -414,9 +426,11 @@ base_url = "https://api.openai.com/v1"
 api_key = ""
 api_key_env = ""
 model = "gpt-4o-mini"
+wire_api = "chat_completions"
 ```
 
 If `llm.api_key_env` is set, Issue Finder reads the LLM key from that environment variable instead of `llm.api_key`.
+Set `llm.wire_api = "responses"` for providers that support native Responses tool calls; otherwise the agent uses the chat-completions fallback adapter.
 
 ### Profile Bootstrap
 

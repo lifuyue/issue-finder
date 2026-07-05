@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::discovery::DiscoveryDiagnostics;
 use crate::github::GitHubIssue;
+use crate::github_enrichment::EnrichedIssue;
 use crate::prepare_gate::{
     allowed_prepare_categories, default_prepare_allowed, prepare_gate_reasons, PrepareGateDecision,
 };
@@ -19,6 +20,98 @@ pub struct IssueOutput {
     pub number: u64,
     pub title: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryCandidateOutput {
+    pub issue: IssueOutput,
+    pub candidate_id: String,
+    pub source_lanes: Vec<String>,
+    pub trust_tier: String,
+    pub matched_labels: Vec<String>,
+    pub rough_score: i32,
+    pub created_at: String,
+    pub updated_at: String,
+    pub body_preview: String,
+    pub body_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverCandidatesStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub scope: String,
+    pub repository: Option<String>,
+    pub candidates: Vec<DiscoveryCandidateOutput>,
+    pub discovered_count: usize,
+    pub lane_limit: usize,
+    pub api_budget: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectCandidateStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub issue: IssueOutput,
+    pub labels: Vec<String>,
+    pub repo_description: String,
+    pub repo_stars: u64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub body: String,
+    pub body_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectDiscussionStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub issue: IssueOutput,
+    pub comments: Vec<serde_json::Value>,
+    pub participants: serde_json::Value,
+    pub competition: CompetitionOutput,
+    pub warnings: Vec<String>,
+    pub api_budget: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectRepoHealthStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub repository: String,
+    pub repository_facts: Option<serde_json::Value>,
+    pub activity: Option<serde_json::Value>,
+    pub growth: Option<serde_json::Value>,
+    pub recent_candidate_count: Option<usize>,
+    pub signal_candidate_count: Option<usize>,
+    pub sample_candidates: Vec<DiscoveryCandidateOutput>,
+    pub diagnostics: Vec<DiscoveryDiagnostics>,
+    pub warnings: Vec<String>,
+    pub api_budget: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RankShortlistStructuredOutput {
+    pub kind: String,
+    pub tool: String,
+    pub status: String,
+    pub success: bool,
+    pub candidates: Vec<CandidateOutput>,
+    pub api_budget: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -281,6 +374,25 @@ pub fn issue_output(issue: &GitHubIssue) -> IssueOutput {
     }
 }
 
+pub fn discovery_candidate_output(
+    candidate: &crate::discovery::DiscoveryCandidate,
+    body_limit: usize,
+) -> DiscoveryCandidateOutput {
+    let (body_preview, body_truncated) = truncate_text(&candidate.issue.body, body_limit);
+    DiscoveryCandidateOutput {
+        issue: issue_output(&candidate.issue),
+        candidate_id: candidate.key(),
+        source_lanes: candidate.source_lanes.clone(),
+        trust_tier: candidate.trust_tier.to_string(),
+        matched_labels: candidate.matched_labels.clone(),
+        rough_score: candidate.rough_score,
+        created_at: candidate.issue.created_at.clone(),
+        updated_at: candidate.issue.updated_at.clone(),
+        body_preview,
+        body_truncated,
+    }
+}
+
 pub fn candidate_output(candidate: &RankedValueIssue) -> CandidateOutput {
     CandidateOutput {
         issue: issue_output(&candidate.issue),
@@ -361,6 +473,135 @@ pub fn gate_bypass_output(decision: &PrepareGateDecision) -> Option<GateBypassOu
         }),
         PrepareGateDecision::Allowed | PrepareGateDecision::Blocked { .. } => None,
     }
+}
+
+pub fn discover_candidates_structured_output(
+    tool: &str,
+    scope: String,
+    repository: Option<String>,
+    candidates: Vec<DiscoveryCandidateOutput>,
+    discovered_count: usize,
+    lane_limit: usize,
+    api_budget: serde_json::Value,
+) -> Value {
+    to_value(DiscoverCandidatesStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "ok".to_string(),
+        success: true,
+        scope,
+        repository,
+        candidates,
+        discovered_count,
+        lane_limit,
+        api_budget,
+    })
+}
+
+pub fn inspect_candidate_structured_output(
+    tool: &str,
+    issue: &GitHubIssue,
+    body_limit: usize,
+) -> Value {
+    let (body, body_truncated) = truncate_text(&issue.body, body_limit);
+    to_value(InspectCandidateStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "ok".to_string(),
+        success: true,
+        issue: issue_output(issue),
+        labels: issue.labels.clone(),
+        repo_description: issue.repo_description.clone(),
+        repo_stars: issue.repo_stars,
+        created_at: issue.created_at.clone(),
+        updated_at: issue.updated_at.clone(),
+        body,
+        body_truncated,
+    })
+}
+
+pub fn inspect_discussion_structured_output(
+    tool: &str,
+    issue: &GitHubIssue,
+    enriched: &EnrichedIssue,
+    max_comments: usize,
+    api_budget: serde_json::Value,
+) -> Value {
+    let comments = enriched
+        .comments
+        .iter()
+        .take(max_comments)
+        .map(to_value)
+        .collect::<Vec<_>>();
+    to_value(InspectDiscussionStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "ok".to_string(),
+        success: true,
+        issue: issue_output(issue),
+        comments,
+        participants: to_value(&enriched.participants),
+        competition: CompetitionOutput {
+            open_pr_refs: enriched.competition.open_pr_refs,
+            closed_pr_refs: enriched.competition.closed_pr_refs,
+            attempt_comments: enriched.competition.attempt_comments,
+            claim_comments: enriched.competition.claim_comments,
+            working_comments: enriched.competition.working_comments,
+            fix_submitted_comments: enriched.competition.fix_submitted_comments,
+            competition_points: enriched.competition.competition_points,
+            competition_band: enriched.competition.competition_band.to_string(),
+            warnings: enriched.competition.warnings.clone(),
+        },
+        warnings: enriched.warnings.clone(),
+        api_budget,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn inspect_repo_health_structured_output(
+    tool: &str,
+    repository: String,
+    repository_facts: Option<serde_json::Value>,
+    activity: Option<serde_json::Value>,
+    growth: Option<serde_json::Value>,
+    recent_candidate_count: Option<usize>,
+    signal_candidate_count: Option<usize>,
+    sample_candidates: Vec<DiscoveryCandidateOutput>,
+    diagnostics: Vec<DiscoveryDiagnostics>,
+    warnings: Vec<String>,
+    api_budget: serde_json::Value,
+) -> Value {
+    to_value(InspectRepoHealthStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "ok".to_string(),
+        success: true,
+        repository,
+        repository_facts,
+        activity,
+        growth,
+        recent_candidate_count,
+        signal_candidate_count,
+        sample_candidates,
+        diagnostics,
+        warnings,
+        api_budget,
+    })
+}
+
+pub fn rank_shortlist_structured_output(
+    tool: &str,
+    candidates: Vec<CandidateOutput>,
+    api_budget: serde_json::Value,
+) -> Value {
+    to_value(RankShortlistStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "ok".to_string(),
+        success: true,
+        candidates,
+        api_budget,
+    })
 }
 
 pub fn scout_structured_output(
@@ -579,4 +820,11 @@ fn risk_tags_output(assessment: &ValueAssessment) -> Vec<String> {
         .iter()
         .map(ToString::to_string)
         .collect()
+}
+
+fn truncate_text(value: &str, limit: usize) -> (String, bool) {
+    if value.chars().count() <= limit {
+        return (value.to_string(), false);
+    }
+    (value.chars().take(limit).collect(), true)
 }

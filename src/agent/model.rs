@@ -175,6 +175,22 @@ pub struct AgentThreadItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentThreadMailboxItem {
+    pub sequence: i64,
+    pub id: String,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub delivery: String,
+    pub status: String,
+    pub input: String,
+    pub payload: Value,
+    pub created_at: String,
+    pub consumed_at: Option<String>,
+    pub rejected_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentThreadEvent {
     pub sequence: i64,
     pub id: String,
@@ -192,7 +208,39 @@ pub struct AgentThreadDetail {
     pub thread: AgentThread,
     pub turns: Vec<AgentTurn>,
     pub items: Vec<AgentThreadItem>,
+    pub mailbox_items: Vec<AgentThreadMailboxItem>,
+    pub approval_requests: Vec<AgentApprovalRequest>,
     pub events: Vec<AgentThreadEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentApprovalRequest {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    pub status: String,
+    pub result: Option<Value>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub executed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentArtifact {
+    pub id: String,
+    pub kind: String,
+    pub content_type: String,
+    pub path: String,
+    pub sha256: String,
+    pub byte_len: usize,
+    pub summary: Value,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -307,6 +355,20 @@ impl AgentThreadTurnRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentThreadInjectRequest {
+    pub input: String,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+impl AgentThreadInjectRequest {
+    pub fn normalized_input(&self) -> String {
+        self.input.trim().to_string()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentTaskAcceptedEnvelope {
     pub kind: String,
     pub version: u8,
@@ -347,8 +409,14 @@ pub struct AgentThreadAcceptedEnvelope {
     pub version: u8,
     pub thread: AgentThread,
     pub turn: AgentTurn,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailbox_item: Option<AgentThreadMailboxItem>,
     pub thread_url: String,
+    pub turn_url: String,
     pub events_url: String,
+    pub subscribe_url: String,
+    pub items_url: String,
+    pub result_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -387,6 +455,9 @@ pub struct AgentCardEnvelope {
     pub input_modes: Vec<String>,
     pub output_modes: Vec<String>,
     pub tools: Vec<String>,
+    pub tool_definitions: Vec<Value>,
+    pub capabilities: Vec<AgentCapability>,
+    pub provider: AgentProviderCapabilities,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -395,4 +466,23 @@ pub struct AgentEndpoint {
     pub method: String,
     pub path: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapability {
+    pub name: String,
+    pub status: String,
+    pub method: Option<String>,
+    pub path: Option<String>,
+    pub limits: Value,
+    pub provider_requirements: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderCapabilities {
+    pub wire_api: String,
+    pub native_tools: bool,
+    pub deferred_tools: bool,
 }

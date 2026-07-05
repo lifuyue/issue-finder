@@ -2,6 +2,11 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 pub const TOOL_SCOUT: &str = "issue-finder.scout";
+pub const TOOL_DISCOVER_CANDIDATES: &str = "issue-finder.discover_candidates";
+pub const TOOL_INSPECT_CANDIDATE: &str = "issue-finder.inspect_candidate";
+pub const TOOL_INSPECT_DISCUSSION: &str = "issue-finder.inspect_discussion";
+pub const TOOL_INSPECT_REPO_HEALTH: &str = "issue-finder.inspect_repo_health";
+pub const TOOL_RANK_SHORTLIST: &str = "issue-finder.rank_shortlist";
 pub const TOOL_ASSESS: &str = "issue-finder.assess";
 pub const TOOL_PREPARE: &str = "issue-finder.prepare";
 pub const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
@@ -75,6 +80,16 @@ pub struct IssueFinderToolSpec {
     pub description: String,
     pub input_schema: Value,
     pub defer_loading: bool,
+    pub agent: ToolAgentMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAgentMetadata {
+    pub exposure: String,
+    pub visible_by_default: bool,
+    pub supports_parallel: bool,
+    pub side_effects: Vec<String>,
 }
 
 pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
@@ -87,8 +102,38 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
         ),
         tool_spec(
             "scout",
-            "Discover and rank candidate GitHub issues with gate-aware summaries.",
+            "Run the batch discovery, enrichment, ranking, and filtering pipeline for GitHub issues.",
             scout_schema(),
+            true,
+        ),
+        tool_spec(
+            "discover_candidates",
+            "Lightly discover candidate GitHub issues for agent loops without enrichment or ranking.",
+            discover_candidates_schema(),
+            false,
+        ),
+        tool_spec(
+            "inspect_candidate",
+            "Fetch one GitHub issue's core details before deciding whether to assess it.",
+            inspect_candidate_schema(),
+            false,
+        ),
+        tool_spec(
+            "inspect_discussion",
+            "Fetch one candidate issue's comments, participant, and competition signals as a bounded read-only observation.",
+            inspect_discussion_schema(),
+            false,
+        ),
+        tool_spec(
+            "inspect_repo_health",
+            "Inspect repository activity and lightweight issue supply signals before committing to a candidate.",
+            inspect_repo_health_schema(),
+            false,
+        ),
+        tool_spec(
+            "rank_shortlist",
+            "Score and compare an explicit shortlist of GitHub issues; still call assess on the selected best candidate before a final recommendation.",
+            rank_shortlist_schema(),
             false,
         ),
         tool_spec(
@@ -165,12 +210,13 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
 
 fn quick_start() -> ToolQuickStart {
     ToolQuickStart {
-        summary: "Use scout to find candidates, assess the top issue, prepare it if the gate allows, then read deferred context sections as needed.".to_string(),
+        summary: "For agent loops, use discover_candidates to recall a small shortlist, inspect one candidate, assess it, then prepare only if the gate allows. Use scout for batch CLI-style discovery.".to_string(),
         first_call: ToolFirstCall {
-            default_tool: TOOL_SCOUT.to_string(),
+            default_tool: TOOL_DISCOVER_CANDIDATES.to_string(),
             default_arguments: json!({
-                "repo": "owner/repo",
-                "limit": 10
+                "repo": null,
+                "limit": 5,
+                "laneLimit": 4
             }),
             when_ready_unknown: TOOL_STATUS.to_string(),
             fallback_after_setup_failure: TOOL_STATUS.to_string(),
@@ -182,8 +228,28 @@ fn recommended_workflow() -> Vec<ToolWorkflowStep> {
     vec![
         workflow_step(
             "discover",
-            TOOL_SCOUT,
-            "Find and rank candidates. Use repo when the user named a repository.",
+            TOOL_DISCOVER_CANDIDATES,
+            "Recall a compact candidate shortlist. Use repo when the user named a repository.",
+        ),
+        workflow_step(
+            "inspect",
+            TOOL_INSPECT_CANDIDATE,
+            "Inspect one candidate issue before spending a heavier assessment call.",
+        ),
+        workflow_step(
+            "inspect_discussion",
+            TOOL_INSPECT_DISCUSSION,
+            "Pull comments and competition signals only when inspection leaves uncertainty.",
+        ),
+        workflow_step(
+            "inspect_repo_health",
+            TOOL_INSPECT_REPO_HEALTH,
+            "Check repository activity or candidate supply when repo health matters to the decision.",
+        ),
+        workflow_step(
+            "rank_shortlist",
+            TOOL_RANK_SHORTLIST,
+            "Compare 2-5 explicit candidates before final recommendation.",
         ),
         workflow_step(
             "assess",
@@ -231,7 +297,107 @@ fn tool_spec(
         description: description.to_string(),
         input_schema,
         defer_loading,
+        agent: agent_metadata_for_tool(&format!("issue-finder.{name}")),
     }
+}
+
+pub fn agent_metadata_for_tool(canonical_name: &str) -> ToolAgentMetadata {
+    let exposure = agent_exposure_for_tool(canonical_name);
+    ToolAgentMetadata {
+        exposure: exposure.to_string(),
+        visible_by_default: exposure == "direct",
+        supports_parallel: supports_parallel_for_tool(canonical_name),
+        side_effects: side_effects_for_tool(canonical_name),
+    }
+}
+
+pub fn agent_exposure_for_tool(canonical_name: &str) -> &'static str {
+    match canonical_name {
+        TOOL_STATUS
+        | TOOL_DISCOVER_CANDIDATES
+        | TOOL_INSPECT_CANDIDATE
+        | TOOL_INSPECT_DISCUSSION
+        | TOOL_INSPECT_REPO_HEALTH
+        | TOOL_RANK_SHORTLIST
+        | TOOL_ASSESS => "direct",
+        TOOL_PREPARE => "approval_required",
+        TOOL_SCOUT | TOOL_READ_CONTEXT => "deferred",
+        name if name.contains("approve")
+            || name.contains("reject")
+            || name.contains("execute")
+            || name.contains("post_comment")
+            || name.contains("retry_comment")
+            || name.contains("hint_update")
+            || name.contains("tombstone")
+            || name.contains("archive")
+            || name.contains("rename")
+            || name.contains("fork") =>
+        {
+            "approval_required"
+        }
+        _ => "deferred",
+    }
+}
+
+fn side_effects_for_tool(canonical_name: &str) -> Vec<String> {
+    match canonical_name {
+        TOOL_STATUS
+        | TOOL_INSPECT_CANDIDATE
+        | TOOL_INSPECT_DISCUSSION
+        | TOOL_INSPECT_REPO_HEALTH
+        | TOOL_READ_CONTEXT => Vec::new(),
+        TOOL_DISCOVER_CANDIDATES => vec!["may_refresh_cache".to_string()],
+        TOOL_SCOUT => vec![
+            "may_refresh_cache".to_string(),
+            "records_local_exposure_by_default".to_string(),
+            "large_observation".to_string(),
+        ],
+        TOOL_RANK_SHORTLIST | TOOL_ASSESS => vec![
+            "may_refresh_cache".to_string(),
+            "records_local_read_by_default".to_string(),
+        ],
+        TOOL_PREPARE => vec![
+            "approval_required".to_string(),
+            "writes_local_workspace".to_string(),
+            "writes_handoff".to_string(),
+        ],
+        name if name.contains("github_post_comment") || name.contains("github_retry_comment") => {
+            vec![
+                "approval_required".to_string(),
+                "posts_to_github".to_string(),
+            ]
+        }
+        name if agent_exposure_for_tool(name) == "approval_required" => {
+            vec![
+                "approval_required".to_string(),
+                "mutates_local_state".to_string(),
+            ]
+        }
+        name if name.contains("memory_status")
+            || name.contains("memory_recall")
+            || name.contains("dispatch_status")
+            || name.contains("dispatch_events")
+            || name.contains("dispatch_timeline")
+            || name.contains("dispatch_trace")
+            || name.contains("dispatch_artifacts")
+            || name.contains("dispatch_review_list")
+            || name.contains("dispatch_review_show")
+            || name.contains("github_interactions")
+            || name.contains("agents_list")
+            || name.contains("agent_capabilities")
+            || name.contains("sessions_list")
+            || name.contains("sessions_search")
+            || name.contains("sessions_read")
+            || name.contains("sessions_replay") =>
+        {
+            Vec::new()
+        }
+        _ => vec!["mutates_local_state_or_large_context".to_string()],
+    }
+}
+
+fn supports_parallel_for_tool(canonical_name: &str) -> bool {
+    matches!(canonical_name, TOOL_STATUS | TOOL_INSPECT_CANDIDATE)
 }
 
 fn status_schema() -> Value {
@@ -258,15 +424,102 @@ fn scout_schema() -> Value {
     })
 }
 
+fn discover_candidates_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+            "repo": { "type": ["string", "null"], "default": null },
+            "refresh": { "type": "boolean", "default": false },
+            "laneLimit": { "type": "integer", "minimum": 1, "maximum": 10, "default": 4 }
+        },
+        "additionalProperties": false
+    })
+}
+
+fn inspect_candidate_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "issue": { "type": "string" },
+            "url": { "type": "string" },
+            "maxBodyChars": { "type": "integer", "minimum": 0, "maximum": 12000, "default": 4000 }
+        },
+        "oneOf": [
+            { "required": ["issue"] },
+            { "required": ["url"] }
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn inspect_discussion_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "issue": { "type": "string" },
+            "url": { "type": "string" },
+            "refresh": { "type": "boolean", "default": false },
+            "maxComments": { "type": "integer", "minimum": 0, "maximum": 30, "default": 12 }
+        },
+        "oneOf": [
+            { "required": ["issue"] },
+            { "required": ["url"] }
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn inspect_repo_health_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "repo": { "type": ["string", "null"] },
+            "issue": { "type": "string" },
+            "url": { "type": "string" },
+            "refresh": { "type": "boolean", "default": false },
+            "recentWindow": { "type": "integer", "minimum": 1, "maximum": 100, "default": 30 }
+        },
+        "oneOf": [
+            { "required": ["repo"] },
+            { "required": ["issue"] },
+            { "required": ["url"] }
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn rank_shortlist_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "issues": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 1,
+                "maxItems": 5
+            },
+            "refresh": { "type": "boolean", "default": false },
+            "recordRead": { "type": "boolean", "default": true }
+        },
+        "required": ["issues"],
+        "additionalProperties": false
+    })
+}
+
 fn assess_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "issue": { "type": ["string", "null"] },
-            "url": { "type": ["string", "null"] },
+            "issue": { "type": "string" },
+            "url": { "type": "string" },
             "refresh": { "type": "boolean", "default": false },
             "recordRead": { "type": "boolean", "default": true }
         },
+        "oneOf": [
+            { "required": ["issue"] },
+            { "required": ["url"] }
+        ],
         "additionalProperties": false
     })
 }
@@ -389,20 +642,21 @@ mod tests {
     use super::{
         list_tool_specs, TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT,
         TOOL_A2A_REJECT_SEND, TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_AGENT_PROBE,
-        TOOL_ASSESS, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS,
-        TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE, TOOL_DISPATCH_IMPORT_HANDOFF,
-        TOOL_DISPATCH_RECORD_OUTCOME, TOOL_DISPATCH_REJECT, TOOL_DISPATCH_REVIEW_APPROVE,
-        TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW,
-        TOOL_DISPATCH_STATUS, TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE,
-        TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+        TOOL_ASSESS, TOOL_DISCOVER_CANDIDATES, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE,
+        TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
+        TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_RECORD_OUTCOME, TOOL_DISPATCH_REJECT,
+        TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT,
+        TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS, TOOL_DISPATCH_TIMELINE,
+        TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
         TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
-        TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_MEMORY_DREAMS_LIST,
+        TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_INSPECT_CANDIDATE,
+        TOOL_INSPECT_DISCUSSION, TOOL_INSPECT_REPO_HEALTH, TOOL_MEMORY_DREAMS_LIST,
         TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE,
         TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS, TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE,
-        TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE,
-        TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION,
-        TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY, TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
-        TOOL_STATUS,
+        TOOL_RANK_SHORTLIST, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_SESSIONS_APPROVE_MUTATION,
+        TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST, TOOL_SESSIONS_READ,
+        TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY,
+        TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC, TOOL_STATUS,
     };
 
     #[test]
@@ -424,6 +678,11 @@ mod tests {
             vec![
                 TOOL_STATUS,
                 TOOL_SCOUT,
+                TOOL_DISCOVER_CANDIDATES,
+                TOOL_INSPECT_CANDIDATE,
+                TOOL_INSPECT_DISCUSSION,
+                TOOL_INSPECT_REPO_HEALTH,
+                TOOL_RANK_SHORTLIST,
                 TOOL_ASSESS,
                 TOOL_PREPARE,
                 TOOL_READ_CONTEXT,
@@ -476,7 +735,10 @@ mod tests {
             ]
         );
 
-        assert_eq!(specs.quick_start.first_call.default_tool, TOOL_SCOUT);
+        assert_eq!(
+            specs.quick_start.first_call.default_tool,
+            TOOL_DISCOVER_CANDIDATES
+        );
         assert_eq!(specs.quick_start.first_call.when_ready_unknown, TOOL_STATUS);
 
         let workflow_tools = specs
@@ -486,7 +748,16 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             workflow_tools,
-            vec![TOOL_SCOUT, TOOL_ASSESS, TOOL_PREPARE, TOOL_READ_CONTEXT]
+            vec![
+                TOOL_DISCOVER_CANDIDATES,
+                TOOL_INSPECT_CANDIDATE,
+                TOOL_INSPECT_DISCUSSION,
+                TOOL_INSPECT_REPO_HEALTH,
+                TOOL_RANK_SHORTLIST,
+                TOOL_ASSESS,
+                TOOL_PREPARE,
+                TOOL_READ_CONTEXT
+            ]
         );
     }
 }

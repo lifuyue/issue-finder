@@ -19,6 +19,18 @@ pub enum AgentCommand {
     ThreadStart(AgentThreadStartArgs),
     /// Append a turn to a resumable thread.
     ThreadSend(AgentThreadSendArgs),
+    /// Steer a running turn without starting a new thread.
+    ThreadSteer(AgentThreadSteerArgs),
+    /// Inject context into a thread mailbox.
+    ThreadInject(AgentThreadInjectArgs),
+    /// Request deterministic context compaction for a thread.
+    ThreadCompact(AgentThreadCompactArgs),
+    /// Interrupt a running turn.
+    ThreadInterrupt(AgentThreadInterruptArgs),
+    /// Approve and execute an approval-gated tool request.
+    ApprovalApprove(AgentApprovalDecisionArgs),
+    /// Reject an approval-gated tool request.
+    ApprovalReject(AgentApprovalRejectArgs),
     /// List recent resumable threads from a running agent daemon.
     Threads(AgentEndpointArgs),
     /// Show one resumable thread from a running agent daemon.
@@ -144,6 +156,123 @@ pub struct AgentThreadSendArgs {
     /// Poll until this turn reaches a terminal state.
     #[arg(long)]
     pub wait: bool,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadSteerArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Agent turn id.
+    pub turn_id: String,
+    /// Natural-language steering input for the running turn.
+    pub input: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Restrict discovery to one repository.
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Candidate limit for scout-style tasks.
+    #[arg(long)]
+    pub limit: Option<usize>,
+    /// Ignore the GitHub discovery cache.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Maximum LLM/tool turns for this turn.
+    #[arg(long)]
+    pub max_turns: Option<usize>,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadInjectArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Context text to inject into the thread mailbox.
+    pub input: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadCompactArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadInterruptArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Agent turn id.
+    pub turn_id: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentApprovalDecisionArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Agent approval request id.
+    pub approval_request_id: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentApprovalRejectArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Agent approval request id.
+    pub approval_request_id: String,
+    /// Reason for rejecting the request.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
     /// Print raw JSON response.
     #[arg(long)]
     pub json: bool,

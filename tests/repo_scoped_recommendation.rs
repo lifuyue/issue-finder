@@ -56,7 +56,18 @@ async fn repo_scoped_scout_returns_same_repo_results_without_global_repo_cap() {
 
     assert_eq!(result.diagnostics.scope, "repository");
     assert_eq!(result.diagnostics.repository.as_deref(), Some("owner/repo"));
-    assert_eq!(result.ranked.len(), 3);
+    let ranked_numbers = result
+        .ranked
+        .iter()
+        .map(|candidate| candidate.issue.number)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        result.ranked.len(),
+        3,
+        "ranked_numbers={ranked_numbers:?}\ndiagnostics={:#?}\nrequests={:#?}",
+        result.diagnostics,
+        requests
+    );
     assert!(result
         .ranked
         .iter()
@@ -134,17 +145,16 @@ fn start_repo_scoped_mock_github() -> MockGithubServer {
         while !shutdown_for_thread.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let base_url = base_url_for_thread.clone();
-                    let requests = Arc::clone(&requests_for_thread);
-                    thread::spawn(move || {
-                        let mut buffer = [0u8; 4096];
-                        let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                        let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-                        let first_line = request.lines().next().unwrap_or_default().to_string();
-                        requests.lock().unwrap().push(first_line);
-                        let body = response_body(&request, &base_url);
-                        write_response(&mut stream, &body);
-                    });
+                    let mut buffer = [0u8; 4096];
+                    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
+                    if bytes_read == 0 {
+                        continue;
+                    }
+                    let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                    let first_line = request.lines().next().unwrap_or_default().to_string();
+                    requests_for_thread.lock().unwrap().push(first_line);
+                    let body = response_body(&request, &base_url_for_thread);
+                    write_response(&mut stream, &body);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
@@ -167,25 +177,17 @@ fn response_body(request: &str, base_url: &str) -> String {
         return r#"{"items":[]}"#.to_string();
     }
 
-    if request.contains("/repos/owner/repo/issues/1/comments")
-        || request.contains("/repos/owner/repo/issues/2/comments")
-        || request.contains("/repos/owner/repo/issues/3/comments")
+    if (1..=5)
+        .any(|number| request.contains(&format!("/repos/owner/repo/issues/{number}/comments")))
     {
         return "[]".to_string();
     }
-    if request.contains("/repos/owner/repo/issues/1/timeline")
-        || request.contains("/repos/owner/repo/issues/2/timeline")
-        || request.contains("/repos/owner/repo/issues/3/timeline")
+    if (1..=5)
+        .any(|number| request.contains(&format!("/repos/owner/repo/issues/{number}/timeline")))
     {
         return "[]".to_string();
     }
-    if request.contains("/repos/owner/repo/issues/1") {
-        return issue_detail_body();
-    }
-    if request.contains("/repos/owner/repo/issues/2") {
-        return issue_detail_body();
-    }
-    if request.contains("/repos/owner/repo/issues/3") {
+    if (1..=5).any(|number| request.contains(&format!("/repos/owner/repo/issues/{number}"))) {
         return issue_detail_body();
     }
 
@@ -213,10 +215,12 @@ fn response_body(request: &str, base_url: &str) -> String {
 
 fn repo_issue_list_body(base_url: &str) -> String {
     format!(
-        "[{},{},{}]",
+        "[{},{},{},{},{}]",
         issue_list_item(base_url, 1),
         issue_list_item(base_url, 2),
-        issue_list_item(base_url, 3)
+        issue_list_item(base_url, 3),
+        issue_list_item(base_url, 4),
+        issue_list_item(base_url, 5)
     )
 }
 

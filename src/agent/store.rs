@@ -4,17 +4,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, Connection, Row};
-use serde_json::Value;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
-use crate::paths::IssueFinderPaths;
+use crate::paths::{atomic_write, IssueFinderPaths};
 
 use super::model::{
-    AgentEvent, AgentMessage, AgentTask, AgentTaskDetail, AgentTaskStatus, AgentThread,
-    AgentThreadDetail, AgentThreadEvent, AgentThreadItem, AgentThreadStatus, AgentToolCall,
-    AgentTurn,
+    AgentApprovalRequest, AgentArtifact, AgentEvent, AgentMessage, AgentTask, AgentTaskDetail,
+    AgentTaskStatus, AgentThread, AgentThreadDetail, AgentThreadEvent, AgentThreadItem,
+    AgentThreadMailboxItem, AgentThreadStatus, AgentToolCall, AgentTurn,
 };
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+const ARTIFACT_SPILL_BYTES: usize = 32 * 1024;
 
 pub struct AgentStore {
     paths: IssueFinderPaths,
@@ -162,6 +164,17 @@ impl AgentStore {
         arguments: Value,
     ) -> Result<AgentToolCall> {
         let id = next_id("agent-tool-call");
+        self.start_tool_call_with_id(&id, task_id, turn_index, tool_name, arguments)
+    }
+
+    pub fn start_tool_call_with_id(
+        &self,
+        id: &str,
+        task_id: &str,
+        turn_index: usize,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<AgentToolCall> {
         let created_at = now();
         self.conn.execute(
             "INSERT INTO agent_tool_calls (
@@ -178,7 +191,7 @@ impl AgentStore {
                 created_at
             ],
         )?;
-        self.get_tool_call(&id)
+        self.get_tool_call(id)
     }
 
     pub fn finish_tool_call(
@@ -308,6 +321,39 @@ impl AgentStore {
         self.get_turn(&id)
     }
 
+    pub fn create_queued_turn_any_status(
+        &self,
+        thread_id: &str,
+        input: &str,
+        metadata: Value,
+    ) -> Result<AgentTurn> {
+        self.get_thread(thread_id)?;
+        let id = next_id("agent-turn");
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO agent_turns (
+                id, thread_id, input, status, created_at, updated_at,
+                completed_at, result_json, error, metadata_json
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, NULL, NULL, ?6)",
+            params![
+                id,
+                thread_id,
+                input,
+                AgentTaskStatus::Queued.as_str(),
+                now,
+                json_text(&metadata)?
+            ],
+        )?;
+        self.conn.execute(
+            "UPDATE agent_threads
+             SET last_turn_id = ?2, updated_at = ?3
+             WHERE id = ?1",
+            params![thread_id, id, now],
+        )?;
+        self.get_turn(&id)
+    }
+
     pub fn get_turn(&self, id: &str) -> Result<AgentTurn> {
         self.conn
             .query_row(
@@ -358,6 +404,13 @@ impl AgentStore {
     pub fn add_thread_item(&self, input: NewAgentThreadItem<'_>) -> Result<AgentThreadItem> {
         let id = next_id("agent-item");
         let created_at = now();
+        let payload = self.maybe_spill_thread_item_payload(
+            &id,
+            input.thread_id,
+            input.turn_id,
+            input.item_type,
+            input.payload,
+        )?;
         self.conn.execute(
             "INSERT INTO agent_thread_items (
                 id, thread_id, turn_id, item_type, role, content,
@@ -372,7 +425,7 @@ impl AgentStore {
                 input.role,
                 input.content,
                 input.tool_name,
-                json_text(&input.payload)?,
+                json_text(&payload)?,
                 created_at
             ],
         )?;
@@ -412,6 +465,8 @@ impl AgentStore {
             thread: self.get_thread(thread_id)?,
             turns: self.list_thread_turns(thread_id)?,
             items: self.list_thread_items(thread_id)?,
+            mailbox_items: self.list_thread_mailbox_items(thread_id)?,
+            approval_requests: self.list_thread_approval_requests(thread_id)?,
             events: self.list_thread_events(thread_id)?,
         })
     }
@@ -440,6 +495,184 @@ impl AgentStore {
         collect_rows(rows)
     }
 
+    pub fn enqueue_mailbox_item(
+        &self,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        delivery: &str,
+        input: &str,
+        payload: Value,
+    ) -> Result<AgentThreadMailboxItem> {
+        self.get_thread(thread_id)?;
+        let id = next_id("agent-mailbox");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO agent_thread_mailbox_items (
+                id, thread_id, turn_id, delivery, status, input,
+                payload_json, created_at, consumed_at, rejected_reason
+             )
+             VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, NULL, NULL)",
+            params![
+                id,
+                thread_id,
+                turn_id,
+                delivery,
+                input,
+                json_text(&payload)?,
+                created_at
+            ],
+        )?;
+        self.get_mailbox_item(&id)
+    }
+
+    pub fn list_thread_mailbox_items(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<AgentThreadMailboxItem>> {
+        let mut statement = self.conn.prepare(
+            "SELECT sequence, id, thread_id, turn_id, delivery, status, input,
+                    payload_json, created_at, consumed_at, rejected_reason
+             FROM agent_thread_mailbox_items
+             WHERE thread_id = ?1
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(params![thread_id], agent_thread_mailbox_item_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn pending_mailbox_items_for_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<Vec<AgentThreadMailboxItem>> {
+        let mut statement = self.conn.prepare(
+            "SELECT sequence, id, thread_id, turn_id, delivery, status, input,
+                    payload_json, created_at, consumed_at, rejected_reason
+             FROM agent_thread_mailbox_items
+             WHERE thread_id = ?1
+               AND status = 'pending'
+               AND (turn_id IS NULL OR turn_id = ?2)
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(
+            params![thread_id, turn_id],
+            agent_thread_mailbox_item_from_row,
+        )?;
+        collect_rows(rows)
+    }
+
+    pub fn consume_mailbox_item(&self, id: &str) -> Result<AgentThreadMailboxItem> {
+        let consumed_at = now();
+        self.conn.execute(
+            "UPDATE agent_thread_mailbox_items
+             SET status = 'consumed', consumed_at = ?2, rejected_reason = NULL
+             WHERE id = ?1",
+            params![id, consumed_at],
+        )?;
+        self.get_mailbox_item(id)
+    }
+
+    pub fn reject_mailbox_item(&self, id: &str, reason: &str) -> Result<AgentThreadMailboxItem> {
+        self.conn.execute(
+            "UPDATE agent_thread_mailbox_items
+             SET status = 'rejected', rejected_reason = ?2
+             WHERE id = ?1",
+            params![id, reason],
+        )?;
+        self.get_mailbox_item(id)
+    }
+
+    pub fn create_agent_approval_request(
+        &self,
+        id: &str,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<AgentApprovalRequest> {
+        self.get_thread(thread_id)?;
+        let created_at = now();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO agent_approval_requests (
+                id, thread_id, turn_id, tool_call_id, tool_name, arguments_json,
+                status, result_json, error, created_at, resolved_at, executed_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', NULL, NULL, ?7, NULL, NULL)",
+            params![
+                id,
+                thread_id,
+                turn_id,
+                tool_call_id,
+                tool_name,
+                json_text(&arguments)?,
+                created_at
+            ],
+        )?;
+        self.get_agent_approval_request(id)
+    }
+
+    pub fn get_agent_approval_request(&self, id: &str) -> Result<AgentApprovalRequest> {
+        self.conn
+            .query_row(
+                "SELECT id, thread_id, turn_id, tool_call_id, tool_name,
+                        arguments_json, status, result_json, error,
+                        created_at, resolved_at, executed_at
+                 FROM agent_approval_requests
+                 WHERE id = ?1",
+                params![id],
+                agent_approval_request_from_row,
+            )
+            .with_context(|| format!("agent approval request {id} not found"))
+    }
+
+    pub fn list_thread_approval_requests(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<AgentApprovalRequest>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, thread_id, turn_id, tool_call_id, tool_name,
+                    arguments_json, status, result_json, error,
+                    created_at, resolved_at, executed_at
+             FROM agent_approval_requests
+             WHERE thread_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![thread_id], agent_approval_request_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn update_agent_approval_status(
+        &self,
+        id: &str,
+        status: &str,
+        result: Option<Value>,
+        error: Option<String>,
+    ) -> Result<AgentApprovalRequest> {
+        let now = now();
+        let resolved_at = matches!(status, "approved" | "rejected" | "executed" | "failed")
+            .then_some(now.as_str());
+        let executed_at = matches!(status, "executed" | "failed").then_some(now.as_str());
+        self.conn.execute(
+            "UPDATE agent_approval_requests
+             SET status = ?2,
+                 result_json = COALESCE(?3, result_json),
+                 error = ?4,
+                 resolved_at = COALESCE(?5, resolved_at),
+                 executed_at = COALESCE(?6, executed_at)
+             WHERE id = ?1",
+            params![
+                id,
+                status,
+                optional_json_text(result.as_ref())?,
+                error,
+                resolved_at,
+                executed_at
+            ],
+        )?;
+        self.get_agent_approval_request(id)
+    }
+
     pub fn list_thread_events(&self, thread_id: &str) -> Result<Vec<AgentThreadEvent>> {
         let mut statement = self.conn.prepare(
             "SELECT sequence, id, thread_id, turn_id, kind, message, payload_json, created_at
@@ -448,6 +681,24 @@ impl AgentStore {
              ORDER BY sequence",
         )?;
         let rows = statement.query_map(params![thread_id], agent_thread_event_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_thread_events_since(
+        &self,
+        thread_id: &str,
+        since_sequence: i64,
+    ) -> Result<Vec<AgentThreadEvent>> {
+        let mut statement = self.conn.prepare(
+            "SELECT sequence, id, thread_id, turn_id, kind, message, payload_json, created_at
+             FROM agent_thread_events
+             WHERE thread_id = ?1 AND sequence > ?2
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(
+            params![thread_id, since_sequence],
+            agent_thread_event_from_row,
+        )?;
         collect_rows(rows)
     }
 
@@ -546,6 +797,117 @@ impl AgentStore {
             )
             .with_context(|| format!("agent thread event {id} not found"))
     }
+
+    fn get_mailbox_item(&self, id: &str) -> Result<AgentThreadMailboxItem> {
+        self.conn
+            .query_row(
+                "SELECT sequence, id, thread_id, turn_id, delivery, status, input,
+                        payload_json, created_at, consumed_at, rejected_reason
+                 FROM agent_thread_mailbox_items
+                 WHERE id = ?1",
+                params![id],
+                agent_thread_mailbox_item_from_row,
+            )
+            .with_context(|| format!("agent thread mailbox item {id} not found"))
+    }
+
+    fn maybe_spill_thread_item_payload(
+        &self,
+        item_id: &str,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        item_type: &str,
+        payload: Value,
+    ) -> Result<Value> {
+        let raw = json_text(&payload)?;
+        if raw.len() <= ARTIFACT_SPILL_BYTES {
+            return Ok(payload);
+        }
+        let artifact = self.write_artifact(
+            "agent_thread_item_payload",
+            "application/json",
+            raw.as_bytes(),
+            json!({
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "itemId": item_id,
+                "itemType": item_type,
+                "byteLen": raw.len()
+            }),
+        )?;
+        Ok(json!({
+            "storage": "artifact",
+            "artifactId": artifact.id,
+            "contentType": artifact.content_type,
+            "sha256": artifact.sha256,
+            "byteLen": artifact.byte_len,
+            "summary": artifact.summary
+        }))
+    }
+
+    pub fn write_artifact(
+        &self,
+        kind: &str,
+        content_type: &str,
+        bytes: &[u8],
+        summary: Value,
+    ) -> Result<AgentArtifact> {
+        let id = next_id("agent-artifact");
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let sha256 = format!("{:x}", hasher.finalize());
+        let relative_path = format!("{kind}/{id}.json");
+        let path = self.paths.agent_artifacts_dir().join(&relative_path);
+        atomic_write(&path, bytes)?;
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO agent_artifacts (
+                id, kind, content_type, path, sha256, byte_len, summary_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                kind,
+                content_type,
+                path.to_string_lossy(),
+                sha256,
+                bytes.len() as i64,
+                json_text(&summary)?,
+                created_at
+            ],
+        )?;
+        self.get_artifact(&id)
+    }
+
+    pub fn get_artifact(&self, id: &str) -> Result<AgentArtifact> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, content_type, path, sha256, byte_len, summary_json, created_at
+                 FROM agent_artifacts
+                 WHERE id = ?1",
+                params![id],
+                agent_artifact_from_row,
+            )
+            .with_context(|| format!("agent artifact {id} not found"))
+    }
+
+    pub fn read_artifact_bytes(&self, id: &str) -> Result<Vec<u8>> {
+        let artifact = self.get_artifact(id)?;
+        let bytes = std::fs::read(&artifact.path)
+            .with_context(|| format!("agent artifact {} is missing at {}", id, artifact.path))?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let actual = format!("{:x}", hasher.finalize());
+        if actual != artifact.sha256 {
+            anyhow::bail!(
+                "agent artifact {} sha256 mismatch: expected {}, got {}",
+                id,
+                artifact.sha256,
+                actual
+            );
+        }
+        Ok(bytes)
+    }
 }
 
 pub struct NewAgentThreadItem<'a> {
@@ -564,11 +926,96 @@ fn initialize_schema(conn: &Connection) -> Result<()> {
         0 => {
             create_schema_v1(conn)?;
             create_schema_v2(conn)?;
+            create_schema_v3(conn)?;
+            create_schema_v4(conn)?;
         }
-        1 => create_schema_v2(conn)?,
-        2 => create_schema_v2(conn)?,
+        1 => {
+            create_schema_v2(conn)?;
+            create_schema_v3(conn)?;
+            create_schema_v4(conn)?;
+        }
+        2 => {
+            create_schema_v3(conn)?;
+            create_schema_v4(conn)?;
+        }
+        3 => {
+            create_schema_v4(conn)?;
+        }
+        4 => create_schema_v4(conn)?,
         other => anyhow::bail!("unsupported agent database schema version {other}"),
     }
+    Ok(())
+}
+
+fn create_schema_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS agent_approval_requests (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT,
+            tool_call_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            resolved_at TEXT,
+            executed_at TEXT,
+            FOREIGN KEY (thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES agent_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_approval_thread_status
+            ON agent_approval_requests(thread_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_approval_turn
+            ON agent_approval_requests(turn_id, created_at);
+        PRAGMA user_version = 4;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn create_schema_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS agent_thread_mailbox_items (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT,
+            delivery TEXT NOT NULL,
+            status TEXT NOT NULL,
+            input TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            consumed_at TEXT,
+            rejected_reason TEXT,
+            FOREIGN KEY (thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES agent_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_artifacts (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            byte_len INTEGER NOT NULL,
+            summary_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_thread_mailbox_pending
+            ON agent_thread_mailbox_items(thread_id, status, sequence);
+        CREATE INDEX IF NOT EXISTS idx_agent_thread_mailbox_turn
+            ON agent_thread_mailbox_items(turn_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_agent_artifacts_kind
+            ON agent_artifacts(kind, created_at);
+        PRAGMA user_version = 3;
+        "#,
+    )?;
     Ok(())
 }
 
@@ -813,6 +1260,53 @@ fn agent_thread_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentThreadEve
     })
 }
 
+fn agent_thread_mailbox_item_from_row(row: &Row<'_>) -> rusqlite::Result<AgentThreadMailboxItem> {
+    Ok(AgentThreadMailboxItem {
+        sequence: row.get(0)?,
+        id: row.get(1)?,
+        thread_id: row.get(2)?,
+        turn_id: row.get(3)?,
+        delivery: row.get(4)?,
+        status: row.get(5)?,
+        input: row.get(6)?,
+        payload: json_column(row, 7)?,
+        created_at: row.get(8)?,
+        consumed_at: row.get(9)?,
+        rejected_reason: row.get(10)?,
+    })
+}
+
+fn agent_approval_request_from_row(row: &Row<'_>) -> rusqlite::Result<AgentApprovalRequest> {
+    Ok(AgentApprovalRequest {
+        id: row.get(0)?,
+        thread_id: row.get(1)?,
+        turn_id: row.get(2)?,
+        tool_call_id: row.get(3)?,
+        tool_name: row.get(4)?,
+        arguments: json_column(row, 5)?,
+        status: row.get(6)?,
+        result: optional_json_column(row, 7)?,
+        error: row.get(8)?,
+        created_at: row.get(9)?,
+        resolved_at: row.get(10)?,
+        executed_at: row.get(11)?,
+    })
+}
+
+fn agent_artifact_from_row(row: &Row<'_>) -> rusqlite::Result<AgentArtifact> {
+    let byte_len: i64 = row.get(5)?;
+    Ok(AgentArtifact {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        content_type: row.get(2)?,
+        path: row.get(3)?,
+        sha256: row.get(4)?,
+        byte_len: byte_len.max(0) as usize,
+        summary: json_column(row, 6)?,
+        created_at: row.get(7)?,
+    })
+}
+
 fn json_text(value: &Value) -> Result<String> {
     Ok(serde_json::to_string(value)?)
 }
@@ -987,6 +1481,141 @@ mod tests {
         );
         assert_eq!(detail.turns.len(), 1);
         assert_eq!(detail.items.len(), 1);
+        assert!(detail.approval_requests.is_empty());
         assert_eq!(detail.events.len(), 1);
+    }
+
+    #[test]
+    fn store_persists_mailbox_items_and_spills_large_thread_payloads() {
+        let dir = tempdir().unwrap();
+        let paths = IssueFinderPaths {
+            home: dir.path().to_path_buf(),
+            config: dir.path().join("config.toml"),
+            cache_dir: dir.path().join("cache"),
+            workspaces_dir: dir.path().join("workspaces"),
+            inbox_dir: dir.path().join("inbox"),
+            reports_dir: dir.path().join("reports"),
+        };
+        let store = AgentStore::open(paths.clone()).unwrap();
+        let thread = store.create_thread("goal", "goal", json!({})).unwrap();
+        let turn = store.create_turn(&thread.id, "input", json!({})).unwrap();
+        let mailbox = store
+            .enqueue_mailbox_item(
+                &thread.id,
+                Some(&turn.id),
+                "steer",
+                "prefer another candidate",
+                json!({}),
+            )
+            .unwrap();
+        store.consume_mailbox_item(&mailbox.id).unwrap();
+
+        let large_payload = json!({
+            "large": "x".repeat(40_000)
+        });
+        let item = store
+            .add_thread_item(NewAgentThreadItem {
+                thread_id: &thread.id,
+                turn_id: Some(&turn.id),
+                item_type: "assistant_model_response",
+                role: Some("assistant"),
+                content: Some("large response"),
+                tool_name: None,
+                payload: large_payload,
+            })
+            .unwrap();
+
+        assert_eq!(item.payload["storage"], "artifact");
+        let artifact_id = item.payload["artifactId"].as_str().unwrap();
+        let artifact = store.get_artifact(artifact_id).unwrap();
+        assert_eq!(artifact.kind, "agent_thread_item_payload");
+        assert!(std::path::Path::new(&artifact.path).exists());
+        let bytes = store.read_artifact_bytes(artifact_id).unwrap();
+        assert!(bytes.len() > 32_000);
+
+        let detail = store.thread_detail(&thread.id).unwrap();
+        assert_eq!(detail.mailbox_items.len(), 1);
+        assert_eq!(detail.mailbox_items[0].status, "consumed");
+    }
+
+    #[test]
+    fn store_persists_agent_approval_requests() {
+        let dir = tempdir().unwrap();
+        let paths = IssueFinderPaths {
+            home: dir.path().to_path_buf(),
+            config: dir.path().join("config.toml"),
+            cache_dir: dir.path().join("cache"),
+            workspaces_dir: dir.path().join("workspaces"),
+            inbox_dir: dir.path().join("inbox"),
+            reports_dir: dir.path().join("reports"),
+        };
+        let store = AgentStore::open(paths).unwrap();
+        let thread = store.create_thread("goal", "goal", json!({})).unwrap();
+        let turn = store.create_turn(&thread.id, "input", json!({})).unwrap();
+
+        let approval = store
+            .create_agent_approval_request(
+                "agent-approval-test",
+                &thread.id,
+                Some(&turn.id),
+                "call_prepare",
+                "issue-finder.prepare",
+                json!({"issue": "owner/repo#1"}),
+            )
+            .unwrap();
+        assert_eq!(approval.status, "pending");
+        let updated = store
+            .update_agent_approval_status(
+                &approval.id,
+                "executed",
+                Some(json!({"status": "prepared"})),
+                None,
+            )
+            .unwrap();
+        assert_eq!(updated.status, "executed");
+        assert!(updated.resolved_at.is_some());
+        assert!(updated.executed_at.is_some());
+
+        let detail = store.thread_detail(&thread.id).unwrap();
+        assert_eq!(detail.approval_requests.len(), 1);
+        assert_eq!(
+            detail.approval_requests[0].tool_name,
+            "issue-finder.prepare"
+        );
+        assert_eq!(
+            detail.approval_requests[0].result.as_ref().unwrap()["status"],
+            "prepared"
+        );
+    }
+
+    #[test]
+    fn artifact_read_reports_missing_or_mismatched_files() {
+        let dir = tempdir().unwrap();
+        let paths = IssueFinderPaths {
+            home: dir.path().to_path_buf(),
+            config: dir.path().join("config.toml"),
+            cache_dir: dir.path().join("cache"),
+            workspaces_dir: dir.path().join("workspaces"),
+            inbox_dir: dir.path().join("inbox"),
+            reports_dir: dir.path().join("reports"),
+        };
+        let store = AgentStore::open(paths).unwrap();
+        let artifact = store
+            .write_artifact(
+                "test",
+                "application/json",
+                br#"{"ok":true}"#,
+                json!({"kind": "test"}),
+            )
+            .unwrap();
+        assert!(store.read_artifact_bytes(&artifact.id).is_ok());
+
+        std::fs::write(&artifact.path, br#"{"ok":false}"#).unwrap();
+        let mismatch = store.read_artifact_bytes(&artifact.id).unwrap_err();
+        assert!(mismatch.to_string().contains("sha256 mismatch"));
+
+        std::fs::remove_file(&artifact.path).unwrap();
+        let missing = store.read_artifact_bytes(&artifact.id).unwrap_err();
+        assert!(missing.to_string().contains("is missing"));
     }
 }

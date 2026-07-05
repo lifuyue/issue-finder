@@ -13,12 +13,16 @@ pub struct Config {
     pub profile: ProfileConfig,
     pub daily: DailyConfig,
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GitHubConfig {
     pub token: String,
     pub username: String,
+    #[serde(default)]
+    pub api_base_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +66,32 @@ pub struct LlmConfig {
     pub api_key: String,
     pub api_key_env: String,
     pub model: String,
+    #[serde(default = "default_llm_wire_api")]
+    pub wire_api: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_context_max_items")]
+    pub context_max_items: usize,
+    #[serde(default = "default_agent_context_max_chars")]
+    pub context_max_chars: usize,
+    #[serde(default = "default_agent_context_max_item_chars")]
+    pub context_max_item_chars: usize,
+    #[serde(default = "default_agent_context_recent_items_after_compaction")]
+    pub context_recent_items_after_compaction: usize,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            context_max_items: default_agent_context_max_items(),
+            context_max_chars: default_agent_context_max_chars(),
+            context_max_item_chars: default_agent_context_max_item_chars(),
+            context_recent_items_after_compaction:
+                default_agent_context_recent_items_after_compaction(),
+        }
+    }
 }
 
 impl Default for Config {
@@ -70,6 +100,7 @@ impl Default for Config {
             github: GitHubConfig {
                 token: std::env::var("GITHUB_TOKEN").unwrap_or_default(),
                 username: String::new(),
+                api_base_url: String::new(),
             },
             profile: ProfileConfig {
                 tech_stack: vec!["Rust".to_string(), "TypeScript".to_string()],
@@ -82,7 +113,9 @@ impl Default for Config {
                 api_key: String::new(),
                 api_key_env: String::new(),
                 model: "gpt-4o-mini".to_string(),
+                wire_api: default_llm_wire_api(),
             },
+            agent: AgentConfig::default(),
         }
     }
 }
@@ -144,6 +177,15 @@ impl Config {
             token: String::new(),
             source: GitHubTokenSource::Missing,
         }
+    }
+
+    pub fn resolved_github_api_base_url(&self) -> String {
+        if !self.github.api_base_url.trim().is_empty() {
+            return self.github.api_base_url.trim().to_string();
+        }
+
+        std::env::var("ISSUE_FINDER_GITHUB_API_BASE")
+            .unwrap_or_else(|_| "https://api.github.com".to_string())
     }
 }
 
@@ -211,6 +253,26 @@ fn prompt_list(label: &str, default: &[String]) -> Result<Vec<String>> {
         .collect())
 }
 
+fn default_llm_wire_api() -> String {
+    "chat_completions".to_string()
+}
+
+fn default_agent_context_max_items() -> usize {
+    12
+}
+
+fn default_agent_context_max_chars() -> usize {
+    24_000
+}
+
+fn default_agent_context_max_item_chars() -> usize {
+    4_000
+}
+
+fn default_agent_context_recent_items_after_compaction() -> usize {
+    8
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
@@ -221,5 +283,58 @@ mod tests {
         assert_eq!(config.daily.top_n, 5);
         assert!(!config.llm.enabled);
         assert_eq!(config.llm.base_url, "https://api.openai.com/v1");
+        assert_eq!(config.llm.wire_api, "chat_completions");
+    }
+
+    #[test]
+    fn llm_config_accepts_explicit_wire_api_and_defaults_legacy_configs() {
+        let legacy = toml::from_str::<Config>(
+            r#"
+[github]
+token = ""
+username = ""
+
+[profile]
+tech_stack = ["Rust"]
+keywords = ["cli"]
+
+[daily]
+top_n = 5
+
+[llm]
+enabled = true
+base_url = "https://api.example.test/v1"
+api_key = ""
+api_key_env = "TEST_KEY"
+model = "test-model"
+"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.llm.wire_api, "chat_completions");
+
+        let responses = toml::from_str::<Config>(
+            r#"
+[github]
+token = ""
+username = ""
+
+[profile]
+tech_stack = ["Rust"]
+keywords = ["cli"]
+
+[daily]
+top_n = 5
+
+[llm]
+enabled = true
+base_url = "https://api.example.test/v1"
+api_key = ""
+api_key_env = "TEST_KEY"
+model = "test-model"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        assert_eq!(responses.llm.wire_api, "responses");
     }
 }

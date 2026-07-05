@@ -502,6 +502,31 @@ mod tests {
     }
 
     #[test]
+    fn agent_card_json_command_parses_stably() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "card",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8788",
+            "--json",
+        ])
+        .unwrap();
+
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::Card(card) = args.command else {
+            panic!("expected agent card subcommand");
+        };
+        assert_eq!(card.host, "127.0.0.1");
+        assert_eq!(card.port, 8788);
+        assert!(card.json);
+    }
+
+    #[test]
     fn agent_thread_start_parses_resumable_thread_goal() {
         let cli = Cli::try_parse_from([
             "issue-finder",
@@ -552,5 +577,119 @@ mod tests {
         assert_eq!(send.input, "继续 assess 第一个候选");
         assert_eq!(send.max_turns, Some(2));
         assert!(send.json);
+    }
+
+    #[test]
+    fn agent_thread_control_commands_parse_mailbox_actions() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-steer",
+            "agent-thread-1",
+            "agent-turn-1",
+            "换一个候选继续评估",
+            "--json",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadSteer(steer) = args.command else {
+            panic!("expected agent thread-steer subcommand");
+        };
+        assert_eq!(steer.thread_id, "agent-thread-1");
+        assert_eq!(steer.turn_id, "agent-turn-1");
+        assert_eq!(steer.input, "换一个候选继续评估");
+        assert!(steer.json);
+
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-inject",
+            "agent-thread-1",
+            "用户侧 agent 已确认优先看 comments",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadInject(inject) = args.command else {
+            panic!("expected agent thread-inject subcommand");
+        };
+        assert_eq!(inject.thread_id, "agent-thread-1");
+        assert_eq!(inject.input, "用户侧 agent 已确认优先看 comments");
+
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-compact",
+            "agent-thread-1",
+            "--json",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadCompact(compact) = args.command else {
+            panic!("expected agent thread-compact subcommand");
+        };
+        assert_eq!(compact.thread_id, "agent-thread-1");
+        assert!(compact.json);
+
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-interrupt",
+            "agent-thread-1",
+            "agent-turn-1",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadInterrupt(interrupt) = args.command else {
+            panic!("expected agent thread-interrupt subcommand");
+        };
+        assert_eq!(interrupt.thread_id, "agent-thread-1");
+        assert_eq!(interrupt.turn_id, "agent-turn-1");
+
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "approval-approve",
+            "agent-thread-1",
+            "agent-approval-1",
+            "--json",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ApprovalApprove(approve) = args.command else {
+            panic!("expected agent approval-approve subcommand");
+        };
+        assert_eq!(approve.thread_id, "agent-thread-1");
+        assert_eq!(approve.approval_request_id, "agent-approval-1");
+        assert!(approve.json);
+
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "approval-reject",
+            "agent-thread-1",
+            "agent-approval-1",
+            "--reason",
+            "too risky",
+        ])
+        .unwrap();
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ApprovalReject(reject) = args.command else {
+            panic!("expected agent approval-reject subcommand");
+        };
+        assert_eq!(reject.thread_id, "agent-thread-1");
+        assert_eq!(reject.approval_request_id, "agent-approval-1");
+        assert_eq!(reject.reason.as_deref(), Some("too risky"));
     }
 }

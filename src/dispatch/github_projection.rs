@@ -78,8 +78,7 @@ impl ReqwestGitHubCommentWriter {
         Ok(Self {
             http,
             token: config.resolved_github_token().token,
-            api_base_url: std::env::var("ISSUE_FINDER_GITHUB_API_BASE")
-                .unwrap_or_else(|_| "https://api.github.com".to_string()),
+            api_base_url: config.resolved_github_api_base_url(),
         })
     }
 }

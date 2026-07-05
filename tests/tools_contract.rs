@@ -55,15 +55,19 @@ fn tools_list_outputs_stable_issue_finder_specs() {
     assert_eq!(specs["version"], 1);
     assert_eq!(
         specs["quickStart"]["firstCall"]["defaultTool"],
-        "issue-finder.scout"
+        "issue-finder.discover_candidates"
     );
     assert_eq!(
         specs["quickStart"]["firstCall"]["defaultArguments"]["repo"],
-        "owner/repo"
+        serde_json::Value::Null
     );
     assert_eq!(
         specs["quickStart"]["firstCall"]["defaultArguments"]["limit"],
-        10
+        5
+    );
+    assert_eq!(
+        specs["quickStart"]["firstCall"]["defaultArguments"]["laneLimit"],
+        4
     );
     assert_eq!(
         specs["quickStart"]["firstCall"]["whenReadyUnknown"],
@@ -81,7 +85,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
     assert_eq!(
         workflow_tools,
         vec![
-            "issue-finder.scout",
+            "issue-finder.discover_candidates",
+            "issue-finder.inspect_candidate",
+            "issue-finder.inspect_discussion",
+            "issue-finder.inspect_repo_health",
+            "issue-finder.rank_shortlist",
             "issue-finder.assess",
             "issue-finder.prepare",
             "issue-finder.read_context"
@@ -112,6 +120,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         vec![
             "issue-finder.status",
             "issue-finder.scout",
+            "issue-finder.discover_candidates",
+            "issue-finder.inspect_candidate",
+            "issue-finder.inspect_discussion",
+            "issue-finder.inspect_repo_health",
+            "issue-finder.rank_shortlist",
             "issue-finder.assess",
             "issue-finder.prepare",
             "issue-finder.read_context",
@@ -168,6 +181,14 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         .iter()
         .find(|tool| tool["name"] == "scout")
         .expect("scout tool spec");
+    assert_eq!(scout["deferLoading"], true);
+    assert_eq!(scout["agent"]["exposure"], "deferred");
+    assert_eq!(scout["agent"]["visibleByDefault"], false);
+    assert!(scout["agent"]["sideEffects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|effect| effect == "large_observation"));
     let scout_properties = scout["inputSchema"]["properties"].as_object().unwrap();
     assert!(scout_properties["repo"].is_object());
     assert!(
@@ -179,6 +200,63 @@ fn tools_list_outputs_stable_issue_finder_specs() {
         .find(|tool| tool["name"] == "status")
         .expect("status tool spec");
     assert!(status["inputSchema"]["properties"]["checkAuth"].is_object());
+    assert_eq!(status["agent"]["supportsParallel"], true);
+    let discover = tools
+        .iter()
+        .find(|tool| tool["name"] == "discover_candidates")
+        .expect("discover_candidates tool spec");
+    assert!(discover["inputSchema"]["properties"]["laneLimit"].is_object());
+    assert_eq!(discover["agent"]["supportsParallel"], false);
+    let inspect = tools
+        .iter()
+        .find(|tool| tool["name"] == "inspect_candidate")
+        .expect("inspect_candidate tool spec");
+    assert!(inspect["inputSchema"]["properties"]["maxBodyChars"].is_object());
+    assert_eq!(inspect["agent"]["exposure"], "direct");
+    assert_eq!(inspect["agent"]["visibleByDefault"], true);
+    assert_eq!(inspect["agent"]["supportsParallel"], true);
+    assert_eq!(
+        inspect["inputSchema"]["oneOf"],
+        serde_json::json!([{"required": ["issue"]}, {"required": ["url"]}])
+    );
+    let repo_health = tools
+        .iter()
+        .find(|tool| tool["name"] == "inspect_repo_health")
+        .expect("inspect_repo_health tool spec");
+    assert_eq!(
+        repo_health["inputSchema"]["oneOf"],
+        serde_json::json!([
+            {"required": ["repo"]},
+            {"required": ["issue"]},
+            {"required": ["url"]}
+        ])
+    );
+    assert_eq!(repo_health["agent"]["supportsParallel"], false);
+    let rank_shortlist = tools
+        .iter()
+        .find(|tool| tool["name"] == "rank_shortlist")
+        .expect("rank_shortlist tool spec");
+    assert!(rank_shortlist["description"]
+        .as_str()
+        .unwrap()
+        .contains("still call assess"));
+    assert_eq!(rank_shortlist["agent"]["supportsParallel"], false);
+    let assess = tools
+        .iter()
+        .find(|tool| tool["name"] == "assess")
+        .expect("assess tool spec");
+    assert_eq!(assess["agent"]["exposure"], "direct");
+    assert_eq!(assess["agent"]["supportsParallel"], false);
+    assert!(assess["agent"]["sideEffects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|effect| effect == "records_local_read_by_default"));
+    let prepare = tools
+        .iter()
+        .find(|tool| tool["name"] == "prepare")
+        .expect("prepare tool spec");
+    assert_eq!(prepare["agent"]["exposure"], "approval_required");
     let read_context = tools
         .iter()
         .find(|tool| tool["name"] == "read_context")
@@ -212,7 +290,7 @@ fn tools_list_cli_outputs_single_json_workflow_entry_object() {
     assert_eq!(value["kind"], "issue_finder_tool_specs");
     assert_eq!(
         value["quickStart"]["firstCall"]["defaultTool"],
-        "issue-finder.scout"
+        "issue-finder.discover_candidates"
     );
     assert!(value["recommendedWorkflow"].is_array());
     assert!(value["tools"].is_array());
@@ -1307,6 +1385,39 @@ async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
     paths.ensure_layout().unwrap();
     let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
 
+    let discover = runtime
+        .execute(invocation(
+            "issue-finder.discover_candidates",
+            r#"{"repo":"owner/ready","limit":1,"refresh":true,"laneLimit":1}"#,
+            "discover_call",
+        ))
+        .await;
+    assert!(discover.success, "{discover:?}");
+    assert_eq!(discover.status, "ok");
+    let discovered = discover.structured_content["candidates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(discovered.len(), 1);
+    assert_eq!(discovered[0]["candidateId"], "owner/ready#1");
+    assert!(discovered[0]["roughScore"].as_i64().unwrap() > 0);
+    assert_eq!(discover.structured_content["scope"], "repository");
+
+    let inspect = runtime
+        .execute(invocation(
+            "issue-finder.inspect_candidate",
+            r#"{"issue":"owner/ready#1","maxBodyChars":32}"#,
+            "inspect_call",
+        ))
+        .await;
+    assert!(inspect.success, "{inspect:?}");
+    assert_eq!(inspect.status, "ok");
+    assert_eq!(
+        inspect.structured_content["issue"]["repoFullName"],
+        "owner/ready"
+    );
+    assert_eq!(inspect.structured_content["bodyTruncated"], true);
+    assert_eq!(inspect.structured_content["repoStars"], 2500);
+
     let scout = runtime
         .execute(invocation(
             "issue-finder.scout",
@@ -1757,6 +1868,10 @@ fn response_body(request: &str, base_url: &str, search_count: &AtomicUsize) -> M
         }
         if target.starts_with(&format!("{prefix}/issues/1/timeline")) {
             return ok_response("[]");
+        }
+        if target.starts_with(&format!("{prefix}/issues?")) || target == format!("{prefix}/issues")
+        {
+            return ok_response(&format!("[{}]", issue_body(repo)));
         }
         if target.starts_with(&format!("{prefix}/stargazers")) {
             return ok_response(&stargazers_body(repo));

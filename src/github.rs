@@ -230,8 +230,7 @@ impl GitHubClient {
         Ok(Self {
             http,
             token,
-            api_base_url: std::env::var("ISSUE_FINDER_GITHUB_API_BASE")
-                .unwrap_or_else(|_| "https://api.github.com".to_string()),
+            api_base_url: config.resolved_github_api_base_url(),
             budget,
         })
     }
@@ -302,6 +301,31 @@ impl GitHubClient {
 
         let candidates = merge_candidates(candidates, profile);
         Ok(candidates)
+    }
+
+    pub async fn discover_agent_global_candidates(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        profile: &ProfileConfig,
+        lane_limit: usize,
+    ) -> Result<Vec<DiscoveryCandidate>> {
+        let lanes = primary_trusted_repository_lanes(profile)?
+            .into_iter()
+            .take(lane_limit.max(1))
+            .map(|(repository, trust_tier)| SearchLaneRequest::trusted(repository, trust_tier))
+            .collect::<Vec<_>>();
+
+        let lane_results = stream::iter(lanes.into_iter().map(|lane| async move {
+            self.fetch_lane_candidates_cached(paths, refresh, lane, profile)
+                .await
+        }))
+        .buffer_unordered(DISCOVERY_SEARCH_CONCURRENCY_LIMIT)
+        .collect::<Vec<_>>()
+        .await;
+
+        let candidates = collect_lane_candidates(lane_results)?;
+        Ok(merge_candidates(candidates, profile))
     }
 
     pub async fn discover_trusted_fallback_candidates(

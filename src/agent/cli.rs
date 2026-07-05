@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::json;
 
 use crate::config::Config;
@@ -11,8 +12,8 @@ use super::cli_args::{AgentArgs, AgentCommand};
 use super::model::{
     AgentCardEnvelope, AgentEventsEnvelope, AgentTaskAcceptedEnvelope, AgentTaskDetailEnvelope,
     AgentTaskListEnvelope, AgentTaskSendRequest, AgentThreadAcceptedEnvelope,
-    AgentThreadDetailEnvelope, AgentThreadEventsEnvelope, AgentThreadListEnvelope,
-    AgentThreadStartRequest, AgentThreadTurnRequest,
+    AgentThreadDetailEnvelope, AgentThreadEventsEnvelope, AgentThreadInjectRequest,
+    AgentThreadListEnvelope, AgentThreadStartRequest, AgentThreadTurnRequest,
 };
 use super::server::run_daemon;
 
@@ -107,6 +108,89 @@ pub async fn handle_agent_cli(
                 Ok(render_thread_accepted(&accepted))
             }
         }
+        AgentCommand::ThreadSteer(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let request = AgentThreadTurnRequest {
+                input: args.input,
+                repo: args.repo,
+                limit: args.limit,
+                refresh: args.refresh,
+                max_turns: args.max_turns,
+                run_immediately: true,
+            };
+            let accepted = endpoint
+                .steer_thread_turn(&args.thread_id, &args.turn_id, &request)
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&accepted)?)
+            } else {
+                Ok(render_thread_accepted(&accepted))
+            }
+        }
+        AgentCommand::ThreadInject(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let request = AgentThreadInjectRequest {
+                input: args.input,
+                metadata: json!({"source": "cli"}),
+            };
+            let response = endpoint
+                .inject_thread_items(&args.thread_id, &request)
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&response)?)
+            } else {
+                Ok(format!(
+                    "Accepted injected input for thread {}\nevents: /a2a/threads/{}/events",
+                    args.thread_id, args.thread_id
+                ))
+            }
+        }
+        AgentCommand::ThreadCompact(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let response = endpoint.compact_thread_context(&args.thread_id).await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&response)?)
+            } else {
+                Ok(render_compaction_response(&response))
+            }
+        }
+        AgentCommand::ThreadInterrupt(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let accepted = endpoint
+                .interrupt_thread_turn(&args.thread_id, &args.turn_id)
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&accepted)?)
+            } else {
+                Ok(render_thread_accepted(&accepted))
+            }
+        }
+        AgentCommand::ApprovalApprove(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let response = endpoint
+                .approve_thread_approval(&args.thread_id, &args.approval_request_id)
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&response)?)
+            } else {
+                Ok(render_approval_response(&response))
+            }
+        }
+        AgentCommand::ApprovalReject(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let response = endpoint
+                .reject_thread_approval(
+                    &args.thread_id,
+                    &args.approval_request_id,
+                    args.reason.as_deref(),
+                )
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&response)?)
+            } else {
+                Ok(render_approval_response(&response))
+            }
+        }
         AgentCommand::Threads(args) => {
             let endpoint = AgentEndpoint::new(args.host, args.port)?;
             let list = endpoint
@@ -167,12 +251,20 @@ pub async fn handle_agent_cli(
             let endpoint = AgentEndpoint::new(args.host, args.port)?;
             let card = endpoint.get::<AgentCardEnvelope>("/a2a/agent-card").await?;
             if args.json {
-                Ok(serde_json::to_string_pretty(&card)?)
+                Ok(render_agent_card_json(&card)?)
             } else {
                 Ok(render_agent_card(&card))
             }
         }
     }
+}
+
+fn render_agent_card_json(card: &AgentCardEnvelope) -> Result<String> {
+    render_json(card)
+}
+
+fn render_json<T: Serialize>(value: &T) -> Result<String> {
+    Ok(serde_json::to_string_pretty(value)?)
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +317,91 @@ impl AgentEndpoint {
             .client
             .post(self.url(&format!("/a2a/threads/{thread_id}/turns/send")))
             .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn steer_thread_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        request: &AgentThreadTurnRequest,
+    ) -> Result<AgentThreadAcceptedEnvelope> {
+        let response = self
+            .client
+            .post(self.url(&format!("/a2a/threads/{thread_id}/turns/{turn_id}/steer")))
+            .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn inject_thread_items(
+        &self,
+        thread_id: &str,
+        request: &AgentThreadInjectRequest,
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .post(self.url(&format!("/a2a/threads/{thread_id}/inject-items")))
+            .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn interrupt_thread_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<AgentThreadAcceptedEnvelope> {
+        let response = self
+            .client
+            .post(self.url(&format!(
+                "/a2a/threads/{thread_id}/turns/{turn_id}/interrupt"
+            )))
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn compact_thread_context(&self, thread_id: &str) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .post(self.url(&format!("/a2a/threads/{thread_id}/compact-context")))
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn approve_thread_approval(
+        &self,
+        thread_id: &str,
+        approval_request_id: &str,
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .post(self.url(&format!(
+                "/a2a/threads/{thread_id}/approvals/{approval_request_id}/approve"
+            )))
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn reject_thread_approval(
+        &self,
+        thread_id: &str,
+        approval_request_id: &str,
+        reason: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .post(self.url(&format!(
+                "/a2a/threads/{thread_id}/approvals/{approval_request_id}/reject"
+            )))
+            .json(&json!({ "reason": reason }))
             .send()
             .await?;
         decode_response(response).await
@@ -340,7 +517,7 @@ fn render_task_list(envelope: &AgentTaskListEnvelope) -> String {
 }
 
 fn render_thread_accepted(envelope: &AgentThreadAcceptedEnvelope) -> String {
-    format!(
+    let mut rendered = format!(
         "Accepted agent thread {}\nturn: {}\nthread status: {}\nturn status: {}\nthread: {}\nevents: {}",
         envelope.thread.id,
         envelope.turn.id,
@@ -348,7 +525,14 @@ fn render_thread_accepted(envelope: &AgentThreadAcceptedEnvelope) -> String {
         envelope.turn.status.as_str(),
         envelope.thread_url,
         envelope.events_url
-    )
+    );
+    if let Some(mailbox_item) = &envelope.mailbox_item {
+        rendered.push_str(&format!(
+            "\nmailbox: {} ({})",
+            mailbox_item.id, mailbox_item.delivery
+        ));
+    }
+    rendered
 }
 
 fn render_thread_list(envelope: &AgentThreadListEnvelope) -> String {
@@ -394,8 +578,34 @@ fn render_thread_detail(envelope: &AgentThreadDetailEnvelope) -> String {
     }
     lines.push(format!("turns: {}", envelope.detail.turns.len()));
     lines.push(format!("items: {}", envelope.detail.items.len()));
+    lines.push(format!(
+        "approval requests: {}",
+        envelope.detail.approval_requests.len()
+    ));
     lines.push(format!("events: {}", envelope.detail.events.len()));
     lines.join("\n")
+}
+
+fn render_approval_response(value: &serde_json::Value) -> String {
+    let approval = &value["approvalRequest"];
+    format!(
+        "Approval request {}\nstatus: {}\ntool: {}\nthread: {}\nevents: {}",
+        approval["id"].as_str().unwrap_or("unknown"),
+        approval["status"].as_str().unwrap_or("unknown"),
+        approval["toolName"].as_str().unwrap_or("unknown"),
+        value["threadUrl"].as_str().unwrap_or(""),
+        value["eventsUrl"].as_str().unwrap_or("")
+    )
+}
+
+fn render_compaction_response(value: &serde_json::Value) -> String {
+    format!(
+        "Context compaction for {}\ncreated: {}\nitems: {}\nevents: {}",
+        value["thread"]["id"].as_str().unwrap_or("unknown"),
+        value["created"].as_bool().unwrap_or(false),
+        value["itemsUrl"].as_str().unwrap_or(""),
+        value["eventsUrl"].as_str().unwrap_or("")
+    )
 }
 
 fn render_thread_events(envelope: &AgentThreadEventsEnvelope) -> String {
@@ -497,4 +707,69 @@ fn render_agent_card(card: &AgentCardEnvelope) -> String {
 
 fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::render_agent_card_json;
+    use crate::agent::model::{
+        AgentCapability, AgentCardEnvelope, AgentEndpoint, AgentProviderCapabilities,
+    };
+
+    #[test]
+    fn agent_card_json_output_has_stable_thread_tool_shape() {
+        let card = AgentCardEnvelope {
+            kind: "issue_finder_agent_card".to_string(),
+            version: 1,
+            name: "Issue Finder Agent".to_string(),
+            description: "Local Issue Finder daemon.".to_string(),
+            endpoints: vec![AgentEndpoint {
+                method: "POST".to_string(),
+                path: "/a2a/threads/start".to_string(),
+                description: "Start a resumable thread.".to_string(),
+            }],
+            input_modes: vec!["natural_language".to_string()],
+            output_modes: vec!["json".to_string()],
+            tools: vec![
+                "issue-finder.status".to_string(),
+                "issue-finder.discover_candidates".to_string(),
+                "issue-finder.inspect_candidate".to_string(),
+                "issue-finder.assess".to_string(),
+            ],
+            tool_definitions: vec![json!({
+                "canonicalName": "issue-finder.discover_candidates",
+                "name": "discover_candidates",
+                "exposure": "direct"
+            })],
+            capabilities: vec![AgentCapability {
+                name: "thread.start".to_string(),
+                status: "supported".to_string(),
+                method: Some("POST".to_string()),
+                path: Some("/a2a/threads/start".to_string()),
+                limits: json!({"maxTurns": 8}),
+                provider_requirements: Vec::new(),
+            }],
+            provider: AgentProviderCapabilities {
+                wire_api: "responses".to_string(),
+                native_tools: true,
+                deferred_tools: true,
+            },
+        };
+
+        let rendered = render_agent_card_json(&card).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(value["kind"], "issue_finder_agent_card");
+        assert_eq!(value["tools"][1], "issue-finder.discover_candidates");
+        assert_eq!(
+            value["toolDefinitions"][0]["canonicalName"],
+            "issue-finder.discover_candidates"
+        );
+        assert_eq!(value["capabilities"][0]["name"], "thread.start");
+        assert_eq!(value["capabilities"][0]["path"], "/a2a/threads/start");
+        assert_eq!(value["provider"]["wireApi"], "responses");
+        assert_eq!(value["provider"]["nativeTools"], true);
+    }
 }

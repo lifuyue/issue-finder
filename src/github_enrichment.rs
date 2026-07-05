@@ -210,12 +210,7 @@ impl GitHubEnrichmentClient {
     }
 
     pub fn with_budget(config: &Config, budget: GitHubApiBudget) -> Result<Self> {
-        Self::with_api_base_and_budget(
-            config,
-            std::env::var("ISSUE_FINDER_GITHUB_API_BASE")
-                .unwrap_or_else(|_| "https://api.github.com".to_string()),
-            budget,
-        )
+        Self::with_api_base_and_budget(config, config.resolved_github_api_base_url(), budget)
     }
 
     pub fn with_api_base(config: &Config, api_base_url: impl Into<String>) -> Result<Self> {
