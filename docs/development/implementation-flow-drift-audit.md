@@ -28,7 +28,7 @@
 | `issue-finder-terminal.svg` | 该资产没有被当前文档引用，且 help 预览遗漏了当前命令和当前 wording。 | 已删除这个过时且未引用的资产。 |
 | 长期和流程图资产 | `issue-finder-long-term-agent-architecture.svg/png`、`issue-finder-task-lifecycle.svg/png` 和 `issue-finder-execution-boundaries.svg/png` 当前未被文档引用，且混合了当前 runtime、未来/未接线能力或压缩的 package 语义。 | 已删除这些过时未引用资产；当前 flow 以本文 Mermaid 和 `docs/usage.md` 为准。 |
 | hybrid memory spec | `docs/superpowers/specs/2026-06-18-hybrid-contribution-memory-design.md` 仍是历史设计 spec。当前 memory 行为在 `src/memory/*` 和 `docs/usage.md` 中。 | 继续通过 `docs/superpowers/README.md` 管理历史漂移；不要只为消除漂移去改 dated spec。 |
-| online A2A agent daemon | 旧审计只覆盖 `dispatch a2a` 的本地 artifact 网关，没有正在运行的 Issue Finder agent。当前分支新增 `issue-finder agent daemon`、`agent send/show/events/card`、`agent/agent.sqlite3` 和只读 LLM tool loop。 | `docs/usage.md` 已将 `agent daemon` 和 `dispatch a2a` 分开记录：前者是在线自然语言任务推送，后者仍是离线 package artifact 网关。 |
+| online A2A agent daemon | 旧审计只覆盖 `dispatch a2a` 的本地 artifact 网关，没有正在运行的 Issue Finder agent。当前实现新增 `issue-finder agent daemon`、durable `agent thread-start/turn/thread-events`、兼容 `agent send/show/events`、`agent/agent.sqlite3` 和 SQLite-backed LLM tool loop。 | `docs/usage.md` 已将 `agent daemon` 和 `dispatch a2a` 分开记录：前者是在线自然语言 thread/turn 推送，后者仍是离线 package artifact 网关。 |
 
 ## 当前实现 Flow
 
@@ -68,13 +68,13 @@ flowchart TD
     C -. 可选 .-> Y["大模型确认审查证据"]
     Y -. 只作建议 .-> C
 
-    AA["agent send: 自然语言目标"] --> AB["本地 HTTP A2A agent daemon"]
-    AB --> AC["agent/agent.sqlite3: task/messages/tool calls/events"]
+    AA["agent thread-start / turn: 自然语言输入"] --> AB["本地 HTTP A2A agent daemon"]
+    AB --> AC["agent/agent.sqlite3: threads/turns/items/events"]
     AB --> AD{"LLM 选择下一步"}
-    AD -->|调用只读工具| AE["host 执行 issue-finder.status/scout"]
+    AD -->|调用安全工具| AE["host 执行 status/scout/assess/prepare/context/memory/dispatch/github draft"]
     AE --> AC
     AE --> AD
-    AD -->|finalAnswer| AF["任务完成 + 持久化结果"]
+    AD -->|finalAnswer| AF["turn 完成，thread 保持可续写"]
 
     classDef agent fill:#f3e8ff,stroke:#7e22ce,color:#111827;
     classDef workflow fill:#eff6ff,stroke:#2563eb,color:#111827;
@@ -86,7 +86,7 @@ flowchart TD
 
 handoff/dispatch 主流程仍不是自治模型 tool loop。多数步骤是确定性 workflow 或带审批的状态转换。当前真正有别于普通 workflow 的 agent 判断点集中在这些位置：
 
-- `issue-finder agent daemon` 是在线本地 A2A agent loop：外部通过 `/a2a/tasks/send` 或 `issue-finder agent send` 推送自然语言目标，LLM 在每个 turn 选择 `issue-finder.status` 或 `issue-finder.scout`，host 侧执行工具并把 observation 交回模型，直到模型输出 `finalAnswer`。
+- `issue-finder agent daemon` 是在线本地 A2A agent loop：外部通过 `/a2a/threads/start` 新建 durable thread，通过 `/a2a/threads/{threadId}/turns/start` 追加 turn；旧 `/a2a/tasks/send` 只是兼容 shim。每个 turn 开始前都会从 SQLite 重建 thread transcript，LLM 再选择安全 Issue Finder 工具，如 `status`、`scout`、`assess`、`prepare`、`read_context`、memory/dispatch inspection 和 GitHub comment draft/list 工具，host 侧执行并把 observation 写回 transcript，直到模型输出 `finalAnswer`。
 - 可选 LLM confirmation 可以审查 issue 价值证据，但它不是唯一 gate，失败也不会阻塞确定性的 handoff 生成。
 - execution agent 只有在 dispatch approval 之后、原生 agent session 被启动或恢复时，才开始做解题判断。
 - GitHub comment drafting 可以基于本地 policy 和 result context 判断是否值得提出公开评论，但发布仍需要审批。

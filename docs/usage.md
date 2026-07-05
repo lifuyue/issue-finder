@@ -87,18 +87,27 @@ issue-finder tools list
 issue-finder tools call issue-finder.status --arguments '{}'
 ```
 
-Run the local Issue Finder agent daemon and push a natural-language A2A task to it:
+Run the local Issue Finder agent daemon and push a natural-language A2A thread/turn to it:
 
 ```bash
 issue-finder agent daemon
 issue-finder agent card
+issue-finder agent thread-start "Search global repositories and recommend issues" --limit 5 --wait
+issue-finder agent turn <agent-thread-id> "Draft a tracking comment for the first recommended issue" --wait
+issue-finder agent threads
+issue-finder agent thread <agent-thread-id>
+issue-finder agent thread-events <agent-thread-id>
+
+# Compatibility shim: creates a thread plus first turn, and mirrors the terminal result to a legacy task row.
 issue-finder agent send "Search global repositories and recommend issues" --limit 5 --wait
 issue-finder agent list
 issue-finder agent show <agent-task-id>
 issue-finder agent events <agent-task-id>
 ```
 
-`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/tasks/send`, `/a2a/tasks`, `/a2a/tasks/{taskId}`, and `/a2a/tasks/{taskId}/events` over local HTTP. A sent task is a high-level natural-language goal; the daemon asks the configured LLM to choose allowed Issue Finder tools, runs only the first-version read-only tool set (`issue-finder.status` and `issue-finder.scout`), and persists the task, messages, tool calls, events, and final answer in `agent/agent.sqlite3`. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
+`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/threads/start`, `/a2a/threads`, `/a2a/threads/{threadId}`, `/a2a/threads/{threadId}/turns/start`, `/a2a/threads/{threadId}/turns/{turnId}`, and `/a2a/threads/{threadId}/events` over local HTTP. A thread is a durable conversation; every turn reconstructs context from SQLite before the LLM chooses the next safe Issue Finder tool. The daemon persists threads, turns, transcript items, tool calls, tool observations, events, and final answers in `agent/agent.sqlite3`. `/a2a/tasks/send` and the older `agent send/list/show/events` commands remain compatibility shims that create a thread plus first turn and mirror the result back to legacy task rows.
+
+The daemon's internal LLM tool policy allows safe Issue Finder operations including status, scout, assess, prepare, read-context, memory status/recall, dispatch inspection, and GitHub comment draft/list operations. The LLM context receives a compact tool catalog generated from the canonical Issue Finder tool specs, including JSON input schemas and missing-argument rules. Posting GitHub comments is still handled by the existing explicit approval and posting flow; the daemon does not automatically approve or post comments. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
 
 Discover and rank candidate issues:
 
@@ -239,10 +248,15 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
 | `issue-finder agent daemon` | Start the local HTTP A2A Issue Finder agent daemon |
 | `issue-finder agent card` | Read the running daemon's A2A agent card |
-| `issue-finder agent send "<goal>" --limit 5 --wait` | Push a natural-language task to the running daemon and optionally poll until completion |
-| `issue-finder agent list` | List recent daemon tasks through the local A2A endpoint |
-| `issue-finder agent show <agent-task-id>` | Show one daemon task, including persisted messages, tool calls, and result metadata |
-| `issue-finder agent events <agent-task-id>` | Show ordered persisted events for one daemon task |
+| `issue-finder agent thread-start "<goal>" --limit 5 --wait` | Create a durable daemon thread and optionally poll until the first turn completes |
+| `issue-finder agent turn <agent-thread-id> "<input>" --wait` | Append a new natural-language turn to an existing daemon thread |
+| `issue-finder agent threads` | List recent durable daemon threads |
+| `issue-finder agent thread <agent-thread-id>` | Show one daemon thread with turns, transcript item counts, events, and latest result |
+| `issue-finder agent thread-events <agent-thread-id>` | Show ordered persisted events for one daemon thread |
+| `issue-finder agent send "<goal>" --limit 5 --wait` | Compatibility shim that creates a thread plus first turn and mirrors completion to a legacy task row |
+| `issue-finder agent list` | List recent legacy daemon task rows |
+| `issue-finder agent show <agent-task-id>` | Show one legacy daemon task row, including mirrored messages, tool calls, and result metadata |
+| `issue-finder agent events <agent-task-id>` | Show ordered persisted events for one legacy daemon task row |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
