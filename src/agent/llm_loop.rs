@@ -9,11 +9,16 @@ use crate::paths::IssueFinderPaths;
 use crate::tool_runtime::{IssueFinderToolInvocation, IssueFinderToolRuntime};
 use crate::tool_specs::{TOOL_SCOUT, TOOL_STATUS};
 
-use super::model::{AgentTaskSendRequest, AgentTaskStatus};
-use super::store::AgentStore;
+use super::model::{
+    AgentTaskSendRequest, AgentTaskStatus, AgentThreadItem, AgentThreadStatus,
+    AgentThreadTurnRequest,
+};
+use super::store::{AgentStore, NewAgentThreadItem};
 
 const AGENT_LLM_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_OBSERVATION_CHARS: usize = 12_000;
+const MAX_THREAD_CONTEXT_ITEMS: usize = 12;
+const MAX_THREAD_CONTEXT_ITEM_CHARS: usize = 4_000;
 
 #[derive(Debug, Clone, Serialize)]
 struct ChatCompletionRequest {
@@ -65,6 +70,20 @@ pub async fn run_agent_task(
         Ok(()) => Ok(()),
         Err(error) => {
             let _ = mark_task_failed(&paths, &task_id, error.to_string());
+            Err(error)
+        }
+    }
+}
+
+pub async fn run_agent_turn(
+    paths: IssueFinderPaths,
+    config: Config,
+    turn_id: String,
+) -> Result<()> {
+    match run_agent_turn_inner(paths.clone(), config, turn_id.clone()).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = mark_turn_failed(&paths, &turn_id, error.to_string());
             Err(error)
         }
     }
@@ -212,6 +231,180 @@ async fn run_agent_task_inner(
     )
 }
 
+async fn run_agent_turn_inner(
+    paths: IssueFinderPaths,
+    config: Config,
+    turn_id: String,
+) -> Result<()> {
+    let (thread_id, turn_input, input) = {
+        let store = AgentStore::open(paths.clone())?;
+        let turn = store.get_turn(&turn_id)?;
+        if turn.status.is_terminal() {
+            return Ok(());
+        }
+        let thread = store.get_thread(&turn.thread_id)?;
+        if thread.status == AgentThreadStatus::Archived {
+            anyhow::bail!("agent thread {} is archived", thread.id);
+        }
+        store.update_thread_status(&thread.id, AgentThreadStatus::Running)?;
+        store.update_turn_status(&turn_id, AgentTaskStatus::Running, None, None)?;
+        store.add_thread_event(
+            &thread.id,
+            Some(&turn_id),
+            "turn_started",
+            "Agent turn started.",
+            json!({"input": turn.input}),
+        )?;
+        let input = turn_input_from_metadata(&turn.metadata, &turn.input)?;
+        (thread.id, turn.input, input)
+    };
+
+    let mut messages = {
+        let store = AgentStore::open(paths.clone())?;
+        thread_messages(&store, &thread_id, &turn_id, &turn_input, &input)?
+    };
+
+    let mut last_tool_output: Option<Value> = None;
+
+    for turn_index in 0..input.normalized_max_turns() {
+        let raw_decision = request_agent_decision(&config, &messages).await?;
+        {
+            let store = AgentStore::open(paths.clone())?;
+            store.add_thread_item(NewAgentThreadItem {
+                thread_id: &thread_id,
+                turn_id: Some(&turn_id),
+                item_type: "assistant_decision",
+                role: Some("assistant"),
+                content: Some(&raw_decision),
+                tool_name: None,
+                payload: json!({"turnIndex": turn_index, "messageType": "agent_decision"}),
+            })?;
+        }
+
+        let decision = parse_agent_decision(&raw_decision)
+            .with_context(|| format!("LLM returned an invalid agent decision: {raw_decision}"))?;
+
+        if let Some(final_answer) = normalized_optional(decision.final_answer.as_deref()) {
+            complete_turn(
+                &paths,
+                &thread_id,
+                &turn_id,
+                &turn_input,
+                final_answer,
+                decision.rationale.clone(),
+                last_tool_output,
+            )?;
+            return Ok(());
+        }
+
+        let Some(tool_name) = normalized_optional(decision.tool.as_deref()) else {
+            anyhow::bail!("LLM decision did not include a tool or finalAnswer");
+        };
+        if !tool_allowed(&tool_name) {
+            anyhow::bail!("LLM selected unsupported tool {tool_name}");
+        }
+
+        let arguments = normalize_thread_tool_arguments(&tool_name, decision.arguments, &input)?;
+        let call_id = {
+            let store = AgentStore::open(paths.clone())?;
+            let item = store.add_thread_item(NewAgentThreadItem {
+                thread_id: &thread_id,
+                turn_id: Some(&turn_id),
+                item_type: "tool_call_started",
+                role: None,
+                content: None,
+                tool_name: Some(&tool_name),
+                payload: json!({
+                    "toolName": tool_name,
+                    "arguments": arguments,
+                    "turnIndex": turn_index
+                }),
+            })?;
+            store.add_thread_event(
+                &thread_id,
+                Some(&turn_id),
+                "tool_call_started",
+                &format!("Agent called {tool_name}."),
+                json!({
+                    "toolName": tool_name,
+                    "toolCallId": item.id,
+                    "turnIndex": turn_index
+                }),
+            )?;
+            item.id
+        };
+
+        let output = IssueFinderToolRuntime::new(paths.clone(), config.clone())
+            .execute(IssueFinderToolInvocation {
+                call_id: call_id.clone(),
+                turn_id: Some(turn_id.clone()),
+                tool_name: tool_name.clone(),
+                arguments,
+            })
+            .await;
+        let output_json = serde_json::to_value(&output)?;
+        let output_success = output.success;
+        let output_status = output.status.clone();
+        let tool_error = (!output_success).then(|| tool_output_error(&output_json));
+        let observation = tool_observation(&tool_name, &output_json);
+
+        {
+            let store = AgentStore::open(paths.clone())?;
+            store.add_thread_item(NewAgentThreadItem {
+                thread_id: &thread_id,
+                turn_id: Some(&turn_id),
+                item_type: if output_success {
+                    "tool_call_completed"
+                } else {
+                    "tool_call_failed"
+                },
+                role: Some("user"),
+                content: Some(&observation),
+                tool_name: Some(&tool_name),
+                payload: json!({
+                    "toolName": tool_name,
+                    "toolCallId": call_id,
+                    "success": output_success,
+                    "status": output_status,
+                    "error": tool_error,
+                    "output": output_json
+                }),
+            })?;
+            store.add_thread_event(
+                &thread_id,
+                Some(&turn_id),
+                if output_success {
+                    "tool_call_completed"
+                } else {
+                    "tool_call_failed"
+                },
+                &format!("Agent tool {tool_name} returned {output_status}."),
+                json!({
+                    "toolName": tool_name,
+                    "toolCallId": call_id,
+                    "success": output_success,
+                    "status": output_status
+                }),
+            )?;
+        }
+
+        last_tool_output = Some(output_json);
+        messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: raw_decision,
+        });
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: observation,
+        });
+    }
+
+    anyhow::bail!(
+        "agent turn reached max_turns={} without finalAnswer",
+        input.normalized_max_turns()
+    )
+}
+
 pub fn parse_agent_decision(raw: &str) -> Result<AgentDecision> {
     let json_text =
         extract_json_object(raw).context("agent decision must contain a JSON object")?;
@@ -235,6 +428,25 @@ fn task_input_from_metadata(metadata: &Value, goal: &str) -> Result<AgentTaskSen
 
     Ok(AgentTaskSendRequest {
         goal: goal.to_string(),
+        repo: None,
+        limit: Some(10),
+        refresh: false,
+        max_turns: Some(4),
+        run_immediately: true,
+    })
+}
+
+fn turn_input_from_metadata(metadata: &Value, input: &str) -> Result<AgentThreadTurnRequest> {
+    if let Some(raw_input) = metadata.get("input") {
+        let mut parsed = serde_json::from_value::<AgentThreadTurnRequest>(raw_input.clone())?;
+        if parsed.input.trim().is_empty() {
+            parsed.input = input.to_string();
+        }
+        return Ok(parsed);
+    }
+
+    Ok(AgentThreadTurnRequest {
+        input: input.to_string(),
         repo: None,
         limit: Some(10),
         refresh: false,
@@ -315,6 +527,16 @@ fn user_prompt(goal: &str, input: &AgentTaskSendRequest) -> String {
     )
 }
 
+fn thread_user_prompt(input_text: &str, input: &AgentThreadTurnRequest) -> String {
+    let repo = input.repo.as_deref().unwrap_or("null");
+    format!(
+        "Thread turn input: {input_text}\nDefault scout arguments: limit={}, repo={}, refresh={}, includeFiltered=false, recordExposure=true.\nChoose the next action.",
+        input.normalized_limit(),
+        repo,
+        input.refresh
+    )
+}
+
 fn normalize_tool_arguments(
     tool_name: &str,
     arguments: Option<Value>,
@@ -355,6 +577,93 @@ fn normalize_tool_arguments(
     Ok(arguments)
 }
 
+fn normalize_thread_tool_arguments(
+    tool_name: &str,
+    arguments: Option<Value>,
+    input: &AgentThreadTurnRequest,
+) -> Result<Value> {
+    let mut arguments = arguments.unwrap_or_else(|| json!({}));
+    if !arguments.is_object() {
+        anyhow::bail!("tool arguments must be a JSON object");
+    }
+
+    if tool_name == TOOL_SCOUT {
+        let object = arguments.as_object_mut().expect("checked object");
+        object
+            .entry("limit".to_string())
+            .or_insert_with(|| json!(input.normalized_limit()));
+        object
+            .entry("repo".to_string())
+            .or_insert_with(|| input.repo.as_ref().map_or(Value::Null, |repo| json!(repo)));
+        object
+            .entry("refresh".to_string())
+            .or_insert_with(|| json!(input.refresh));
+        object
+            .entry("includeFiltered".to_string())
+            .or_insert_with(|| json!(false));
+        object
+            .entry("recordExposure".to_string())
+            .or_insert_with(|| json!(true));
+    }
+
+    if tool_name == TOOL_STATUS {
+        arguments
+            .as_object_mut()
+            .expect("checked object")
+            .entry("checkAuth".to_string())
+            .or_insert_with(|| json!(true));
+    }
+
+    Ok(arguments)
+}
+
+fn thread_messages(
+    store: &AgentStore,
+    thread_id: &str,
+    current_turn_id: &str,
+    input_text: &str,
+    input: &AgentThreadTurnRequest,
+) -> Result<Vec<ChatMessage>> {
+    let mut messages = vec![ChatMessage {
+        role: "system".to_string(),
+        content: system_prompt(),
+    }];
+
+    let items = store.list_thread_items(thread_id)?;
+    let mut history = items
+        .into_iter()
+        .filter(|item| item.turn_id.as_deref() != Some(current_turn_id))
+        .filter_map(thread_item_message)
+        .collect::<Vec<_>>();
+    if history.len() > MAX_THREAD_CONTEXT_ITEMS {
+        history = history.split_off(history.len() - MAX_THREAD_CONTEXT_ITEMS);
+    }
+    messages.extend(history);
+    messages.push(ChatMessage {
+        role: "user".to_string(),
+        content: thread_user_prompt(input_text, input),
+    });
+    Ok(messages)
+}
+
+fn thread_item_message(item: AgentThreadItem) -> Option<ChatMessage> {
+    match item.item_type.as_str() {
+        "user_message"
+        | "assistant_decision"
+        | "tool_call_completed"
+        | "tool_call_failed"
+        | "final_answer" => {
+            let role = item.role?;
+            let content = item.content?;
+            Some(ChatMessage {
+                role,
+                content: truncate_chars(&content, MAX_THREAD_CONTEXT_ITEM_CHARS),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn complete_task(
     paths: &IssueFinderPaths,
     task_id: &str,
@@ -388,6 +697,45 @@ fn complete_task(
     Ok(())
 }
 
+fn complete_turn(
+    paths: &IssueFinderPaths,
+    thread_id: &str,
+    turn_id: &str,
+    input: &str,
+    final_answer: String,
+    rationale: Option<String>,
+    last_tool_output: Option<Value>,
+) -> Result<()> {
+    let result = json!({
+        "kind": "issue_finder_agent_turn_result",
+        "version": 1,
+        "input": input,
+        "finalAnswer": final_answer,
+        "rationale": rationale,
+        "lastToolOutput": last_tool_output
+    });
+    let store = AgentStore::open(paths.clone())?;
+    store.add_thread_item(NewAgentThreadItem {
+        thread_id,
+        turn_id: Some(turn_id),
+        item_type: "final_answer",
+        role: Some("assistant"),
+        content: result["finalAnswer"].as_str(),
+        tool_name: None,
+        payload: result.clone(),
+    })?;
+    store.update_turn_status(turn_id, AgentTaskStatus::Completed, Some(result), None)?;
+    store.update_thread_status(thread_id, AgentThreadStatus::Active)?;
+    store.add_thread_event(
+        thread_id,
+        Some(turn_id),
+        "turn_completed",
+        "Agent turn completed.",
+        json!({}),
+    )?;
+    Ok(())
+}
+
 fn mark_task_failed(paths: &IssueFinderPaths, task_id: &str, error: String) -> Result<()> {
     let store = AgentStore::open(paths.clone())?;
     store.update_task_status(task_id, AgentTaskStatus::Failed, None, Some(error.clone()))?;
@@ -395,6 +743,21 @@ fn mark_task_failed(paths: &IssueFinderPaths, task_id: &str, error: String) -> R
         task_id,
         "task_failed",
         "Agent task failed.",
+        json!({ "error": error }),
+    )?;
+    Ok(())
+}
+
+fn mark_turn_failed(paths: &IssueFinderPaths, turn_id: &str, error: String) -> Result<()> {
+    let store = AgentStore::open(paths.clone())?;
+    let turn = store.get_turn(turn_id)?;
+    store.update_turn_status(turn_id, AgentTaskStatus::Failed, None, Some(error.clone()))?;
+    store.update_thread_status(&turn.thread_id, AgentThreadStatus::Active)?;
+    store.add_thread_event(
+        &turn.thread_id,
+        Some(turn_id),
+        "turn_failed",
+        "Agent turn failed.",
         json!({ "error": error }),
     )?;
     Ok(())

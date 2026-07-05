@@ -9,7 +9,9 @@ use serde_json::Value;
 use crate::paths::IssueFinderPaths;
 
 use super::model::{
-    AgentEvent, AgentMessage, AgentTask, AgentTaskDetail, AgentTaskStatus, AgentToolCall,
+    AgentEvent, AgentMessage, AgentTask, AgentTaskDetail, AgentTaskStatus, AgentThread,
+    AgentThreadDetail, AgentThreadEvent, AgentThreadItem, AgentThreadStatus, AgentToolCall,
+    AgentTurn,
 };
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -214,6 +216,241 @@ impl AgentStore {
         })
     }
 
+    pub fn create_thread(&self, goal: &str, title: &str, metadata: Value) -> Result<AgentThread> {
+        let id = next_id("agent-thread");
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO agent_threads (
+                id, title, goal, status, created_at, updated_at,
+                last_turn_id, metadata_json
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, ?6)",
+            params![
+                id,
+                title,
+                goal,
+                AgentThreadStatus::Active.as_str(),
+                now,
+                json_text(&metadata)?
+            ],
+        )?;
+        self.get_thread(&id)
+    }
+
+    pub fn get_thread(&self, id: &str) -> Result<AgentThread> {
+        self.conn
+            .query_row(
+                "SELECT id, title, goal, status, created_at, updated_at,
+                        last_turn_id, metadata_json
+                 FROM agent_threads
+                 WHERE id = ?1",
+                params![id],
+                agent_thread_from_row,
+            )
+            .with_context(|| format!("agent thread {id} not found"))
+    }
+
+    pub fn list_threads(&self, limit: usize) -> Result<Vec<AgentThread>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, title, goal, status, created_at, updated_at,
+                    last_turn_id, metadata_json
+             FROM agent_threads
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit.max(1) as i64], agent_thread_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn update_thread_status(&self, id: &str, status: AgentThreadStatus) -> Result<AgentThread> {
+        let now = now();
+        self.conn.execute(
+            "UPDATE agent_threads
+             SET status = ?2, updated_at = ?3
+             WHERE id = ?1",
+            params![id, status.as_str(), now],
+        )?;
+        self.get_thread(id)
+    }
+
+    pub fn create_turn(&self, thread_id: &str, input: &str, metadata: Value) -> Result<AgentTurn> {
+        let thread = self.get_thread(thread_id)?;
+        if !thread.status.accepts_new_turn() {
+            anyhow::bail!(
+                "agent thread {thread_id} cannot accept a new turn while status is {}",
+                thread.status.as_str()
+            );
+        }
+
+        let id = next_id("agent-turn");
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO agent_turns (
+                id, thread_id, input, status, created_at, updated_at,
+                completed_at, result_json, error, metadata_json
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, NULL, NULL, ?6)",
+            params![
+                id,
+                thread_id,
+                input,
+                AgentTaskStatus::Queued.as_str(),
+                now,
+                json_text(&metadata)?
+            ],
+        )?;
+        self.conn.execute(
+            "UPDATE agent_threads
+             SET last_turn_id = ?2, updated_at = ?3
+             WHERE id = ?1",
+            params![thread_id, id, now],
+        )?;
+        self.get_turn(&id)
+    }
+
+    pub fn get_turn(&self, id: &str) -> Result<AgentTurn> {
+        self.conn
+            .query_row(
+                "SELECT id, thread_id, input, status, created_at, updated_at,
+                        completed_at, result_json, error, metadata_json
+                 FROM agent_turns
+                 WHERE id = ?1",
+                params![id],
+                agent_turn_from_row,
+            )
+            .with_context(|| format!("agent turn {id} not found"))
+    }
+
+    pub fn update_turn_status(
+        &self,
+        id: &str,
+        status: AgentTaskStatus,
+        result: Option<Value>,
+        error: Option<String>,
+    ) -> Result<AgentTurn> {
+        let now = now();
+        let completed_at = status.is_terminal().then_some(now.as_str());
+        self.conn.execute(
+            "UPDATE agent_turns
+             SET status = ?2,
+                 updated_at = ?3,
+                 completed_at = COALESCE(?4, completed_at),
+                 result_json = COALESCE(?5, result_json),
+                 error = ?6
+             WHERE id = ?1",
+            params![
+                id,
+                status.as_str(),
+                now,
+                completed_at,
+                optional_json_text(result.as_ref())?,
+                error
+            ],
+        )?;
+        let turn = self.get_turn(id)?;
+        self.conn.execute(
+            "UPDATE agent_threads SET updated_at = ?2 WHERE id = ?1",
+            params![turn.thread_id, now],
+        )?;
+        Ok(turn)
+    }
+
+    pub fn add_thread_item(&self, input: NewAgentThreadItem<'_>) -> Result<AgentThreadItem> {
+        let id = next_id("agent-item");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO agent_thread_items (
+                id, thread_id, turn_id, item_type, role, content,
+                tool_name, payload_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                input.thread_id,
+                input.turn_id,
+                input.item_type,
+                input.role,
+                input.content,
+                input.tool_name,
+                json_text(&input.payload)?,
+                created_at
+            ],
+        )?;
+        self.get_thread_item(&id)
+    }
+
+    pub fn add_thread_event(
+        &self,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        kind: &str,
+        message: &str,
+        payload: Value,
+    ) -> Result<AgentThreadEvent> {
+        let id = next_id("agent-thread-event");
+        let created_at = now();
+        self.conn.execute(
+            "INSERT INTO agent_thread_events (
+                id, thread_id, turn_id, kind, message, payload_json, created_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                thread_id,
+                turn_id,
+                kind,
+                message,
+                json_text(&payload)?,
+                created_at
+            ],
+        )?;
+        self.get_thread_event(&id)
+    }
+
+    pub fn thread_detail(&self, thread_id: &str) -> Result<AgentThreadDetail> {
+        Ok(AgentThreadDetail {
+            thread: self.get_thread(thread_id)?,
+            turns: self.list_thread_turns(thread_id)?,
+            items: self.list_thread_items(thread_id)?,
+            events: self.list_thread_events(thread_id)?,
+        })
+    }
+
+    pub fn list_thread_turns(&self, thread_id: &str) -> Result<Vec<AgentTurn>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, thread_id, input, status, created_at, updated_at,
+                    completed_at, result_json, error, metadata_json
+             FROM agent_turns
+             WHERE thread_id = ?1
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![thread_id], agent_turn_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_thread_items(&self, thread_id: &str) -> Result<Vec<AgentThreadItem>> {
+        let mut statement = self.conn.prepare(
+            "SELECT sequence, id, thread_id, turn_id, item_type, role, content,
+                    tool_name, payload_json, created_at
+             FROM agent_thread_items
+             WHERE thread_id = ?1
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(params![thread_id], agent_thread_item_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_thread_events(&self, thread_id: &str) -> Result<Vec<AgentThreadEvent>> {
+        let mut statement = self.conn.prepare(
+            "SELECT sequence, id, thread_id, turn_id, kind, message, payload_json, created_at
+             FROM agent_thread_events
+             WHERE thread_id = ?1
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(params![thread_id], agent_thread_event_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn list_events(&self, task_id: &str) -> Result<Vec<AgentEvent>> {
         let mut statement = self.conn.prepare(
             "SELECT sequence, id, task_id, kind, message, payload_json, created_at
@@ -284,14 +521,123 @@ impl AgentStore {
             )
             .with_context(|| format!("agent event {id} not found"))
     }
+
+    fn get_thread_item(&self, id: &str) -> Result<AgentThreadItem> {
+        self.conn
+            .query_row(
+                "SELECT sequence, id, thread_id, turn_id, item_type, role, content,
+                        tool_name, payload_json, created_at
+                 FROM agent_thread_items
+                 WHERE id = ?1",
+                params![id],
+                agent_thread_item_from_row,
+            )
+            .with_context(|| format!("agent thread item {id} not found"))
+    }
+
+    fn get_thread_event(&self, id: &str) -> Result<AgentThreadEvent> {
+        self.conn
+            .query_row(
+                "SELECT sequence, id, thread_id, turn_id, kind, message, payload_json, created_at
+                 FROM agent_thread_events
+                 WHERE id = ?1",
+                params![id],
+                agent_thread_event_from_row,
+            )
+            .with_context(|| format!("agent thread event {id} not found"))
+    }
+}
+
+pub struct NewAgentThreadItem<'a> {
+    pub thread_id: &'a str,
+    pub turn_id: Option<&'a str>,
+    pub item_type: &'a str,
+    pub role: Option<&'a str>,
+    pub content: Option<&'a str>,
+    pub tool_name: Option<&'a str>,
+    pub payload: Value,
 }
 
 fn initialize_schema(conn: &Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
-        0 | 1 => create_schema_v1(conn)?,
+        0 => {
+            create_schema_v1(conn)?;
+            create_schema_v2(conn)?;
+        }
+        1 => create_schema_v2(conn)?,
+        2 => create_schema_v2(conn)?,
         other => anyhow::bail!("unsupported agent database schema version {other}"),
     }
+    Ok(())
+}
+
+fn create_schema_v2(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS agent_threads (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_turn_id TEXT,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (last_turn_id) REFERENCES agent_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_turns (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            input TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT,
+            result_json TEXT,
+            error TEXT,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_thread_items (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT,
+            item_type TEXT NOT NULL,
+            role TEXT,
+            content TEXT,
+            tool_name TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES agent_turns(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_thread_events (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT,
+            kind TEXT NOT NULL,
+            message TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES agent_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_threads_status ON agent_threads(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_turns_thread ON agent_turns(thread_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_turns_status ON agent_turns(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_thread_items_thread ON agent_thread_items(thread_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_agent_thread_items_turn ON agent_thread_items(turn_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_agent_thread_events_thread ON agent_thread_events(thread_id, sequence);
+        PRAGMA user_version = 2;
+        "#,
+    )?;
     Ok(())
 }
 
@@ -409,6 +755,64 @@ fn agent_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentEvent> {
     })
 }
 
+fn agent_thread_from_row(row: &Row<'_>) -> rusqlite::Result<AgentThread> {
+    let status: String = row.get(3)?;
+    Ok(AgentThread {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        goal: row.get(2)?,
+        status: AgentThreadStatus::parse(&status).unwrap_or(AgentThreadStatus::Active),
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        last_turn_id: row.get(6)?,
+        metadata: json_column(row, 7)?,
+    })
+}
+
+fn agent_turn_from_row(row: &Row<'_>) -> rusqlite::Result<AgentTurn> {
+    let status: String = row.get(3)?;
+    Ok(AgentTurn {
+        id: row.get(0)?,
+        thread_id: row.get(1)?,
+        input: row.get(2)?,
+        status: AgentTaskStatus::parse(&status).unwrap_or(AgentTaskStatus::Failed),
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        completed_at: row.get(6)?,
+        result: optional_json_column(row, 7)?,
+        error: row.get(8)?,
+        metadata: json_column(row, 9)?,
+    })
+}
+
+fn agent_thread_item_from_row(row: &Row<'_>) -> rusqlite::Result<AgentThreadItem> {
+    Ok(AgentThreadItem {
+        sequence: row.get(0)?,
+        id: row.get(1)?,
+        thread_id: row.get(2)?,
+        turn_id: row.get(3)?,
+        item_type: row.get(4)?,
+        role: row.get(5)?,
+        content: row.get(6)?,
+        tool_name: row.get(7)?,
+        payload: json_column(row, 8)?,
+        created_at: row.get(9)?,
+    })
+}
+
+fn agent_thread_event_from_row(row: &Row<'_>) -> rusqlite::Result<AgentThreadEvent> {
+    Ok(AgentThreadEvent {
+        sequence: row.get(0)?,
+        id: row.get(1)?,
+        thread_id: row.get(2)?,
+        turn_id: row.get(3)?,
+        kind: row.get(4)?,
+        message: row.get(5)?,
+        payload: json_column(row, 6)?,
+        created_at: row.get(7)?,
+    })
+}
+
 fn json_text(value: &Value) -> Result<String> {
     Ok(serde_json::to_string(value)?)
 }
@@ -467,8 +871,8 @@ mod tests {
     use serde_json::json;
     use tempfile::tempdir;
 
-    use super::AgentStore;
-    use crate::agent::model::AgentTaskStatus;
+    use super::{AgentStore, NewAgentThreadItem};
+    use crate::agent::model::{AgentTaskStatus, AgentThreadStatus};
     use crate::paths::IssueFinderPaths;
 
     #[test]
@@ -514,5 +918,75 @@ mod tests {
         assert_eq!(detail.tool_calls.len(), 1);
         assert_eq!(detail.events.len(), 1);
         assert_eq!(detail.tool_calls[0].status, "ok");
+    }
+
+    #[test]
+    fn store_persists_resumable_thread_turns_items_and_events() {
+        let dir = tempdir().unwrap();
+        let paths = IssueFinderPaths {
+            home: dir.path().to_path_buf(),
+            config: dir.path().join("config.toml"),
+            cache_dir: dir.path().join("cache"),
+            workspaces_dir: dir.path().join("workspaces"),
+            inbox_dir: dir.path().join("inbox"),
+            reports_dir: dir.path().join("reports"),
+        };
+        let store = AgentStore::open(paths.clone()).unwrap();
+
+        let thread = store
+            .create_thread(
+                "搜索全网仓库并推荐 issue",
+                "搜索 issue",
+                json!({"transport": "local_http_a2a"}),
+            )
+            .unwrap();
+        let turn = store
+            .create_turn(&thread.id, "先 scout", json!({"limit": 3}))
+            .unwrap();
+        store
+            .add_thread_item(NewAgentThreadItem {
+                thread_id: &thread.id,
+                turn_id: Some(&turn.id),
+                item_type: "user_message",
+                role: Some("user"),
+                content: Some("先 scout"),
+                tool_name: None,
+                payload: json!({}),
+            })
+            .unwrap();
+        store
+            .add_thread_event(
+                &thread.id,
+                Some(&turn.id),
+                "turn_queued",
+                "Turn queued.",
+                json!({}),
+            )
+            .unwrap();
+        store
+            .update_thread_status(&thread.id, AgentThreadStatus::Running)
+            .unwrap();
+        store
+            .update_turn_status(
+                &turn.id,
+                AgentTaskStatus::Completed,
+                Some(json!({"finalAnswer": "done"})),
+                None,
+            )
+            .unwrap();
+        store
+            .update_thread_status(&thread.id, AgentThreadStatus::Active)
+            .unwrap();
+
+        let reopened = AgentStore::open(paths).unwrap();
+        let detail = reopened.thread_detail(&thread.id).unwrap();
+        assert_eq!(detail.thread.status, AgentThreadStatus::Active);
+        assert_eq!(
+            detail.thread.last_turn_id.as_deref(),
+            Some(turn.id.as_str())
+        );
+        assert_eq!(detail.turns.len(), 1);
+        assert_eq!(detail.items.len(), 1);
+        assert_eq!(detail.events.len(), 1);
     }
 }

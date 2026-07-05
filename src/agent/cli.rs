@@ -10,7 +10,9 @@ use crate::paths::IssueFinderPaths;
 use super::cli_args::{AgentArgs, AgentCommand};
 use super::model::{
     AgentCardEnvelope, AgentEventsEnvelope, AgentTaskAcceptedEnvelope, AgentTaskDetailEnvelope,
-    AgentTaskListEnvelope, AgentTaskSendRequest,
+    AgentTaskListEnvelope, AgentTaskSendRequest, AgentThreadAcceptedEnvelope,
+    AgentThreadDetailEnvelope, AgentThreadEventsEnvelope, AgentThreadListEnvelope,
+    AgentThreadStartRequest, AgentThreadTurnRequest,
 };
 use super::server::run_daemon;
 
@@ -50,6 +52,88 @@ pub async fn handle_agent_cli(
                 Ok(serde_json::to_string_pretty(&accepted)?)
             } else {
                 Ok(render_task_accepted(&accepted))
+            }
+        }
+        AgentCommand::ThreadStart(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let request = AgentThreadStartRequest {
+                goal: args.goal,
+                title: args.title,
+                repo: args.repo,
+                limit: args.limit,
+                refresh: args.refresh,
+                max_turns: args.max_turns,
+                run_immediately: !args.queued,
+            };
+            let accepted = endpoint.start_thread(&request).await?;
+            if args.wait {
+                let detail = endpoint
+                    .wait_for_thread_turn(&accepted.thread.id, &accepted.turn.id)
+                    .await?;
+                if args.json {
+                    return Ok(serde_json::to_string_pretty(&detail)?);
+                }
+                return Ok(render_thread_detail(&detail));
+            }
+            if args.json {
+                Ok(serde_json::to_string_pretty(&accepted)?)
+            } else {
+                Ok(render_thread_accepted(&accepted))
+            }
+        }
+        AgentCommand::ThreadSend(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let request = AgentThreadTurnRequest {
+                input: args.input,
+                repo: args.repo,
+                limit: args.limit,
+                refresh: args.refresh,
+                max_turns: args.max_turns,
+                run_immediately: !args.queued,
+            };
+            let accepted = endpoint.send_thread_turn(&args.thread_id, &request).await?;
+            if args.wait {
+                let detail = endpoint
+                    .wait_for_thread_turn(&accepted.thread.id, &accepted.turn.id)
+                    .await?;
+                if args.json {
+                    return Ok(serde_json::to_string_pretty(&detail)?);
+                }
+                return Ok(render_thread_detail(&detail));
+            }
+            if args.json {
+                Ok(serde_json::to_string_pretty(&accepted)?)
+            } else {
+                Ok(render_thread_accepted(&accepted))
+            }
+        }
+        AgentCommand::Threads(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let list = endpoint
+                .get::<AgentThreadListEnvelope>("/a2a/threads")
+                .await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&list)?)
+            } else {
+                Ok(render_thread_list(&list))
+            }
+        }
+        AgentCommand::ThreadShow(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let detail = endpoint.thread_detail(&args.thread_id).await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&detail)?)
+            } else {
+                Ok(render_thread_detail(&detail))
+            }
+        }
+        AgentCommand::ThreadEvents(args) => {
+            let endpoint = AgentEndpoint::new(args.host, args.port)?;
+            let events = endpoint.thread_events(&args.thread_id).await?;
+            if args.json {
+                Ok(serde_json::to_string_pretty(&events)?)
+            } else {
+                Ok(render_thread_events(&events))
             }
         }
         AgentCommand::List(args) => {
@@ -119,12 +203,47 @@ impl AgentEndpoint {
         decode_response(response).await
     }
 
+    async fn start_thread(
+        &self,
+        request: &AgentThreadStartRequest,
+    ) -> Result<AgentThreadAcceptedEnvelope> {
+        let response = self
+            .client
+            .post(self.url("/a2a/threads/start"))
+            .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
+    async fn send_thread_turn(
+        &self,
+        thread_id: &str,
+        request: &AgentThreadTurnRequest,
+    ) -> Result<AgentThreadAcceptedEnvelope> {
+        let response = self
+            .client
+            .post(self.url(&format!("/a2a/threads/{thread_id}/turns/send")))
+            .json(request)
+            .send()
+            .await?;
+        decode_response(response).await
+    }
+
     async fn task_detail(&self, task_id: &str) -> Result<AgentTaskDetailEnvelope> {
         self.get(&format!("/a2a/tasks/{task_id}")).await
     }
 
     async fn task_events(&self, task_id: &str) -> Result<AgentEventsEnvelope> {
         self.get(&format!("/a2a/tasks/{task_id}/events")).await
+    }
+
+    async fn thread_detail(&self, thread_id: &str) -> Result<AgentThreadDetailEnvelope> {
+        self.get(&format!("/a2a/threads/{thread_id}")).await
+    }
+
+    async fn thread_events(&self, thread_id: &str) -> Result<AgentThreadEventsEnvelope> {
+        self.get(&format!("/a2a/threads/{thread_id}/events")).await
     }
 
     async fn get<T>(&self, path: &str) -> Result<T>
@@ -144,6 +263,31 @@ impl AgentEndpoint {
             }
             if started.elapsed() >= WAIT_TIMEOUT {
                 anyhow::bail!("timed out waiting for agent task {task_id}");
+            }
+            tokio::time::sleep(WAIT_INTERVAL).await;
+        }
+    }
+
+    async fn wait_for_thread_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<AgentThreadDetailEnvelope> {
+        let started = std::time::Instant::now();
+        loop {
+            let detail = self.thread_detail(thread_id).await?;
+            if detail
+                .detail
+                .turns
+                .iter()
+                .find(|turn| turn.id == turn_id)
+                .map(|turn| turn.status.is_terminal())
+                .unwrap_or(false)
+            {
+                return Ok(detail);
+            }
+            if started.elapsed() >= WAIT_TIMEOUT {
+                anyhow::bail!("timed out waiting for agent turn {turn_id}");
             }
             tokio::time::sleep(WAIT_INTERVAL).await;
         }
@@ -189,6 +333,95 @@ fn render_task_list(envelope: &AgentTaskListEnvelope) -> String {
                 task.id,
                 task.status.as_str(),
                 one_line(&task.goal)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_thread_accepted(envelope: &AgentThreadAcceptedEnvelope) -> String {
+    format!(
+        "Accepted agent thread {}\nturn: {}\nthread status: {}\nturn status: {}\nthread: {}\nevents: {}",
+        envelope.thread.id,
+        envelope.turn.id,
+        envelope.thread.status.as_str(),
+        envelope.turn.status.as_str(),
+        envelope.thread_url,
+        envelope.events_url
+    )
+}
+
+fn render_thread_list(envelope: &AgentThreadListEnvelope) -> String {
+    if envelope.threads.is_empty() {
+        return "No agent threads.".to_string();
+    }
+    envelope
+        .threads
+        .iter()
+        .map(|thread| {
+            format!(
+                "{}  {}  {}",
+                thread.id,
+                thread.status.as_str(),
+                one_line(&thread.title)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_thread_detail(envelope: &AgentThreadDetailEnvelope) -> String {
+    let thread = &envelope.detail.thread;
+    let mut lines = vec![
+        format!("Thread {}", thread.id),
+        format!("status: {}", thread.status.as_str()),
+        format!("title: {}", thread.title),
+        format!("goal: {}", thread.goal),
+    ];
+    if let Some(turn) = envelope.detail.turns.last() {
+        lines.push(format!("last turn: {} ({})", turn.id, turn.status.as_str()));
+        if let Some(error) = &turn.error {
+            lines.push(format!("last error: {error}"));
+        }
+        if let Some(final_answer) = turn
+            .result
+            .as_ref()
+            .and_then(|result| result.get("finalAnswer"))
+            .and_then(|value| value.as_str())
+        {
+            lines.push(format!("last final: {final_answer}"));
+        }
+    }
+    lines.push(format!("turns: {}", envelope.detail.turns.len()));
+    lines.push(format!("items: {}", envelope.detail.items.len()));
+    lines.push(format!("events: {}", envelope.detail.events.len()));
+    lines.join("\n")
+}
+
+fn render_thread_events(envelope: &AgentThreadEventsEnvelope) -> String {
+    if envelope.events.is_empty() {
+        return format!("No events for {}.", envelope.thread_id);
+    }
+    envelope
+        .events
+        .iter()
+        .map(|event| {
+            let payload = if event.payload == json!({}) {
+                String::new()
+            } else {
+                format!(
+                    " {}",
+                    serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string())
+                )
+            };
+            let turn = event
+                .turn_id
+                .as_deref()
+                .map(|turn_id| format!(" {turn_id}"))
+                .unwrap_or_default();
+            format!(
+                "{}{}  {}  {}{}",
+                event.sequence, turn, event.kind, event.message, payload
             )
         })
         .collect::<Vec<_>>()

@@ -15,6 +15,16 @@ pub enum AgentCommand {
     Daemon(AgentDaemonArgs),
     /// Send a natural-language task to a running agent daemon.
     Send(AgentSendArgs),
+    /// Start a resumable natural-language thread.
+    ThreadStart(AgentThreadStartArgs),
+    /// Append a turn to a resumable thread.
+    ThreadSend(AgentThreadSendArgs),
+    /// List recent resumable threads from a running agent daemon.
+    Threads(AgentEndpointArgs),
+    /// Show one resumable thread from a running agent daemon.
+    ThreadShow(AgentThreadQueryArgs),
+    /// Show ordered events for one resumable thread from a running agent daemon.
+    ThreadEvents(AgentThreadQueryArgs),
     /// List recent tasks from a running agent daemon.
     List(AgentEndpointArgs),
     /// Show one task from a running agent daemon.
@@ -69,6 +79,77 @@ pub struct AgentSendArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct AgentThreadStartArgs {
+    /// Natural-language goal for the Issue Finder agent thread.
+    pub goal: String,
+    /// Optional display title for the thread.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Restrict discovery to one repository.
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Candidate limit for scout-style tasks.
+    #[arg(long)]
+    pub limit: Option<usize>,
+    /// Ignore the GitHub discovery cache.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Maximum LLM/tool turns for this turn.
+    #[arg(long)]
+    pub max_turns: Option<usize>,
+    /// Queue the first turn without running it immediately.
+    #[arg(long)]
+    pub queued: bool,
+    /// Poll until the first turn reaches a terminal state.
+    #[arg(long)]
+    pub wait: bool,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadSendArgs {
+    /// Agent thread id.
+    pub thread_id: String,
+    /// Natural-language follow-up input for the thread.
+    pub input: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Restrict discovery to one repository.
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Candidate limit for scout-style tasks.
+    #[arg(long)]
+    pub limit: Option<usize>,
+    /// Ignore the GitHub discovery cache.
+    #[arg(long)]
+    pub refresh: bool,
+    /// Maximum LLM/tool turns for this turn.
+    #[arg(long)]
+    pub max_turns: Option<usize>,
+    /// Queue the turn without running it immediately.
+    #[arg(long)]
+    pub queued: bool,
+    /// Poll until this turn reaches a terminal state.
+    #[arg(long)]
+    pub wait: bool,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct AgentEndpointArgs {
     /// Running daemon host.
     #[arg(long, default_value = DEFAULT_AGENT_HOST)]
@@ -85,6 +166,21 @@ pub struct AgentEndpointArgs {
 pub struct AgentTaskQueryArgs {
     /// Agent task id.
     pub task_id: String,
+    /// Running daemon host.
+    #[arg(long, default_value = DEFAULT_AGENT_HOST)]
+    pub host: String,
+    /// Running daemon port.
+    #[arg(long, default_value_t = DEFAULT_AGENT_PORT)]
+    pub port: u16,
+    /// Print raw JSON response.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentThreadQueryArgs {
+    /// Agent thread id.
+    pub thread_id: String,
     /// Running daemon host.
     #[arg(long, default_value = DEFAULT_AGENT_HOST)]
     pub host: String,

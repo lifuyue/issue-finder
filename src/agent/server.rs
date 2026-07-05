@@ -7,12 +7,14 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::config::Config;
 use crate::paths::IssueFinderPaths;
 
-use super::llm_loop::run_agent_task;
+use super::llm_loop::{run_agent_task, run_agent_turn};
 use super::model::{
     AgentCardEnvelope, AgentEndpoint, AgentEventsEnvelope, AgentTaskAcceptedEnvelope,
     AgentTaskDetailEnvelope, AgentTaskListEnvelope, AgentTaskSendRequest,
+    AgentThreadAcceptedEnvelope, AgentThreadDetailEnvelope, AgentThreadEventsEnvelope,
+    AgentThreadListEnvelope, AgentThreadStartRequest, AgentThreadTurnRequest,
 };
-use super::store::AgentStore;
+use super::store::{AgentStore, NewAgentThreadItem};
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -41,7 +43,8 @@ pub async fn run_daemon(
             "version": 1,
             "address": address,
             "agentCardUrl": format!("http://{address}/a2a/agent-card"),
-            "sendTaskUrl": format!("http://{address}/a2a/tasks/send")
+            "sendTaskUrl": format!("http://{address}/a2a/tasks/send"),
+            "startThreadUrl": format!("http://{address}/a2a/threads/start")
         }))?
     );
 
@@ -109,6 +112,20 @@ async fn route_request(
                 tasks,
             })
         }
+        ("GET", "/a2a/threads") => {
+            let store = open_store(paths)?;
+            let threads = store.list_threads(50).map_err(HttpError::internal)?;
+            to_value(AgentThreadListEnvelope {
+                kind: "issue_finder_agent_thread_list".to_string(),
+                version: 1,
+                threads,
+            })
+        }
+        ("POST", "/a2a/threads/start") => {
+            let input = serde_json::from_slice::<AgentThreadStartRequest>(&request.body)
+                .map_err(|error| HttpError::bad_request(format!("invalid thread JSON: {error}")))?;
+            start_thread(paths, config, input).await
+        }
         ("POST", "/a2a/tasks/send") => {
             let input = serde_json::from_slice::<AgentTaskSendRequest>(&request.body)
                 .map_err(|error| HttpError::bad_request(format!("invalid task JSON: {error}")))?;
@@ -162,7 +179,177 @@ async fn route_request(
                 events_url: format!("/a2a/tasks/{}/events", task.id),
             })
         }
+        _ if path.starts_with("/a2a/threads/") => {
+            route_thread_request(&request.method, path, request.body, paths, config).await
+        }
         _ => route_task_request(&request.method, path, paths),
+    }
+}
+
+async fn start_thread(
+    paths: IssueFinderPaths,
+    config: Config,
+    input: AgentThreadStartRequest,
+) -> std::result::Result<Value, HttpError> {
+    let goal = input.normalized_goal();
+    if goal.is_empty() {
+        return Err(HttpError::bad_request("goal must not be empty"));
+    }
+    let turn_input = input.turn_input();
+    let title = input.normalized_title();
+    let store = open_store(paths.clone())?;
+    let thread = store
+        .create_thread(
+            &goal,
+            &title,
+            json!({
+                "input": input,
+                "transport": "local_http_a2a"
+            }),
+        )
+        .map_err(HttpError::internal)?;
+    store
+        .add_thread_event(
+            &thread.id,
+            None,
+            "thread_started",
+            "Agent thread started.",
+            json!({"goal": goal}),
+        )
+        .map_err(HttpError::internal)?;
+    let turn = create_thread_turn(&store, &thread.id, turn_input).map_err(HttpError::internal)?;
+
+    maybe_spawn_turn(&turn.id, &turn.metadata, paths, config);
+
+    let thread = store.get_thread(&thread.id).map_err(HttpError::internal)?;
+    to_value(AgentThreadAcceptedEnvelope {
+        kind: "issue_finder_agent_thread_accepted".to_string(),
+        version: 1,
+        thread,
+        turn: turn.clone(),
+        thread_url: format!("/a2a/threads/{}", turn.thread_id),
+        events_url: format!("/a2a/threads/{}/events", turn.thread_id),
+    })
+}
+
+async fn route_thread_request(
+    method: &str,
+    path: &str,
+    body: Vec<u8>,
+    paths: IssueFinderPaths,
+    config: Config,
+) -> std::result::Result<Value, HttpError> {
+    let Some(rest) = path.strip_prefix("/a2a/threads/") else {
+        return Err(HttpError::not_found("unknown agent thread endpoint"));
+    };
+
+    if method == "POST" && rest.ends_with("/turns/send") {
+        let thread_id = rest.trim_end_matches("/turns/send");
+        let input = serde_json::from_slice::<AgentThreadTurnRequest>(&body)
+            .map_err(|error| HttpError::bad_request(format!("invalid turn JSON: {error}")))?;
+        let normalized = input.normalized_input();
+        if normalized.is_empty() {
+            return Err(HttpError::bad_request("input must not be empty"));
+        }
+        let store = open_store(paths.clone())?;
+        let turn = create_thread_turn(&store, thread_id, input).map_err(|error| {
+            if error.to_string().contains("not found")
+                || error.to_string().contains("cannot accept")
+            {
+                HttpError::bad_request(error.to_string())
+            } else {
+                HttpError::internal(error)
+            }
+        })?;
+        maybe_spawn_turn(&turn.id, &turn.metadata, paths, config);
+        let thread = store.get_thread(thread_id).map_err(HttpError::internal)?;
+        return to_value(AgentThreadAcceptedEnvelope {
+            kind: "issue_finder_agent_thread_accepted".to_string(),
+            version: 1,
+            thread,
+            turn: turn.clone(),
+            thread_url: format!("/a2a/threads/{}", turn.thread_id),
+            events_url: format!("/a2a/threads/{}/events", turn.thread_id),
+        });
+    }
+
+    let store = open_store(paths)?;
+
+    if method == "GET" && rest.ends_with("/events") {
+        let thread_id = rest.trim_end_matches("/events");
+        let events = store
+            .list_thread_events(thread_id)
+            .map_err(HttpError::internal)?;
+        return to_value(AgentThreadEventsEnvelope {
+            kind: "issue_finder_agent_thread_events".to_string(),
+            version: 1,
+            thread_id: thread_id.to_string(),
+            events,
+        });
+    }
+
+    if method == "GET" {
+        let detail = store.thread_detail(rest).map_err(|error| {
+            if error.to_string().contains("not found") {
+                HttpError::not_found(error.to_string())
+            } else {
+                HttpError::internal(error)
+            }
+        })?;
+        return to_value(AgentThreadDetailEnvelope {
+            kind: "issue_finder_agent_thread_detail".to_string(),
+            version: 1,
+            detail,
+        });
+    }
+
+    Err(HttpError::not_found("unknown agent thread endpoint"))
+}
+
+fn create_thread_turn(
+    store: &AgentStore,
+    thread_id: &str,
+    input: AgentThreadTurnRequest,
+) -> Result<super::model::AgentTurn> {
+    let normalized = input.normalized_input();
+    let turn = store.create_turn(
+        thread_id,
+        &normalized,
+        json!({
+            "input": input,
+            "transport": "local_http_a2a"
+        }),
+    )?;
+    store.add_thread_item(NewAgentThreadItem {
+        thread_id,
+        turn_id: Some(&turn.id),
+        item_type: "user_message",
+        role: Some("user"),
+        content: Some(&normalized),
+        tool_name: None,
+        payload: json!({"messageType": "turn_input"}),
+    })?;
+    store.add_thread_event(
+        thread_id,
+        Some(&turn.id),
+        "turn_queued",
+        "Agent turn queued.",
+        json!({"input": normalized}),
+    )?;
+    Ok(turn)
+}
+
+fn maybe_spawn_turn(turn_id: &str, metadata: &Value, paths: IssueFinderPaths, config: Config) {
+    if metadata["input"]["runImmediately"]
+        .as_bool()
+        .unwrap_or(true)
+    {
+        let turn_id = turn_id.to_string();
+        tokio::spawn(async move {
+            if let Err(error) = run_agent_turn(paths, config, turn_id.clone()).await {
+                tracing::warn!("agent turn {turn_id} failed: {error}");
+            }
+        });
     }
 }
 
@@ -223,6 +410,26 @@ fn agent_card() -> AgentCardEnvelope {
                 method: "POST".to_string(),
                 path: "/a2a/tasks/send".to_string(),
                 description: "Queue a natural-language agent task.".to_string(),
+            },
+            AgentEndpoint {
+                method: "POST".to_string(),
+                path: "/a2a/threads/start".to_string(),
+                description: "Start a resumable natural-language agent thread.".to_string(),
+            },
+            AgentEndpoint {
+                method: "POST".to_string(),
+                path: "/a2a/threads/{threadId}/turns/send".to_string(),
+                description: "Append a turn to a resumable agent thread.".to_string(),
+            },
+            AgentEndpoint {
+                method: "GET".to_string(),
+                path: "/a2a/threads/{threadId}".to_string(),
+                description: "Read one persisted agent thread.".to_string(),
+            },
+            AgentEndpoint {
+                method: "GET".to_string(),
+                path: "/a2a/threads/{threadId}/events".to_string(),
+                description: "Read ordered persisted thread events.".to_string(),
             },
             AgentEndpoint {
                 method: "GET".to_string(),

@@ -500,4 +500,57 @@ mod tests {
         assert_eq!(daemon.host, "127.0.0.1");
         assert_eq!(daemon.port, 8787);
     }
+
+    #[test]
+    fn agent_thread_start_parses_resumable_thread_goal() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-start",
+            "搜索全网仓库并推荐 issue",
+            "--title",
+            "global scout",
+            "--limit",
+            "5",
+            "--wait",
+        ])
+        .unwrap();
+
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadStart(start) = args.command else {
+            panic!("expected agent thread-start subcommand");
+        };
+        assert_eq!(start.goal, "搜索全网仓库并推荐 issue");
+        assert_eq!(start.title.as_deref(), Some("global scout"));
+        assert_eq!(start.limit, Some(5));
+        assert!(start.wait);
+    }
+
+    #[test]
+    fn agent_thread_send_parses_follow_up_turn() {
+        let cli = Cli::try_parse_from([
+            "issue-finder",
+            "agent",
+            "thread-send",
+            "agent-thread-1",
+            "继续 assess 第一个候选",
+            "--max-turns",
+            "2",
+            "--json",
+        ])
+        .unwrap();
+
+        let Command::Agent(args) = cli.command else {
+            panic!("expected agent command");
+        };
+        let AgentCommand::ThreadSend(send) = args.command else {
+            panic!("expected agent thread-send subcommand");
+        };
+        assert_eq!(send.thread_id, "agent-thread-1");
+        assert_eq!(send.input, "继续 assess 第一个候选");
+        assert_eq!(send.max_turns, Some(2));
+        assert!(send.json);
+    }
 }

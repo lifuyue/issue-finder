@@ -87,18 +87,23 @@ issue-finder tools list
 issue-finder tools call issue-finder.status --arguments '{}'
 ```
 
-Run the local Issue Finder agent daemon and push a natural-language A2A task to it:
+Run the local Issue Finder agent daemon and push natural-language A2A work to it:
 
 ```bash
 issue-finder agent daemon
 issue-finder agent card
+issue-finder agent thread-start "Search global repositories and recommend issues" --limit 5 --wait
+issue-finder agent thread-send <agent-thread-id> "Assess the first candidate more deeply" --wait
+issue-finder agent threads
+issue-finder agent thread-show <agent-thread-id>
+issue-finder agent thread-events <agent-thread-id>
 issue-finder agent send "Search global repositories and recommend issues" --limit 5 --wait
 issue-finder agent list
 issue-finder agent show <agent-task-id>
 issue-finder agent events <agent-task-id>
 ```
 
-`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/tasks/send`, `/a2a/tasks`, `/a2a/tasks/{taskId}`, and `/a2a/tasks/{taskId}/events` over local HTTP. A sent task is a high-level natural-language goal; the daemon asks the configured LLM to choose allowed Issue Finder tools, runs only the first-version read-only tool set (`issue-finder.status` and `issue-finder.scout`), and persists the task, messages, tool calls, events, and final answer in `agent/agent.sqlite3`. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
+`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/threads/start`, `/a2a/threads/{threadId}/turns/send`, `/a2a/threads`, `/a2a/threads/{threadId}`, `/a2a/threads/{threadId}/events`, and the older one-shot `/a2a/tasks/*` endpoints over local HTTP. Prefer `agent thread-start` and `agent thread-send` for resumable work: the daemon stores the thread, turns, bounded model-visible items, events, and final turn results in `agent/agent.sqlite3`, so a later daemon process can continue the same thread by id. `agent send` remains a compatibility-oriented one-shot task helper. The first agent runtime still runs only the read-only tool set (`issue-finder.status` and `issue-finder.scout`). This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
 
 Discover and rank candidate issues:
 
@@ -239,6 +244,11 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
 | `issue-finder agent daemon` | Start the local HTTP A2A Issue Finder agent daemon |
 | `issue-finder agent card` | Read the running daemon's A2A agent card |
+| `issue-finder agent thread-start "<goal>" --limit 5 --wait` | Start a resumable daemon thread and optionally poll until its first turn completes |
+| `issue-finder agent thread-send <agent-thread-id> "<input>" --wait` | Append a follow-up turn to a resumable daemon thread |
+| `issue-finder agent threads` | List recent resumable daemon threads |
+| `issue-finder agent thread-show <agent-thread-id>` | Show one persisted daemon thread, including turns, items, events, and last result |
+| `issue-finder agent thread-events <agent-thread-id>` | Show ordered persisted events for one daemon thread |
 | `issue-finder agent send "<goal>" --limit 5 --wait` | Push a natural-language task to the running daemon and optionally poll until completion |
 | `issue-finder agent list` | List recent daemon tasks through the local A2A endpoint |
 | `issue-finder agent show <agent-task-id>` | Show one daemon task, including persisted messages, tool calls, and result metadata |
@@ -374,7 +384,7 @@ Issue Finder stores local state under `~/.issue-finder` by default:
     YYYY-MM-DD.md
 ```
 
-`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon tasks, conversation messages, tool calls, events, and final results for natural-language A2A tasks sent to the running Issue Finder agent.
+`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon threads, turns, bounded model-visible items, events, final turn results, and compatibility task rows for natural-language A2A work sent to the running Issue Finder agent.
 
 Use `ISSUE_FINDER_HOME` for isolated testing or demos:
 
