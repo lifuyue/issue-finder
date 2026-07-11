@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::dispatch::cli_args::{AgentsArgs, DispatchArgs, SessionsArgs};
+use crate::dispatch::cli_args::{AgentsArgs, DispatchArgs};
 
 #[derive(Debug, Parser)]
 #[command(name = "issue-finder")]
@@ -37,8 +37,6 @@ pub enum Command {
     Profile(ProfileArgs),
     /// Inspect configured execution agents and their capabilities.
     Agents(AgentsArgs),
-    /// Inspect local links to native execution agent sessions.
-    Sessions(SessionsArgs),
     /// Inspect local dispatch runs, events, and artifacts.
     Dispatch(Box<DispatchArgs>),
     /// Run recommendation evaluation workflows.

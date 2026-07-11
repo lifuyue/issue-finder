@@ -125,16 +125,6 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.agents_list",
             "issue-finder.agent_capabilities",
             "issue-finder.agent_probe",
-            "issue-finder.sessions_list",
-            "issue-finder.sessions_sync",
-            "issue-finder.sessions_search",
-            "issue-finder.sessions_read",
-            "issue-finder.sessions_replay",
-            "issue-finder.sessions_rename",
-            "issue-finder.sessions_fork",
-            "issue-finder.sessions_archive",
-            "issue-finder.sessions_approve_mutation",
-            "issue-finder.sessions_reject_mutation",
             "issue-finder.dispatch_status",
             "issue-finder.dispatch_events",
             "issue-finder.dispatch_timeline",
@@ -397,22 +387,6 @@ async fn dispatch_read_tools_use_local_state_only() {
         .unwrap()
         .iter()
         .any(|item| item["capability"] == "start_session"));
-
-    let session_search = tool_runtime
-        .execute(invocation(
-            "issue-finder.sessions_search",
-            r#"{"issue":"owner/repo#123","agent":"codex"}"#,
-            "sessions_search",
-        ))
-        .await;
-    assert!(session_search.success, "{session_search:?}");
-    assert_eq!(
-        session_search.structured_content["sessionSearch"]["sessions"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
 
     let status_args = format!(r#"{{"runId":"{}"}}"#, run.id);
     let dispatch_status = tool_runtime
@@ -995,33 +969,6 @@ async fn dispatch_tool_reports_missing_capability_as_structured_block() {
         .as_str()
         .unwrap()
         .contains("does not support capability start_session"));
-
-    let session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "limited".to_string(),
-            native_session_id: "native_limited".to_string(),
-            issue_task_id: Some(task.id),
-            display_name: "limited session".to_string(),
-            goal: None,
-            status: AgentSessionStatus::Idle,
-            metadata_json: serde_json::json!({}),
-        })
-        .unwrap();
-    let read_args = serde_json::json!({ "sessionLinkId": session.id }).to_string();
-    let read_result = tool_runtime
-        .execute(invocation(
-            "issue-finder.sessions_read",
-            &read_args,
-            "sessions_read_limited",
-        ))
-        .await;
-    assert!(read_result.success, "{read_result:?}");
-    assert_eq!(read_result.status, "unsupported_capability");
-    assert_eq!(
-        read_result.structured_content["unsupportedCapability"],
-        "read_transcript"
-    );
 }
 
 #[test]

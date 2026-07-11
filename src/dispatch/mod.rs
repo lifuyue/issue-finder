@@ -15,8 +15,6 @@ mod output;
 pub mod packaging;
 pub mod policy;
 pub mod runtime;
-pub mod session_approvals;
-pub mod session_ops;
 pub mod store;
 pub mod task_package;
 pub mod timeline;
@@ -50,16 +48,10 @@ pub use policy::PolicyDecision;
 pub use runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordRequest,
     DispatchOutcomeRecordResult, DispatchProposal, DispatchProposalRequest, DispatchRuntime,
-    DispatchStatusSnapshot, SessionSearchResult,
-};
-pub use session_approvals::{
-    PendingSessionMutation, SessionMutationApprovalResolution, SessionMutationProposal,
-};
-pub use session_ops::{
-    SessionMutationResult, SessionTranscriptResult, SessionsSyncRequest, SessionsSyncResult,
+    DispatchStatusSnapshot,
 };
 pub use store::DispatchStore;
 pub use task_package::{IssueTaskPackage, IssueTaskPackageIssue};
 pub use timeline::{ApprovalLatency, DispatchTimeline, DispatchTrace, TimelineItem};
 
-pub use cli::{handle_agents_cli, handle_dispatch_cli, handle_sessions_cli};
+pub use cli::{handle_agents_cli, handle_dispatch_cli};

@@ -6,17 +6,12 @@ use super::execution::DispatchExecutionResult;
 use super::github_projection::{
     GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubPostResult,
 };
-use super::model::{
-    AgentArtifact, AgentProfile, AgentSessionLink, DispatchEvent, GitHubInteraction,
-    SessionTranscriptItem,
-};
+use super::model::{AgentArtifact, AgentProfile, DispatchEvent, GitHubInteraction};
 use super::packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::runtime::{
     AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordResult,
-    DispatchProposal, DispatchStatusSnapshot, SessionSearchResult,
+    DispatchProposal, DispatchStatusSnapshot,
 };
-use super::session_approvals::{SessionMutationApprovalResolution, SessionMutationProposal};
-use super::session_ops::{SessionTranscriptResult, SessionsSyncResult};
 use super::timeline::{DispatchTimeline, DispatchTrace};
 
 pub(crate) fn render_cli_output<T: serde::Serialize>(
@@ -76,115 +71,6 @@ pub(crate) fn render_agent_probe(report: &AgentProbeReport) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn render_sessions(sessions: &[AgentSessionLink]) -> String {
-    if sessions.is_empty() {
-        return "No local session links found.".to_string();
-    }
-
-    let mut lines = vec!["Sessions:".to_string()];
-    for session in sessions {
-        lines.push(format!(
-            "- {} agent={} native={} status={} issue={}",
-            session.id,
-            session.agent_id,
-            session.native_session_id,
-            session.status,
-            session.issue_task_id.as_deref().unwrap_or("-")
-        ));
-    }
-    lines.join("\n")
-}
-
-pub(crate) fn render_sessions_sync(result: &SessionsSyncResult) -> String {
-    if result.synced.is_empty() {
-        return format!("No native sessions synced for {}.", result.agent_id);
-    }
-
-    let mut lines = vec![format!(
-        "Synced {} native sessions for {}:",
-        result.synced.len(),
-        result.agent_id
-    )];
-    for session in &result.synced {
-        lines.push(format!(
-            "- {} native={} name={}",
-            session.id, session.native_session_id, session.display_name
-        ));
-    }
-    lines.join("\n")
-}
-
-pub(crate) fn render_session_search(result: &SessionSearchResult) -> String {
-    if result.sessions.is_empty() {
-        if result.issue_task_found {
-            return format!("No local session links found for {}.", result.issue_key);
-        }
-        return format!(
-            "No dispatch issue task has been imported for {}; no local session links found.",
-            result.issue_key
-        );
-    }
-
-    let mut lines = vec![format!("Sessions for {}:", result.issue_key)];
-    for session in &result.sessions {
-        lines.push(format!(
-            "- {} agent={} native={} status={}",
-            session.id, session.agent_id, session.native_session_id, session.status
-        ));
-    }
-    lines.join("\n")
-}
-
-pub(crate) fn render_session_transcript(result: &SessionTranscriptResult) -> String {
-    format!(
-        "Read session {} transcript into artifact {}.\nReplay items: {}\nPath: {}",
-        result.session.id,
-        result.transcript_artifact.id,
-        result.replay_items.len(),
-        result.transcript_artifact.path
-    )
-}
-
-pub(crate) fn render_session_replay(items: &[SessionTranscriptItem]) -> String {
-    if items.is_empty() {
-        return "No replay items found.".to_string();
-    }
-
-    let mut lines = vec!["Session replay:".to_string()];
-    for item in items {
-        lines.push(format!(
-            "- #{} type={} turn={} storage={}",
-            item.item_index,
-            item.item_type,
-            item.turn_id.as_deref().unwrap_or("-"),
-            item.payload_storage
-        ));
-    }
-    lines.join("\n")
-}
-
-pub(crate) fn render_session_mutation_proposal(result: &SessionMutationProposal) -> String {
-    format!(
-        "Session mutation for {} is pending approval.\nApproval request: {}",
-        result.session.id, result.approval_request.id
-    )
-}
-
-pub(crate) fn render_session_mutation_approval(
-    result: &SessionMutationApprovalResolution,
-) -> String {
-    match &result.mutation {
-        Some(mutation) => format!(
-            "Session mutation {} approved and executed.\nSession {} is {}.",
-            result.approval_request.id, mutation.session.id, mutation.session.status
-        ),
-        None => format!(
-            "Session mutation {} is {}.",
-            result.approval_request.id, result.approval_request.status
-        ),
-    }
-}
-
 pub(crate) fn render_dispatch_status(status: &DispatchStatusSnapshot) -> String {
     let mut lines = vec![
         format!("Dispatch run {}: {}", status.run.id, status.run.status),
@@ -197,11 +83,8 @@ pub(crate) fn render_dispatch_status(status: &DispatchStatusSnapshot) -> String 
         format!("Agent: {} ({})", status.agent.id, status.agent.display_name),
         format!("Approval: {}", status.run.approval_state),
     ];
-    if let Some(session) = &status.selected_session {
-        lines.push(format!(
-            "Session: {} native={} status={}",
-            session.id, session.native_session_id, session.status
-        ));
+    if let Some(thread_id) = &status.selected_thread_id {
+        lines.push(format!("Thread: {thread_id}"));
     }
     lines.push(format!("Approvals: {}", status.approval_requests.len()));
     lines.push(format!("Artifacts: {}", status.artifacts.len()));

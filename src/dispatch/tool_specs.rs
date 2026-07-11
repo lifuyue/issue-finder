@@ -5,16 +5,6 @@ use crate::tool_specs::IssueFinderToolSpec;
 pub const TOOL_AGENTS_LIST: &str = "issue-finder.agents_list";
 pub const TOOL_AGENT_CAPABILITIES: &str = "issue-finder.agent_capabilities";
 pub const TOOL_AGENT_PROBE: &str = "issue-finder.agent_probe";
-pub const TOOL_SESSIONS_LIST: &str = "issue-finder.sessions_list";
-pub const TOOL_SESSIONS_SYNC: &str = "issue-finder.sessions_sync";
-pub const TOOL_SESSIONS_SEARCH: &str = "issue-finder.sessions_search";
-pub const TOOL_SESSIONS_READ: &str = "issue-finder.sessions_read";
-pub const TOOL_SESSIONS_REPLAY: &str = "issue-finder.sessions_replay";
-pub const TOOL_SESSIONS_RENAME: &str = "issue-finder.sessions_rename";
-pub const TOOL_SESSIONS_FORK: &str = "issue-finder.sessions_fork";
-pub const TOOL_SESSIONS_ARCHIVE: &str = "issue-finder.sessions_archive";
-pub const TOOL_SESSIONS_APPROVE_MUTATION: &str = "issue-finder.sessions_approve_mutation";
-pub const TOOL_SESSIONS_REJECT_MUTATION: &str = "issue-finder.sessions_reject_mutation";
 pub const TOOL_DISPATCH_STATUS: &str = "issue-finder.dispatch_status";
 pub const TOOL_DISPATCH_EVENTS: &str = "issue-finder.dispatch_events";
 pub const TOOL_DISPATCH_TIMELINE: &str = "issue-finder.dispatch_timeline";
@@ -61,66 +51,6 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             "agent_probe",
             "Probe one execution agent's adapter capabilities and cache the result.",
             agent_probe_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_list",
-            "List local links to native execution agent sessions.",
-            sessions_list_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_sync",
-            "Sync native execution agent sessions into local session links.",
-            sessions_sync_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_search",
-            "Search local session links by GitHub issue reference.",
-            sessions_search_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_read",
-            "Read one native session transcript into a local dispatch artifact.",
-            session_link_read_schema(),
-            true,
-        ),
-        dispatch_tool_spec(
-            "sessions_replay",
-            "List normalized replay items for one local session link.",
-            session_link_read_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_rename",
-            "Create an approval request to rename one native session.",
-            sessions_rename_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_fork",
-            "Create an approval request to fork one native session into a new local session link.",
-            session_link_read_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_archive",
-            "Create an approval request to archive one native session.",
-            session_link_read_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_approve_mutation",
-            "Approve and execute a pending native session mutation.",
-            session_mutation_approval_schema(),
-            false,
-        ),
-        dispatch_tool_spec(
-            "sessions_reject_mutation",
-            "Reject a pending native session mutation.",
-            session_mutation_approval_schema(),
             false,
         ),
         dispatch_tool_spec(
@@ -324,74 +254,6 @@ fn agent_probe_schema() -> Value {
             "refresh": { "type": "boolean", "default": false }
         },
         "required": ["agent"],
-        "additionalProperties": false
-    })
-}
-
-fn sessions_list_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "agent": { "type": ["string", "null"], "default": null }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn sessions_sync_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "agent": { "type": ["string", "null"], "default": "codex" },
-            "search": { "type": ["string", "null"], "default": null },
-            "limit": { "type": "integer", "minimum": 1, "default": 20 }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn sessions_search_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "issue": { "type": "string" },
-            "agent": { "type": ["string", "null"], "default": null }
-        },
-        "required": ["issue"],
-        "additionalProperties": false
-    })
-}
-
-fn session_link_read_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "sessionLinkId": { "type": "string" }
-        },
-        "required": ["sessionLinkId"],
-        "additionalProperties": false
-    })
-}
-
-fn sessions_rename_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "sessionLinkId": { "type": "string" },
-            "name": { "type": "string" }
-        },
-        "required": ["sessionLinkId", "name"],
-        "additionalProperties": false
-    })
-}
-
-fn session_mutation_approval_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "approvalRequestId": { "type": "string" }
-        },
-        "required": ["approvalRequestId"],
         "additionalProperties": false
     })
 }

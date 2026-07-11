@@ -405,8 +405,8 @@ fn session_resume_observations() -> Result<Vec<String>> {
     let execution = execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id)?;
 
     let mut observations = Vec::new();
-    if proposal.run.selected_session_link_id.as_deref() == Some(session.id.as_str()) {
-        observations.push("native_session_selector_resolved_to_local_link".to_string());
+    if proposal.run.selected_session_link_id.as_deref() == Some("native_existing_505") {
+        observations.push("explicit_native_thread_id_preserved".to_string());
     }
     if adapter
         .calls
@@ -420,7 +420,7 @@ fn session_resume_observations() -> Result<Vec<String>> {
     }
     if execution.session.id == session.id && execution.session.status == AgentSessionStatus::Active
     {
-        observations.push("session_link_remains_continuity_anchor".to_string());
+        observations.push("native_thread_remains_continuity_anchor".to_string());
     }
     Ok(observations)
 }

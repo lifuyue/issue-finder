@@ -3,7 +3,6 @@ use anyhow::Result;
 use super::cli_args::{
     AgentsArgs, AgentsCommand, DispatchA2aCommand, DispatchArgs, DispatchCommand,
     DispatchGithubCommand, DispatchOutcomeCommand, DispatchPackageCommand, DispatchReviewCommand,
-    SessionsArgs, SessionsCommand,
 };
 use crate::config::Config;
 use crate::paths::IssueFinderPaths;
@@ -14,7 +13,6 @@ use super::model::{
 };
 use super::output::*;
 use super::runtime::{DispatchOutcomeRecordRequest, DispatchProposalRequest, DispatchRuntime};
-use super::session_ops::SessionsSyncRequest;
 
 pub fn handle_agents_cli(paths: &IssueFinderPaths, args: AgentsArgs) -> Result<String> {
     let runtime = DispatchRuntime::open(paths.clone())?;
@@ -32,66 +30,6 @@ pub fn handle_agents_cli(paths: &IssueFinderPaths, args: AgentsArgs) -> Result<S
         AgentsCommand::Probe(args) => {
             let result = runtime.probe_agent(&args.agent, args.refresh)?;
             render_cli_output(args.json, &result, || render_agent_probe(&result))
-        }
-    }
-}
-
-pub fn handle_sessions_cli(paths: &IssueFinderPaths, args: SessionsArgs) -> Result<String> {
-    let runtime = DispatchRuntime::open(paths.clone())?;
-    match args.command {
-        SessionsCommand::List(args) => {
-            let sessions = runtime.list_sessions(args.agent.as_deref())?;
-            render_cli_output(args.json, &sessions, || render_sessions(&sessions))
-        }
-        SessionsCommand::Sync(args) => {
-            let result = runtime.sync_sessions(SessionsSyncRequest {
-                agent_id: args.agent,
-                search: args.search,
-                limit: Some(args.limit),
-            })?;
-            render_cli_output(args.json, &result, || render_sessions_sync(&result))
-        }
-        SessionsCommand::Search(args) => {
-            let result = runtime.search_sessions(&args.issue, args.agent.as_deref())?;
-            render_cli_output(args.json, &result, || render_session_search(&result))
-        }
-        SessionsCommand::Read(args) => {
-            let result = runtime.read_session_transcript(&args.session_link_id)?;
-            render_cli_output(args.json, &result, || render_session_transcript(&result))
-        }
-        SessionsCommand::Replay(args) => {
-            let result = runtime.session_replay(&args.session_link_id)?;
-            render_cli_output(args.json, &result, || render_session_replay(&result))
-        }
-        SessionsCommand::Rename(args) => {
-            let result = runtime.rename_session(&args.session_link_id, &args.name)?;
-            render_cli_output(args.json, &result, || {
-                render_session_mutation_proposal(&result)
-            })
-        }
-        SessionsCommand::Fork(args) => {
-            let result = runtime.fork_session(&args.session_link_id)?;
-            render_cli_output(args.json, &result, || {
-                render_session_mutation_proposal(&result)
-            })
-        }
-        SessionsCommand::Archive(args) => {
-            let result = runtime.archive_session(&args.session_link_id)?;
-            render_cli_output(args.json, &result, || {
-                render_session_mutation_proposal(&result)
-            })
-        }
-        SessionsCommand::Approve(args) => {
-            let result = runtime.approve_session_mutation(&args.approval_request_id)?;
-            render_cli_output(args.json, &result, || {
-                render_session_mutation_approval(&result)
-            })
-        }
-        SessionsCommand::Reject(args) => {
-            let result = runtime.reject_session_mutation(&args.approval_request_id)?;
-            render_cli_output(args.json, &result, || {
-                render_session_mutation_approval(&result)
-            })
         }
     }
 }

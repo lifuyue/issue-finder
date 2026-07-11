@@ -1522,8 +1522,7 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             result_artifact_id TEXT,
             failure_reason TEXT,
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE CASCADE,
-            FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE RESTRICT,
-            FOREIGN KEY (selected_session_link_id) REFERENCES agent_session_links(id)
+            FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS dispatch_run_outcomes (

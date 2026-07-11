@@ -68,10 +68,10 @@
       "scenario": "session_resume_uses_selected_native_session",
       "expected": {
         "behaviors": [
-          "native_session_selector_resolved_to_local_link",
+          "explicit_native_thread_id_preserved",
           "execution_resumed_selected_native_session",
           "resumed_session_started_agent_turn",
-          "session_link_remains_continuity_anchor"
+          "native_thread_remains_continuity_anchor"
         ],
         "reasons": [
           "Agent loop resumability depends on stable local links to existing native sessions."

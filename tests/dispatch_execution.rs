@@ -143,7 +143,7 @@ fn dispatch_proposal_accepts_native_session_id_selector() {
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths).unwrap();
     let task = create_packaged_task(&runtime, 457);
-    let session = runtime
+    let _session = runtime
         .store()
         .create_session_link(NewAgentSessionLink {
             agent_id: "codex".to_string(),
@@ -168,11 +168,11 @@ fn dispatch_proposal_accepts_native_session_id_selector() {
 
     assert_eq!(
         proposal.run.selected_session_link_id.as_deref(),
-        Some(session.id.as_str())
+        Some("native_existing_457")
     );
     assert_eq!(
         proposal.approval_request.details_json["executionMode"],
-        "resume_session"
+        "resume_thread"
     );
     assert_eq!(proposal.approval_request.details_json["newSession"], false);
     assert_eq!(
@@ -180,13 +180,13 @@ fn dispatch_proposal_accepts_native_session_id_selector() {
         false
     );
     assert_eq!(
-        proposal.approval_request.details_json["selectedNativeSessionId"],
+        proposal.approval_request.details_json["selectedThreadId"],
         "native_existing_457"
     );
     assert!(proposal
         .approval_request
         .prompt
-        .contains("resuming native session native_existing_457"));
+        .contains("resuming native thread native_existing_457"));
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn dispatch_proposal_records_actual_new_session_mode_when_flag_is_omitted() {
 
     assert_eq!(
         proposal.approval_request.details_json["executionMode"],
-        "start_session"
+        "start_thread"
     );
     assert_eq!(proposal.approval_request.details_json["newSession"], true);
     assert_eq!(
@@ -216,13 +216,13 @@ fn dispatch_proposal_records_actual_new_session_mode_when_flag_is_omitted() {
         false
     );
     assert_eq!(
-        proposal.approval_request.details_json["selectedNativeSessionId"],
+        proposal.approval_request.details_json["selectedThreadId"],
         serde_json::Value::Null
     );
     assert!(proposal
         .approval_request
         .prompt
-        .contains("starting a new native session"));
+        .contains("starting a new native thread"));
 }
 
 #[test]
@@ -471,51 +471,6 @@ fn dispatch_approval_marks_issue_task_dispatched() {
     let status = runtime.dispatch_status(&proposal.run.id).unwrap();
     assert_eq!(status.approval_latencies.len(), 1);
     assert!(status.approval_latencies[0].latency_ms.is_some());
-}
-
-#[test]
-fn dispatch_proposal_rejects_session_for_different_agent() {
-    let dir = tempdir().unwrap();
-    let paths = test_paths(dir.path());
-    let runtime = DispatchRuntime::open(paths).unwrap();
-    let task = create_packaged_task(&runtime, 321);
-    runtime
-        .store()
-        .create_agent_profile(NewAgentProfile {
-            id: Some("other-agent".to_string()),
-            kind: "other".to_string(),
-            display_name: "Other Agent".to_string(),
-            adapter: "fake_adapter".to_string(),
-            config_json: json!({}),
-            enabled: true,
-        })
-        .unwrap();
-    let session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "other-agent".to_string(),
-            native_session_id: "native_other".to_string(),
-            issue_task_id: Some(task.id),
-            display_name: "other session".to_string(),
-            goal: None,
-            status: AgentSessionStatus::Idle,
-            metadata_json: json!({}),
-        })
-        .unwrap();
-
-    let error = runtime
-        .propose_dispatch(DispatchProposalRequest {
-            issue: "owner/repo#321".to_string(),
-            agent_id: "codex".to_string(),
-            requested_by: "test".to_string(),
-            selected_session_link_id: Some(session.id.clone()),
-            new_session: false,
-        })
-        .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("belongs to agent other-agent, not codex"));
 }
 
 #[test]

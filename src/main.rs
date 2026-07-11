@@ -5,7 +5,7 @@ use issue_finder::cli::{
     ProfileCommand, ToolsCommand,
 };
 use issue_finder::config::{initialize_interactive, Config};
-use issue_finder::dispatch::{handle_agents_cli, handle_dispatch_cli, handle_sessions_cli};
+use issue_finder::dispatch::{handle_agents_cli, handle_dispatch_cli};
 use issue_finder::doctor;
 use issue_finder::inbox::{self, InboxStatus};
 use issue_finder::memory::{
@@ -185,9 +185,6 @@ async fn main() -> Result<()> {
         },
         Command::Agents(args) => {
             println!("{}", handle_agents_cli(&paths, args)?);
-        }
-        Command::Sessions(args) => {
-            println!("{}", handle_sessions_cli(&paths, args)?);
         }
         Command::Dispatch(args) => {
             println!("{}", handle_dispatch_cli(&paths, *args)?);

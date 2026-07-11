@@ -15,9 +15,6 @@ use crate::tool_specs::{
     TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT,
     TOOL_GITHUB_DRAFT_FINAL_COMMENT, TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS,
     TOOL_GITHUB_POST_COMMENT, TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
-    TOOL_SESSIONS_APPROVE_MUTATION, TOOL_SESSIONS_ARCHIVE, TOOL_SESSIONS_FORK, TOOL_SESSIONS_LIST,
-    TOOL_SESSIONS_READ, TOOL_SESSIONS_REJECT_MUTATION, TOOL_SESSIONS_RENAME, TOOL_SESSIONS_REPLAY,
-    TOOL_SESSIONS_SEARCH, TOOL_SESSIONS_SYNC,
 };
 
 use super::github_projection::GitHubCommentPolicyResult;
@@ -26,7 +23,6 @@ use super::model::{
     DispatchTaskClass, DispatchValidationOutcome,
 };
 use super::runtime::{DispatchOutcomeRecordRequest, DispatchProposalRequest, DispatchRuntime};
-use super::session_ops::SessionsSyncRequest;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DispatchToolOutput {
@@ -65,16 +61,6 @@ pub fn is_dispatch_tool(tool_name: &str) -> bool {
         TOOL_AGENTS_LIST
             | TOOL_AGENT_CAPABILITIES
             | TOOL_AGENT_PROBE
-            | TOOL_SESSIONS_LIST
-            | TOOL_SESSIONS_SYNC
-            | TOOL_SESSIONS_SEARCH
-            | TOOL_SESSIONS_READ
-            | TOOL_SESSIONS_REPLAY
-            | TOOL_SESSIONS_RENAME
-            | TOOL_SESSIONS_FORK
-            | TOOL_SESSIONS_ARCHIVE
-            | TOOL_SESSIONS_APPROVE_MUTATION
-            | TOOL_SESSIONS_REJECT_MUTATION
             | TOOL_DISPATCH_STATUS
             | TOOL_DISPATCH_EVENTS
             | TOOL_DISPATCH_TIMELINE
@@ -150,140 +136,6 @@ pub fn execute_dispatch_tool(
                     result.agent_id
                 ),
                 json!({ "agentProbe": result }),
-            ))
-        }
-        TOOL_SESSIONS_LIST => {
-            let args: SessionsListToolArgs = parse_arguments(arguments)?;
-            let sessions = runtime
-                .list_sessions(normalized_optional(args.agent).as_deref())
-                .map_err(DispatchToolError::System)?;
-            Ok(output(
-                "ok",
-                format!("Found {} local session links.", sessions.len()),
-                json!({ "sessions": sessions }),
-            ))
-        }
-        TOOL_SESSIONS_SYNC => {
-            let args: SessionsSyncToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .sync_sessions(SessionsSyncRequest {
-                    agent_id: args.agent.unwrap_or_else(|| "codex".to_string()),
-                    search: normalized_optional(args.search),
-                    limit: Some(args.limit.unwrap_or(20)),
-                })
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "ok",
-                format!(
-                    "Synced {} native sessions for {}.",
-                    result.synced.len(),
-                    result.agent_id
-                ),
-                json!({ "sessionsSync": result }),
-            ))
-        }
-        TOOL_SESSIONS_SEARCH => {
-            let args: SessionsSearchToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .search_sessions(&args.issue, normalized_optional(args.agent).as_deref())
-                .map_err(map_issue_ref_error)?;
-            Ok(output(
-                "ok",
-                format!(
-                    "Found {} local session links for {}.",
-                    result.sessions.len(),
-                    result.issue_key
-                ),
-                json!({ "sessionSearch": result }),
-            ))
-        }
-        TOOL_SESSIONS_READ => {
-            let args: SessionLinkReadToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .read_session_transcript(&args.session_link_id)
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "ok",
-                format!(
-                    "Read session {} transcript into artifact {}.",
-                    result.session.id, result.transcript_artifact.id
-                ),
-                json!({ "sessionTranscript": result }),
-            ))
-        }
-        TOOL_SESSIONS_REPLAY => {
-            let args: SessionLinkReadToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .session_replay(&args.session_link_id)
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "ok",
-                format!("Found {} replay items.", result.len()),
-                json!({ "sessionReplay": result }),
-            ))
-        }
-        TOOL_SESSIONS_RENAME => {
-            let args: SessionsRenameToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .rename_session(&args.session_link_id, &args.name)
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "pending_approval",
-                format!(
-                    "Session mutation {} is pending approval.",
-                    result.approval_request.id
-                ),
-                json!({ "sessionMutationProposal": result }),
-            ))
-        }
-        TOOL_SESSIONS_ARCHIVE => {
-            let args: SessionLinkReadToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .archive_session(&args.session_link_id)
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "pending_approval",
-                format!(
-                    "Session mutation {} is pending approval.",
-                    result.approval_request.id
-                ),
-                json!({ "sessionMutationProposal": result }),
-            ))
-        }
-        TOOL_SESSIONS_FORK => {
-            let args: SessionLinkReadToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .fork_session(&args.session_link_id)
-                .map_err(map_runtime_error)?;
-            Ok(output(
-                "pending_approval",
-                format!(
-                    "Session mutation {} is pending approval.",
-                    result.approval_request.id
-                ),
-                json!({ "sessionMutationProposal": result }),
-            ))
-        }
-        TOOL_SESSIONS_APPROVE_MUTATION => {
-            let args: SessionMutationApprovalToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .approve_session_mutation(&args.approval_request_id)
-                .map_err(DispatchToolError::System)?;
-            Ok(output(
-                "approved",
-                format!("Session mutation {} approved.", result.approval_request.id),
-                json!({ "sessionMutationApproval": result }),
-            ))
-        }
-        TOOL_SESSIONS_REJECT_MUTATION => {
-            let args: SessionMutationApprovalToolArgs = parse_arguments(arguments)?;
-            let result = runtime
-                .reject_session_mutation(&args.approval_request_id)
-                .map_err(DispatchToolError::System)?;
-            Ok(output(
-                "rejected",
-                format!("Session mutation {} rejected.", result.approval_request.id),
-                json!({ "sessionMutationApproval": result }),
             ))
         }
         TOOL_DISPATCH_STATUS => {
@@ -787,15 +639,6 @@ fn optional_outcome_record_request(
     }))
 }
 
-fn map_runtime_error(error: anyhow::Error) -> DispatchToolError {
-    let message = error.to_string();
-    if let Some(output) = business_block_output(&message) {
-        DispatchToolError::BusinessBlock(output)
-    } else {
-        DispatchToolError::System(error)
-    }
-}
-
 fn map_issue_ref_error(error: anyhow::Error) -> DispatchToolError {
     let message = error.to_string();
     if message.contains("invalid issue reference; expected owner/repo#123") {
@@ -931,51 +774,6 @@ struct AgentProbeToolArgs {
     agent: String,
     #[serde(default)]
     refresh: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionsListToolArgs {
-    #[serde(default)]
-    agent: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionsSyncToolArgs {
-    #[serde(default)]
-    agent: Option<String>,
-    #[serde(default)]
-    search: Option<String>,
-    #[serde(default)]
-    limit: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionsSearchToolArgs {
-    issue: String,
-    #[serde(default)]
-    agent: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionLinkReadToolArgs {
-    session_link_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionsRenameToolArgs {
-    session_link_id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SessionMutationApprovalToolArgs {
-    approval_request_id: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -14,7 +14,7 @@ pub fn dispatch_run_event(
 ) -> NewDispatchEvent {
     NewDispatchEvent {
         run_id: Some(run.id.clone()),
-        session_link_id: run.selected_session_link_id.clone(),
+        session_link_id: None,
         issue_task_id: Some(run.issue_task_id.clone()),
         event_kind,
         subject_type: DispatchSubjectType::DispatchRun,

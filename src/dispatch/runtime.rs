@@ -5,7 +5,6 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::config::Config;
-use crate::github::IssueRef;
 use crate::paths::IssueFinderPaths;
 
 use super::a2a_gateway::{self, A2aApprovalResult, A2aExportResult, A2aResultImport};
@@ -21,25 +20,15 @@ use super::github_projection::{
 };
 use super::memory::record_dispatch_approval_signal;
 use super::model::{
-    AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, AgentSessionLink,
-    AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus,
-    DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
-    DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRun, DispatchRunOutcome,
-    DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction,
-    IssueTaskStatus, NewAgentCapability, NewAgentProfile, NewApprovalRequest, NewDispatchRun,
-    NewDispatchRunOutcome, PolicyAction, SessionTranscriptItem,
+    AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile, ApprovalRequest,
+    ApprovalStatus, ApprovalType, CapabilityStatus, DispatchEvent, DispatchEventKind,
+    DispatchEventSeverity, DispatchEventSource, DispatchFailure, DispatchOutcomeFailureClass,
+    DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchTaskClass,
+    DispatchValidationOutcome, GitHubInteraction, IssueTaskStatus, NewAgentCapability,
+    NewAgentProfile, NewApprovalRequest, NewDispatchRun, NewDispatchRunOutcome, PolicyAction,
 };
 use super::packaging::{self, IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::policy::{classify_action, ensure_capability_preconditions};
-use super::session_approvals::{
-    approve_session_mutation_with_adapter, pending_session_mutation, reject_session_mutation,
-    request_session_archive, request_session_fork, request_session_rename, PendingSessionMutation,
-    SessionMutationApprovalResolution, SessionMutationProposal,
-};
-use super::session_ops::{
-    read_codex_session_transcript, sync_codex_sessions, SessionTranscriptResult,
-    SessionsSyncRequest, SessionsSyncResult,
-};
 use super::store::DispatchStore;
 use super::timeline::{
     approval_latency, dispatch_timeline, dispatch_trace, ApprovalLatency, DispatchTimeline,
@@ -59,19 +48,11 @@ pub struct AgentCapabilitiesView {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionSearchResult {
-    pub issue_key: String,
-    pub issue_task_found: bool,
-    pub sessions: Vec<AgentSessionLink>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct DispatchStatusSnapshot {
     pub run: DispatchRun,
     pub issue_task: super::model::IssueTask,
     pub agent: AgentProfile,
-    pub selected_session: Option<AgentSessionLink>,
+    pub selected_thread_id: Option<String>,
     pub approval_requests: Vec<ApprovalRequest>,
     pub approval_latencies: Vec<ApprovalLatency>,
     pub artifacts: Vec<AgentArtifact>,
@@ -146,151 +127,21 @@ impl DispatchRuntime {
         })
     }
 
-    pub fn list_sessions(&self, agent_id: Option<&str>) -> Result<Vec<AgentSessionLink>> {
-        self.store.list_session_links(agent_id)
-    }
-
-    pub fn search_sessions(
-        &self,
-        issue: &str,
-        agent_id: Option<&str>,
-    ) -> Result<SessionSearchResult> {
-        let issue_ref = IssueRef::parse(issue)?;
-        let issue_key = format!("{}#{}", issue_ref.repo_full_name(), issue_ref.number);
-        let Some(issue_task) = self.store.find_issue_task_by_key(&issue_key)? else {
-            return Ok(SessionSearchResult {
-                issue_key,
-                issue_task_found: false,
-                sessions: Vec::new(),
-            });
-        };
-
-        let mut sessions = self
-            .store
-            .list_session_links_for_issue_task(&issue_task.id)?;
-        if let Some(agent_id) = agent_id {
-            sessions.retain(|session| session.agent_id == agent_id);
-        }
-
-        Ok(SessionSearchResult {
-            issue_key,
-            issue_task_found: true,
-            sessions,
-        })
-    }
-
-    pub fn sync_sessions(&self, request: SessionsSyncRequest) -> Result<SessionsSyncResult> {
-        let agent = self.store.get_agent_profile(&request.agent_id)?;
-        if agent.adapter != "codex_app_server" {
-            anyhow::bail!(
-                "agent {} uses adapter {}, not codex_app_server",
-                agent.id,
-                agent.adapter
-            );
-        }
-        let capability = if request
-            .search
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-        {
-            AgentCapabilityName::SearchSessions
-        } else {
-            AgentCapabilityName::ListSessions
-        };
-        self.ensure_agent_capability(&agent.id, capability)?;
-        sync_codex_sessions(&self.store, request)
-    }
-
-    pub fn read_session_transcript(
-        &self,
-        session_link_id: &str,
-    ) -> Result<SessionTranscriptResult> {
-        self.ensure_session_policy(session_link_id, PolicyAction::ReadSessionTranscript)?;
-        read_codex_session_transcript(&self.store, session_link_id)
-    }
-
-    pub fn session_replay(&self, session_link_id: &str) -> Result<Vec<SessionTranscriptItem>> {
-        self.store.list_session_transcript_items(session_link_id)
-    }
-
-    pub fn rename_session(
-        &self,
-        session_link_id: &str,
-        display_name: &str,
-    ) -> Result<SessionMutationProposal> {
-        if display_name.trim().is_empty() {
-            anyhow::bail!("session display name cannot be empty");
-        }
-        self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?;
-        request_session_rename(&self.store, session_link_id, display_name)
-    }
-
-    pub fn archive_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?;
-        request_session_archive(&self.store, session_link_id)
-    }
-
-    pub fn fork_session(&self, session_link_id: &str) -> Result<SessionMutationProposal> {
-        self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?;
-        request_session_fork(&self.store, session_link_id)
-    }
-
-    pub fn approve_session_mutation(
-        &self,
-        approval_request_id: &str,
-    ) -> Result<SessionMutationApprovalResolution> {
-        let mutation = pending_session_mutation(&self.store, approval_request_id)?;
-        match &mutation {
-            PendingSessionMutation::Rename {
-                session_link_id, ..
-            } => self.ensure_session_policy(session_link_id, PolicyAction::RenameSession)?,
-            PendingSessionMutation::Fork { session_link_id } => {
-                self.ensure_session_policy(session_link_id, PolicyAction::ForkSession)?
-            }
-            PendingSessionMutation::Archive { session_link_id } => {
-                self.ensure_session_policy(session_link_id, PolicyAction::ArchiveSession)?
-            }
-        }
-        let session = self.store.get_session_link(mutation.session_link_id())?;
-        let agent = self.store.get_agent_profile(&session.agent_id)?;
-        if agent.adapter != "codex_app_server" {
-            anyhow::bail!(
-                "session link {} uses adapter {}, not codex_app_server",
-                session.id,
-                agent.adapter
-            );
-        }
-        let transport = super::adapters::codex_app_server::CodexAppServerStdioTransport::connect()?;
-        let mut adapter = super::adapters::codex_app_server::CodexAppServerAdapter::new(transport);
-        approve_session_mutation_with_adapter(&self.store, &mut adapter, approval_request_id)
-    }
-
-    pub fn reject_session_mutation(
-        &self,
-        approval_request_id: &str,
-    ) -> Result<SessionMutationApprovalResolution> {
-        reject_session_mutation(&self.store, approval_request_id)
-    }
-
     pub fn dispatch_status(&self, run_id: &str) -> Result<DispatchStatusSnapshot> {
         let run = self.store.get_dispatch_run(run_id)?;
         let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
         let agent = self.store.get_agent_profile(&run.agent_id)?;
-        let selected_session = run
-            .selected_session_link_id
-            .as_deref()
-            .map(|session_id| self.store.get_session_link(session_id))
-            .transpose()?;
         let approval_requests = self.store.list_approval_requests_for_run(run_id)?;
         let approval_latencies = approval_requests.iter().map(approval_latency).collect();
         let artifacts = self.store.list_artifacts_for_run(run_id)?;
         let failures = self.store.list_dispatch_failures_for_run(run_id)?;
+        let selected_thread_id = run.selected_session_link_id.clone();
 
         Ok(DispatchStatusSnapshot {
             run,
             issue_task,
             agent,
-            selected_session,
+            selected_thread_id,
             approval_requests,
             approval_latencies,
             artifacts,
@@ -411,14 +262,7 @@ impl DispatchRuntime {
         let issue_task =
             packaging::ensure_packaged_issue_task_for_issue(&self.store, &request.issue)?;
         let issue_key = issue_task.issue_key.clone();
-        let selected_session_link_id = match request.selected_session_link_id {
-            Some(selector) => Some(self.resolve_dispatch_session_selector(&agent.id, &selector)?),
-            None => None,
-        };
-        let selected_session = selected_session_link_id
-            .as_deref()
-            .map(|session_link_id| self.store.get_session_link(session_link_id))
-            .transpose()?;
+        let selected_session_link_id = request.selected_session_link_id;
         let dispatch_capability = if selected_session_link_id.is_some() {
             PolicyAction::ResumeDispatch
         } else {
@@ -439,15 +283,14 @@ impl DispatchRuntime {
             run_id: Some(run.id.clone()),
             approval_type: ApprovalType::Dispatch,
             status: ApprovalStatus::Pending,
-            prompt: dispatch_approval_prompt(&issue_key, &run.agent_id, selected_session.as_ref()),
+            prompt: dispatch_approval_prompt(&issue_key, &run.agent_id, run.selected_session_link_id.as_deref()),
             details_json: json!({
                 "issueKey": issue_key,
                 "agentId": run.agent_id,
-                "executionMode": if selected_session.is_some() { "resume_session" } else { "start_session" },
-                "newSession": selected_session.is_none(),
+                "executionMode": if run.selected_session_link_id.is_some() { "resume_thread" } else { "start_thread" },
+                "newSession": run.selected_session_link_id.is_none(),
                 "requestedNewSession": request.new_session,
-                "selectedSessionLinkId": run.selected_session_link_id,
-                "selectedNativeSessionId": selected_session.as_ref().map(|session| session.native_session_id.as_str()),
+                "selectedThreadId": run.selected_session_link_id,
                 "policy": policy
             }),
         })?;
@@ -671,61 +514,6 @@ impl DispatchRuntime {
     pub fn list_github_interactions(&self, issue: &str) -> Result<Vec<GitHubInteraction>> {
         github_projection::list_github_interactions(&self.store, issue)
     }
-
-    fn resolve_dispatch_session_selector(&self, agent_id: &str, selector: &str) -> Result<String> {
-        let session = match self.store.get_session_link(selector) {
-            Ok(session) => session,
-            Err(link_error) => self
-                .store
-                .find_session_link_by_native_id_opt(agent_id, selector)?
-                .with_context(|| {
-                    format!(
-                        "session selector {selector} is neither a local session link id nor a native session id for agent {agent_id}: {link_error}"
-                    )
-                })?,
-        };
-        if session.agent_id != agent_id {
-            anyhow::bail!(
-                "session link {} belongs to agent {}, not {}",
-                session.id,
-                session.agent_id,
-                agent_id
-            );
-        }
-        if session.status == AgentSessionStatus::Archived {
-            anyhow::bail!("session link {} is archived", session.id);
-        }
-        Ok(session.id)
-    }
-
-    fn ensure_session_policy(&self, session_link_id: &str, action: PolicyAction) -> Result<()> {
-        let session = self.store.get_session_link(session_link_id)?;
-        let agent = self.store.get_agent_profile(&session.agent_id)?;
-        if agent.adapter != "codex_app_server" {
-            anyhow::bail!(
-                "session link {session_link_id} uses adapter {}, not codex_app_server",
-                agent.adapter
-            );
-        }
-        let decision = classify_action(action);
-        ensure_capability_preconditions(&self.store, &agent.id, &decision)?;
-        Ok(())
-    }
-
-    fn ensure_agent_capability(
-        &self,
-        agent_id: &str,
-        capability: AgentCapabilityName,
-    ) -> Result<()> {
-        let capability = self.store.get_agent_capability(agent_id, capability)?;
-        if capability.status == CapabilityStatus::Unsupported {
-            anyhow::bail!(
-                "agent {agent_id} does not support capability {}",
-                capability.capability.as_str()
-            );
-        }
-        Ok(())
-    }
 }
 
 fn terminal_outcome_for_status(status: DispatchRunStatus) -> Option<DispatchOutcomeKind> {
@@ -765,14 +553,13 @@ fn ensure_builtin_agents(store: &DispatchStore) -> Result<()> {
 fn dispatch_approval_prompt(
     issue_key: &str,
     agent_id: &str,
-    selected_session: Option<&AgentSessionLink>,
+    selected_thread_id: Option<&str>,
 ) -> String {
-    match selected_session {
-        Some(session) => format!(
-            "Dispatch {issue_key} to {agent_id} by resuming native session {} ({})?",
-            session.native_session_id, session.id
-        ),
-        None => format!("Dispatch {issue_key} to {agent_id} by starting a new native session?"),
+    match selected_thread_id {
+        Some(thread_id) => {
+            format!("Dispatch {issue_key} to {agent_id} by resuming native thread {thread_id}?")
+        }
+        None => format!("Dispatch {issue_key} to {agent_id} by starting a new native thread?"),
     }
 }
 

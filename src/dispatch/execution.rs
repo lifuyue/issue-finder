@@ -423,7 +423,22 @@ fn resume_session<A>(
 where
     A: NativeExecutionAdapter,
 {
-    let session_link = store.get_session_link(session_link_id)?;
+    let session_link = match store.get_session_link(session_link_id).or_else(|_| {
+        store
+            .find_session_link_by_native_id_opt(&run.agent_id, session_link_id)?
+            .context("native thread is not projected yet")
+    }) {
+        Ok(link) => link,
+        Err(_) => store.create_session_link(NewAgentSessionLink {
+            agent_id: run.agent_id.clone(),
+            native_session_id: session_link_id.to_string(),
+            issue_task_id: Some(run.issue_task_id.clone()),
+            display_name: setup.display_name.to_string(),
+            goal: Some(setup.goal.to_string()),
+            status: AgentSessionStatus::Active,
+            metadata_json: setup.metadata.clone(),
+        })?,
+    };
     if session_link.agent_id != run.agent_id {
         anyhow::bail!(
             "session link {} belongs to agent {}, not {}",
