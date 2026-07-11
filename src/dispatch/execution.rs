@@ -14,6 +14,7 @@ use super::model::{
     DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus, NewAgentSessionLink, NewArtifact,
 };
 use super::store::DispatchStore;
+use super::task_package::IssueTaskPackage;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +82,8 @@ struct ExecutionContext {
     run: DispatchRun,
     issue_task: IssueTask,
     package_artifact: AgentArtifact,
+    package: IssueTaskPackage,
+    codex_md_path: String,
 }
 
 fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<ExecutionContext> {
@@ -104,6 +107,22 @@ fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<Exec
         .as_deref()
         .with_context(|| format!("issue task {} has no task package artifact", issue_task.id))?;
     let package_artifact = store.get_artifact(package_artifact_id)?;
+    let package: IssueTaskPackage =
+        serde_json::from_slice(&store.read_artifact_bytes(&package_artifact.id)?)
+            .context("dispatch package artifact is not valid IssueTaskPackage v3")?;
+    let context_artifact_path = if package.source.handoff_artifact_id.trim().is_empty() {
+        package_artifact.path.clone()
+    } else {
+        store
+            .get_artifact(&package.source.handoff_artifact_id)?
+            .path
+    };
+    let codex_md_path = std::path::Path::new(&context_artifact_path)
+        .parent()
+        .context("handoff artifact path has no parent")?
+        .join("codex.md")
+        .to_string_lossy()
+        .to_string();
 
     let required_capability = if run.selected_session_link_id.is_some() {
         AgentCapabilityName::ResumeSession
@@ -118,6 +137,8 @@ fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<Exec
         run,
         issue_task,
         package_artifact,
+        package,
+        codex_md_path,
     })
 }
 
@@ -137,6 +158,13 @@ where
         &context.issue_task,
         &context.package_artifact,
     );
+    let workspace_path = context.package.workspace_policy.workspace.path.clone();
+    let session_setup = NativeSessionSetup {
+        display_name: &display_name,
+        goal: &goal,
+        metadata: &metadata,
+        cwd: &workspace_path,
+    };
 
     let mut events = Vec::new();
     events.push(store.append_dispatch_event(dispatch_run_event(
@@ -158,18 +186,14 @@ where
                 adapter,
                 &starting_run,
                 session_link_id,
-                &display_name,
-                &goal,
-                metadata.clone(),
+                &session_setup,
             )?,
             None => start_session(
                 store,
                 adapter,
                 &starting_run,
                 &context.issue_task,
-                &display_name,
-                &goal,
-                metadata.clone(),
+                &session_setup,
             )?,
         };
 
@@ -187,7 +211,11 @@ where
     ))?);
 
     let run = store.set_dispatch_run_session(&starting_run.id, &session_link.id)?;
-    let prompt = dispatch_turn_prompt(&context.issue_task, &context.package_artifact);
+    let prompt = dispatch_turn_prompt(
+        &context.issue_task,
+        &context.package_artifact,
+        &context.codex_md_path,
+    );
     let prompt_artifact = store.write_artifact(
         NewArtifact {
             issue_task_id: Some(context.issue_task.id.clone()),
@@ -201,7 +229,13 @@ where
         },
         prompt.as_bytes(),
     )?;
-    let turn = adapter.adapter_start_turn(&session_link.native_session_id, &prompt)?;
+    let client_user_message_id = format!("issue-finder:{}", run.id);
+    let turn = adapter.adapter_start_turn(
+        &session_link.native_session_id,
+        &prompt,
+        &workspace_path,
+        &client_user_message_id,
+    )?;
     events.push(store.append_dispatch_event(run_session_event(
         &run,
         &session_link.id,
@@ -248,17 +282,16 @@ fn start_session<A>(
     adapter: &mut A,
     run: &DispatchRun,
     issue_task: &IssueTask,
-    display_name: &str,
-    goal: &str,
-    metadata_json: Value,
+    setup: &NativeSessionSetup<'_>,
 ) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
 {
     let native_session = adapter.adapter_start_session(AdapterStartSessionRequest {
-        display_name: display_name.to_string(),
-        goal: Some(goal.to_string()),
-        metadata_json: metadata_json.clone(),
+        display_name: setup.display_name.to_string(),
+        goal: Some(setup.goal.to_string()),
+        metadata_json: setup.metadata.clone(),
+        cwd: setup.cwd.to_string(),
     })?;
     let session_link = store.create_session_link(NewAgentSessionLink {
         agent_id: run.agent_id.clone(),
@@ -267,13 +300,13 @@ where
         display_name: native_session
             .display_name
             .clone()
-            .unwrap_or_else(|| display_name.to_string()),
+            .unwrap_or_else(|| setup.display_name.to_string()),
         goal: native_session
             .goal
             .clone()
-            .or_else(|| Some(goal.to_string())),
+            .or_else(|| Some(setup.goal.to_string())),
         status: AgentSessionStatus::Active,
-        metadata_json,
+        metadata_json: setup.metadata.clone(),
     })?;
     Ok((
         session_link,
@@ -287,9 +320,7 @@ fn resume_session<A>(
     adapter: &mut A,
     run: &DispatchRun,
     session_link_id: &str,
-    display_name: &str,
-    goal: &str,
-    metadata_json: Value,
+    setup: &NativeSessionSetup<'_>,
 ) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
@@ -306,10 +337,10 @@ where
 
     let mut native_session = adapter.adapter_resume_session(&session_link.native_session_id)?;
     native_session =
-        adapter.adapter_rename_session(&native_session.native_session_id, display_name)?;
-    native_session = adapter.adapter_set_goal(&native_session.native_session_id, goal)?;
+        adapter.adapter_rename_session(&native_session.native_session_id, setup.display_name)?;
+    native_session = adapter.adapter_set_goal(&native_session.native_session_id, setup.goal)?;
     native_session =
-        adapter.adapter_set_metadata(&native_session.native_session_id, metadata_json)?;
+        adapter.adapter_set_metadata(&native_session.native_session_id, setup.metadata.clone())?;
     let session_link =
         store.update_session_link_status(&session_link.id, AgentSessionStatus::Active)?;
     Ok((
@@ -317,6 +348,13 @@ where
         native_session,
         DispatchEventKind::SessionResumed,
     ))
+}
+
+struct NativeSessionSetup<'a> {
+    display_name: &'a str,
+    goal: &'a str,
+    metadata: &'a Value,
+    cwd: &'a str,
 }
 
 fn ensure_capability(
@@ -366,16 +404,15 @@ fn dispatch_metadata(
     })
 }
 
-fn dispatch_turn_prompt(issue_task: &IssueTask, package_artifact: &AgentArtifact) -> String {
+fn dispatch_turn_prompt(
+    issue_task: &IssueTask,
+    package_artifact: &AgentArtifact,
+    codex_md_path: &str,
+) -> String {
     format!(
-        "You are receiving an Issue Finder task package v3.\n\
-Goal: follow the package contract to reproduce when practical, make a scoped fix, validate, and report the result.\n\
-Read the package artifact first. Respect workspace_policy, reproduction_contract, change_budget, environment_contract, interaction_policy, session_context, and outcome_contract.\n\
-Return fix_result.json with reproduction evidence, success criteria status, changed files, validation run, residual risks, failure reason when applicable, session context, and suggested GitHub reply.\n\n\
-Issue: {}\n\
-Title: {}\n\
-Task package artifact id: {}\n\
-Task package path: {}\n",
-        issue_task.issue_key, issue_task.title, package_artifact.id, package_artifact.path
+        "Issue Finder dispatch for {}: {}\n\
+Read the prepared context at {} and the approved task package at {}.\n\
+Follow their workspace, safety, validation, interaction, and outcome contracts. Do not push or create a PR.",
+        issue_task.issue_key, issue_task.title, codex_md_path, package_artifact.path
     )
 }

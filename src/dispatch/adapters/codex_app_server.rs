@@ -26,6 +26,7 @@ pub struct CodexStartSessionRequest {
     pub goal: Option<String>,
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
+    pub cwd: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +49,12 @@ pub struct CodexTurn {
     pub turn_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSteerResponse {
+    pub turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,6 +91,10 @@ pub struct CodexTranscript {
 
 pub trait CodexAppServerTransport {
     fn request(&mut self, method: &str, params: Value) -> Result<Value>;
+
+    fn notify(&mut self, _method: &str, _params: Value) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub struct CodexAppServerAdapter<T> {
@@ -106,7 +117,8 @@ pub struct CodexAppServerStdioTransport {
 
 impl CodexAppServerStdioTransport {
     pub fn connect() -> Result<Self> {
-        Self::connect_with_command("codex")
+        let command = discover_codex_binary()?;
+        Self::connect_stdio_with_command(&command)
     }
 
     pub fn connect_with_command(command: &str) -> Result<Self> {
@@ -174,6 +186,7 @@ impl CodexAppServerStdioTransport {
                 }
             }),
         )?;
+        transport.notify("initialized", json!({}))?;
         Ok(transport)
     }
 }
@@ -228,6 +241,15 @@ impl CodexAppServerTransport for CodexAppServerStdioTransport {
                 .with_context(|| format!("codex app-server {method} response missing result"));
         }
     }
+
+    fn notify(&mut self, method: &str, params: Value) -> Result<()> {
+        let message = json!({ "method": method, "params": params });
+        serde_json::to_writer(&mut self.stdin, &message)
+            .with_context(|| format!("unable to write {method} notification"))?;
+        self.stdin.write_all(b"\n")?;
+        self.stdin.flush()?;
+        Ok(())
+    }
 }
 
 impl Drop for CodexAppServerStdioTransport {
@@ -254,9 +276,15 @@ where
     }
 
     pub fn start_session(&mut self, request: CodexStartSessionRequest) -> Result<CodexSession> {
-        let value = self
-            .transport
-            .request("thread/start", json!({ "threadSource": "issue_finder" }))?;
+        let value = self.transport.request(
+            "thread/start",
+            json!({
+                "cwd": request.cwd,
+                "runtimeWorkspaceRoots": [request.cwd],
+                "approvalPolicy": "on-request",
+                "sandbox": "workspace-write"
+            }),
+        )?;
         let mut session = decode_session(value, "thread/start")?;
 
         if let Some(name) = request.name {
@@ -347,21 +375,35 @@ where
         turn_id: &str,
     ) -> Result<Vec<CodexTranscriptItem>> {
         let value = self.transport.request(
-            "thread/turns/items/list",
+            "thread/items/list",
             json!({
                 "threadId": thread_id,
                 "turnId": turn_id
             }),
         )?;
-        decode_array(value, "thread/turns/items/list", &["items", "data"])
+        decode_array::<Value>(value, "thread/items/list", &["items", "data"])?
+            .into_iter()
+            .map(decode_transcript_item)
+            .collect()
     }
 
     pub fn read_transcript(&mut self, thread_id: &str) -> Result<CodexTranscript> {
-        let thread = self.read_thread(thread_id)?;
+        let read_value = self.transport.request(
+            "thread/read",
+            json!({ "threadId": thread_id, "includeTurns": true }),
+        )?;
+        let thread = decode_session(read_value.clone(), "thread/read")?;
         let turns = self.list_turns(thread_id)?;
         let mut items = Vec::new();
         for turn in &turns {
-            items.extend(self.list_turn_items(thread_id, &turn.turn_id)?);
+            match self.list_turn_items(thread_id, &turn.turn_id) {
+                Ok(turn_items) => items.extend(turn_items),
+                Err(error) if error.to_string().contains("not supported yet") => {
+                    items = transcript_items_from_thread_read(&read_value)?;
+                    break;
+                }
+                Err(error) => return Err(error),
+            }
         }
         Ok(CodexTranscript {
             thread,
@@ -389,7 +431,7 @@ where
         limit: Option<usize>,
     ) -> Result<Vec<CodexSession>> {
         let value = self.transport.request(
-            "thread/search",
+            "thread/list",
             json!({
                 "searchTerm": search_term,
                 "limit": limit,
@@ -398,28 +440,48 @@ where
                 "sortKey": "updated_at"
             }),
         )?;
-        let values = decode_array::<Value>(value, "thread/search", &["data"])?;
-        values
-            .into_iter()
-            .map(|value| {
-                value
-                    .get("thread")
-                    .cloned()
-                    .with_context(|| "invalid thread/search response: missing thread".to_string())
-                    .and_then(|thread| decode(thread, "thread/search"))
-            })
-            .collect()
+        decode_array(value, "thread/list", &["data"])
     }
 
-    pub fn start_turn(&mut self, thread_id: &str, prompt: &str) -> Result<CodexTurn> {
+    pub fn start_turn(
+        &mut self,
+        thread_id: &str,
+        prompt: &str,
+        cwd: &str,
+        client_user_message_id: &str,
+    ) -> Result<CodexTurn> {
         let value = self.transport.request(
             "turn/start",
             json!({
                 "threadId": thread_id,
-                "input": [{ "type": "text", "text": prompt }]
+                "clientUserMessageId": client_user_message_id,
+                "input": [{ "type": "text", "text": prompt }],
+                "cwd": cwd,
+                "runtimeWorkspaceRoots": [cwd],
+                "approvalPolicy": "on-request",
+                "sandboxPolicy": { "type": "workspaceWrite", "writableRoots": [cwd], "networkAccess": false }
             }),
         )?;
         decode_turn(value, "turn/start")
+    }
+
+    pub fn steer_turn(
+        &mut self,
+        thread_id: &str,
+        expected_turn_id: &str,
+        prompt: &str,
+        client_user_message_id: &str,
+    ) -> Result<CodexSteerResponse> {
+        let value = self.transport.request(
+            "turn/steer",
+            json!({
+                "threadId": thread_id,
+                "expectedTurnId": expected_turn_id,
+                "clientUserMessageId": client_user_message_id,
+                "input": [{ "type": "text", "text": prompt }]
+            }),
+        )?;
+        decode(value, "turn/steer")
     }
 
     pub fn set_goal(&mut self, thread_id: &str, goal: &str) -> Result<CodexSession> {
@@ -427,7 +489,7 @@ where
             "thread/goal/set",
             json!({
                 "threadId": thread_id,
-                "goal": goal
+                "objective": goal
             }),
         )?;
         decode_session_or_known(
@@ -441,11 +503,19 @@ where
     }
 
     pub fn set_metadata(&mut self, thread_id: &str, metadata: Value) -> Result<CodexSession> {
+        let Some(git_info) = metadata.get("gitInfo") else {
+            return Ok(CodexSession {
+                thread_id: thread_id.to_string(),
+                name: None,
+                goal: None,
+                metadata,
+            });
+        };
         let value = self.transport.request(
             "thread/metadata/update",
             json!({
                 "threadId": thread_id,
-                "metadata": metadata
+                "gitInfo": git_info
             }),
         )?;
         decode_session(value, "thread/metadata/update")
@@ -466,6 +536,7 @@ where
                 name: Some(request.display_name),
                 goal: request.goal,
                 metadata: request.metadata_json,
+                cwd: request.cwd,
             },
         )?;
         Ok(session.into())
@@ -499,8 +570,21 @@ where
         Ok(CodexAppServerAdapter::set_metadata(self, native_session_id, metadata_json)?.into())
     }
 
-    fn adapter_start_turn(&mut self, native_session_id: &str, prompt: &str) -> Result<AdapterTurn> {
-        Ok(CodexAppServerAdapter::start_turn(self, native_session_id, prompt)?.into())
+    fn adapter_start_turn(
+        &mut self,
+        native_session_id: &str,
+        prompt: &str,
+        cwd: &str,
+        client_user_message_id: &str,
+    ) -> Result<AdapterTurn> {
+        Ok(CodexAppServerAdapter::start_turn(
+            self,
+            native_session_id,
+            prompt,
+            cwd,
+            client_user_message_id,
+        )?
+        .into())
     }
 
     fn adapter_read_transcript(&mut self, native_session_id: &str) -> Result<Value> {
@@ -541,7 +625,7 @@ pub fn codex_capability_mappings() -> Vec<CodexCapabilityMapping> {
         mapping(AgentCapabilityName::ForkSession, "thread/fork"),
         mapping(AgentCapabilityName::RenameSession, "thread/name/set"),
         mapping(AgentCapabilityName::ListSessions, "thread/list"),
-        mapping(AgentCapabilityName::SearchSessions, "thread/search"),
+        mapping(AgentCapabilityName::SearchSessions, "thread/list"),
         mapping(AgentCapabilityName::ReadTranscript, "thread/read"),
         mapping(AgentCapabilityName::SetGoal, "thread/goal/set"),
         mapping(AgentCapabilityName::SetMetadata, "thread/metadata/update"),
@@ -555,7 +639,15 @@ pub fn codex_capability_mappings() -> Vec<CodexCapabilityMapping> {
 pub fn default_codex_app_server_startup_metadata() -> Value {
     static METADATA: OnceLock<Value> = OnceLock::new();
     METADATA
-        .get_or_init(|| codex_app_server_startup_metadata("codex"))
+        .get_or_init(|| match discover_codex_binary() {
+            Ok(command) => codex_app_server_startup_metadata(&command),
+            Err(error) => json!({
+                "binary": { "name": "codex", "available": false },
+                "connectionModes": [],
+                "supportedMethods": supported_method_names(),
+                "probe": { "status": "binary_unavailable", "error": error.to_string() }
+            }),
+        })
         .clone()
 }
 
@@ -585,6 +677,16 @@ pub fn codex_app_server_startup_metadata(command: &str) -> Value {
         .is_none()
         .then(|| command_error(command, &["app-server", "daemon", "version"]))
         .flatten();
+    let handshake = match CodexAppServerStdioTransport::connect_stdio_with_command(command) {
+        Ok(mut transport) => match transport.request(
+            "thread/list",
+            json!({ "limit": 1, "archived": false, "sortDirection": "desc" }),
+        ) {
+            Ok(_) => json!({ "status": "handshake_succeeded", "method": "thread/list" }),
+            Err(error) => json!({ "status": "handshake_failed", "error": error.to_string() }),
+        },
+        Err(error) => json!({ "status": "handshake_failed", "error": error.to_string() }),
+    };
 
     json!({
         "binary": binary,
@@ -605,10 +707,7 @@ pub fn codex_app_server_startup_metadata(command: &str) -> Value {
             }
         ],
         "supportedMethods": supported_method_names(),
-        "probe": {
-            "status": "local_cli_probe",
-            "source": "codex_cli_help_and_adapter_method_mapping"
-        }
+        "probe": handshake
     })
 }
 
@@ -627,6 +726,68 @@ fn mapping(capability: AgentCapabilityName, method: &'static str) -> CodexCapabi
     CodexCapabilityMapping { capability, method }
 }
 
+fn decode_transcript_item(value: Value) -> Result<CodexTranscriptItem> {
+    let item_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .context("invalid thread/items/list item: missing type")?
+        .to_string();
+    let turn_id = value
+        .get("turnId")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            value
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|content| {
+                    content
+                        .iter()
+                        .filter_map(|entry| entry.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+        })
+        .filter(|text| !text.is_empty());
+    Ok(CodexTranscriptItem {
+        turn_id,
+        item_type,
+        text,
+        payload: value,
+    })
+}
+
+fn transcript_items_from_thread_read(value: &Value) -> Result<Vec<CodexTranscriptItem>> {
+    let thread = value.get("thread").unwrap_or(value);
+    let turns = thread
+        .get("turns")
+        .and_then(Value::as_array)
+        .context("thread/read includeTurns response is missing turns")?;
+    let mut items = Vec::new();
+    for turn in turns {
+        let turn_id = turn.get("id").and_then(Value::as_str);
+        for item in turn
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let mut item = item.clone();
+            if item.get("turnId").is_none() {
+                if let (Some(turn_id), Some(object)) = (turn_id, item.as_object_mut()) {
+                    object.insert("turnId".to_string(), Value::String(turn_id.to_string()));
+                }
+            }
+            items.push(decode_transcript_item(item)?);
+        }
+    }
+    Ok(items)
+}
+
 fn supported_method_names() -> Vec<&'static str> {
     vec![
         "thread/start",
@@ -634,17 +795,58 @@ fn supported_method_names() -> Vec<&'static str> {
         "thread/fork",
         "thread/name/set",
         "thread/list",
-        "thread/search",
         "thread/read",
         "thread/turns/list",
-        "thread/turns/items/list",
+        "thread/items/list",
         "thread/goal/set",
         "thread/metadata/update",
         "thread/archive",
         "turn/start",
+        "turn/steer",
         "turn/interrupt",
         "review/start",
     ]
+}
+
+pub fn discover_codex_binary() -> Result<String> {
+    if let Ok(explicit) = std::env::var("ISSUE_FINDER_CODEX_BIN") {
+        let explicit = explicit.trim();
+        if explicit.is_empty() {
+            anyhow::bail!("ISSUE_FINDER_CODEX_BIN is empty");
+        }
+        validate_codex_binary(explicit)
+            .with_context(|| format!("ISSUE_FINDER_CODEX_BIN {explicit} is not usable"))?;
+        return Ok(explicit.to_string());
+    }
+
+    if let Some(path) = find_command_path("codex") {
+        if validate_codex_binary(&path).is_ok() {
+            return Ok(path);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let app_binary = "/Applications/ChatGPT.app/Contents/Resources/codex";
+        if validate_codex_binary(app_binary).is_ok() {
+            return Ok(app_binary.to_string());
+        }
+    }
+
+    anyhow::bail!("no usable Codex binary found; set ISSUE_FINDER_CODEX_BIN")
+}
+
+fn validate_codex_binary(command: &str) -> Result<()> {
+    if !Path::new(command).is_file() {
+        anyhow::bail!("binary does not exist");
+    }
+    if !command_succeeds(command, &["--version"]) {
+        anyhow::bail!("--version failed");
+    }
+    if !command_succeeds(command, &["app-server", "--help"]) {
+        anyhow::bail!("app-server --help failed");
+    }
+    Ok(())
 }
 
 fn codex_binary_metadata(command: &str) -> Value {

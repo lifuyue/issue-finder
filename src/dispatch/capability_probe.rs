@@ -73,7 +73,8 @@ fn record_probe(
         .pointer("/startup/probe/status")
         .and_then(Value::as_str);
     let binary_unavailable = startup_probe_status == Some("binary_unavailable");
-    let status = if binary_unavailable {
+    let handshake_failed = startup_probe_status == Some("handshake_failed");
+    let status = if binary_unavailable || handshake_failed {
         AdapterProbeStatus::Failed
     } else if capability.status == CapabilityStatus::Unsupported {
         AdapterProbeStatus::Unsupported
@@ -89,6 +90,8 @@ fn record_probe(
         .map(ToOwned::to_owned);
     let error_code = if binary_unavailable {
         Some("binary_unavailable".to_string())
+    } else if handshake_failed {
+        Some("app_server_handshake_failed".to_string())
     } else if capability.status == CapabilityStatus::Unsupported {
         Some("capability_unsupported".to_string())
     } else {

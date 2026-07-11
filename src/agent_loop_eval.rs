@@ -805,6 +805,8 @@ impl NativeExecutionAdapter for FakeNativeAdapter {
         &mut self,
         native_session_id: &str,
         _prompt: &str,
+        _cwd: &str,
+        _client_user_message_id: &str,
     ) -> Result<AdapterTurn> {
         self.calls.push(format!("start_turn:{native_session_id}"));
         Ok(AdapterTurn {

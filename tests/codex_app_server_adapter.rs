@@ -52,6 +52,7 @@ fn codex_adapter_session_operations_call_json_rpc_thread_methods() {
             name: Some("issue-finder: owner/repo#123".to_string()),
             goal: Some("Fix owner/repo#123".to_string()),
             metadata: json!({ "issueKey": "owner/repo#123" }),
+            cwd: "/tmp/workspace".to_string(),
         })
         .unwrap();
     assert_eq!(started.thread_id, "thread_started");
@@ -75,7 +76,12 @@ fn codex_adapter_session_operations_call_json_rpc_thread_methods() {
     assert_eq!(archived.metadata["archived"], true);
 
     let turn = adapter
-        .start_turn("thread_existing", dispatch_prompt())
+        .start_turn(
+            "thread_existing",
+            dispatch_prompt(),
+            "/tmp/workspace",
+            "client-message-1",
+        )
         .unwrap();
     assert_eq!(turn.turn_id, "turn_started");
 
@@ -86,7 +92,6 @@ fn codex_adapter_session_operations_call_json_rpc_thread_methods() {
             "thread/start",
             "thread/name/set",
             "thread/goal/set",
-            "thread/metadata/update",
             "thread/resume",
             "thread/fork",
             "thread/name/set",
@@ -94,15 +99,20 @@ fn codex_adapter_session_operations_call_json_rpc_thread_methods() {
             "turn/start"
         ]
     );
-    assert_eq!(transport.calls[0].1["threadSource"], "issue_finder");
+    assert_eq!(transport.calls[0].1["cwd"], "/tmp/workspace");
     assert_eq!(
-        transport.calls[3].1["metadata"]["issueKey"],
-        "owner/repo#123"
+        transport.calls[0].1["runtimeWorkspaceRoots"][0],
+        "/tmp/workspace"
     );
-    assert!(transport.calls[8].1["input"][0]["text"]
+    assert_eq!(transport.calls[2].1["objective"], "Fix owner/repo#123");
+    assert!(transport.calls[7].1["input"][0]["text"]
         .as_str()
         .unwrap()
         .contains("Issue Finder task package v3"));
+    assert_eq!(
+        transport.calls[7].1["clientUserMessageId"],
+        "client-message-1"
+    );
 }
 
 #[test]
@@ -124,12 +134,30 @@ fn codex_adapter_reads_transcript_from_thread_turn_and_item_methods() {
         vec![
             "thread/read",
             "thread/turns/list",
-            "thread/turns/items/list",
-            "thread/turns/items/list"
+            "thread/items/list",
+            "thread/items/list"
         ]
     );
     assert_eq!(transport.calls[2].1["turnId"], "turn_1");
     assert_eq!(transport.calls[3].1["turnId"], "turn_2");
+}
+
+#[test]
+fn official_protocol_fixtures_keep_current_thread_shapes() {
+    let list: Value =
+        serde_json::from_str(include_str!("fixtures/codex_app_server/thread_list.json")).unwrap();
+    let read: Value =
+        serde_json::from_str(include_str!("fixtures/codex_app_server/thread_read.json")).unwrap();
+
+    assert_eq!(list["data"][0]["id"], "thread-fixture-1");
+    assert_eq!(
+        read["thread"]["turns"][0]["items"][0]["clientId"],
+        "fixture-client-message"
+    );
+    assert_eq!(
+        read["thread"]["turns"][0]["items"][1]["type"],
+        "agentMessage"
+    );
 }
 
 #[cfg(unix)]
@@ -149,6 +177,7 @@ fi
 if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
   read line
   printf '%s\n' '{{"id":1,"result":{{}}}}'
+  read line
   read line
   printf '%s\n' '{{"id":2,"result":{{"data":[]}}}}'
   while read line; do sleep 1; done
@@ -206,6 +235,14 @@ if [ "$1" = "app-server" ] && [ "$2" = "proxy" ] && [ "$3" = "--help" ]; then
 fi
 if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "version" ]; then
   echo '{"cliVersion":"9.9.9","serverVersion":"9.9.9"}'
+  exit 0
+fi
+if [ "$1" = "app-server" ] && [ "$2" = "--stdio" ]; then
+  read line
+  printf '%s\n' '{"id":1,"result":{}}'
+  read line
+  read line
+  printf '%s\n' '{"id":2,"result":{"data":[]}}'
   exit 0
 fi
 exit 64
@@ -282,7 +319,7 @@ impl CodexAppServerTransport for FakeTransport {
                     { "id": "turn_2", "status": "running" }
                 ]
             }),
-            "thread/turns/items/list" => {
+            "thread/items/list" => {
                 let text = if params["turnId"] == "turn_1" {
                     "first response"
                 } else {

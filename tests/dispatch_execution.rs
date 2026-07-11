@@ -58,11 +58,9 @@ fn execution_starts_new_native_session_after_approval() {
             .unwrap(),
     )
     .unwrap();
-    assert!(prompt.contains("Issue Finder task package v3"));
     assert!(prompt.contains("owner/repo#123"));
-    assert!(prompt.contains("reproduction_contract"));
-    assert!(prompt.contains("outcome_contract"));
-    assert!(prompt.contains("Task package path:"));
+    assert!(prompt.contains("prepared context at"));
+    assert!(prompt.contains("approved task package at"));
 
     let event_types = runtime
         .dispatch_events(&proposal.run.id)
@@ -612,12 +610,16 @@ fn create_packaged_task(
             category: Some("high_value_ready".to_string()),
         })
         .unwrap();
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let mut package = IssueTaskPackage::new(IssueTaskPackageIssue {
         repo_full_name: "owner/repo".to_string(),
         number,
         title: "Fix parser panic".to_string(),
         url: format!("https://github.com/owner/repo/issues/{number}"),
     });
+    package.workspace_policy.workspace.path = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     runtime
         .store()
         .write_task_package_artifact(&task.id, &package)
@@ -756,9 +758,17 @@ impl NativeExecutionAdapter for FakeNativeAdapter {
         })
     }
 
-    fn adapter_start_turn(&mut self, native_session_id: &str, prompt: &str) -> Result<AdapterTurn> {
+    fn adapter_start_turn(
+        &mut self,
+        native_session_id: &str,
+        prompt: &str,
+        cwd: &str,
+        client_user_message_id: &str,
+    ) -> Result<AdapterTurn> {
         self.calls.push(format!("start_turn:{native_session_id}"));
-        assert!(prompt.contains("Task package artifact id:"));
+        assert!(prompt.contains("approved task package at"));
+        assert!(!cwd.trim().is_empty());
+        assert!(client_user_message_id.starts_with("issue-finder:"));
         if self.fail_start_turn {
             anyhow::bail!("codex app-server adapter unavailable");
         }

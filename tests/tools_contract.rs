@@ -334,7 +334,9 @@ async fn dispatch_read_tools_use_local_state_only() {
         .iter()
         .find(|item| item["capability"] == "start_session")
         .expect("start_session capability");
-    assert_eq!(start_session["details_json"]["binary"]["name"], "codex");
+    assert!(start_session["details_json"]["binary"]["name"]
+        .as_str()
+        .is_some_and(|name| name.ends_with("codex")));
     assert!(start_session["details_json"]["binary"]["available"].is_boolean());
     let startup = &start_session["details_json"]["startup"];
     assert!(startup["supportedMethods"]
@@ -343,16 +345,14 @@ async fn dispatch_read_tools_use_local_state_only() {
         .iter()
         .any(|method| method == "thread/start"));
     match startup["probe"]["status"].as_str() {
-        Some("local_cli_probe") => {
-            assert_eq!(
-                startup["probe"]["source"],
-                "codex_cli_help_and_adapter_method_mapping"
-            );
-            assert_eq!(startup["connectionModes"][0]["mode"], "daemon_proxy");
+        Some("handshake_succeeded") => {
+            assert_eq!(startup["probe"]["method"], "thread/list");
+            assert_eq!(startup["connectionModes"][1]["mode"], "stdio");
         }
         Some("binary_unavailable") => {
             assert_eq!(startup["connectionModes"], serde_json::json!([]));
         }
+        Some("handshake_failed") => assert!(startup["probe"]["error"].is_string()),
         other => panic!("unexpected Codex startup probe status: {other:?}"),
     }
     for unsupported_capability in ["interrupt_run", "review_mode", "stream_events"] {

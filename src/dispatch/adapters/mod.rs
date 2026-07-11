@@ -10,6 +10,7 @@ pub struct AdapterStartSessionRequest {
     pub display_name: String,
     pub goal: Option<String>,
     pub metadata_json: Value,
+    pub cwd: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -52,7 +53,13 @@ pub trait NativeExecutionAdapter {
         metadata_json: Value,
     ) -> Result<AdapterSession>;
 
-    fn adapter_start_turn(&mut self, native_session_id: &str, prompt: &str) -> Result<AdapterTurn>;
+    fn adapter_start_turn(
+        &mut self,
+        native_session_id: &str,
+        prompt: &str,
+        cwd: &str,
+        client_user_message_id: &str,
+    ) -> Result<AdapterTurn>;
 
     fn adapter_read_transcript(&mut self, native_session_id: &str) -> Result<Value>;
 

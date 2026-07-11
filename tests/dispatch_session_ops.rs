@@ -416,6 +416,8 @@ impl NativeExecutionAdapter for FakeSessionAdapter {
         &mut self,
         _native_session_id: &str,
         _prompt: &str,
+        _cwd: &str,
+        _client_user_message_id: &str,
     ) -> Result<AdapterTurn> {
         Ok(AdapterTurn {
             native_turn_id: "unused".to_string(),
