@@ -87,18 +87,7 @@ issue-finder tools list
 issue-finder tools call issue-finder.status --arguments '{}'
 ```
 
-Run the local Issue Finder agent daemon and push a natural-language A2A task to it:
-
-```bash
-issue-finder agent daemon
-issue-finder agent card
-issue-finder agent send "Search global repositories and recommend issues" --limit 5 --wait
-issue-finder agent list
-issue-finder agent show <agent-task-id>
-issue-finder agent events <agent-task-id>
-```
-
-`agent daemon` is the online local A2A surface for a running Issue Finder LLM agent. It exposes `/a2a/agent-card`, `/a2a/tasks/send`, `/a2a/tasks`, `/a2a/tasks/{taskId}`, and `/a2a/tasks/{taskId}/events` over local HTTP. A sent task is a high-level natural-language goal; the daemon asks the configured LLM to choose allowed Issue Finder tools, runs only the first-version read-only tool set (`issue-finder.status` and `issue-finder.scout`), and persists the task, messages, tool calls, events, and final answer in `agent/agent.sqlite3`. This is separate from `dispatch a2a`, which remains the offline package artifact gateway for approved `IssueTaskPackage` handoffs.
+Issue Finder does not start an A2A listener by default. `dispatch a2a` is an explicitly invoked external artifact gateway that maps approved packages and results onto the same dispatch artifacts and lifecycle; it is not a second agent runtime or database.
 
 Discover and rank candidate issues:
 
@@ -237,12 +226,6 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
 | `issue-finder tools list` | Print the current Issue Finder JSON tool catalog |
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
-| `issue-finder agent daemon` | Start the local HTTP A2A Issue Finder agent daemon |
-| `issue-finder agent card` | Read the running daemon's A2A agent card |
-| `issue-finder agent send "<goal>" --limit 5 --wait` | Push a natural-language task to the running daemon and optionally poll until completion |
-| `issue-finder agent list` | List recent daemon tasks through the local A2A endpoint |
-| `issue-finder agent show <agent-task-id>` | Show one daemon task, including persisted messages, tool calls, and result metadata |
-| `issue-finder agent events <agent-task-id>` | Show ordered persisted events for one daemon task |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
 | `issue-finder scout --refresh` | Ignore the local GitHub issue cache and request fresh data |
@@ -366,15 +349,13 @@ Issue Finder stores local state under `~/.issue-finder` by default:
   dispatch/
     dispatch.sqlite3
     artifacts/
-  agent/
-    agent.sqlite3
   recommendation/
     events.jsonl
   reports/
     YYYY-MM-DD.md
 ```
 
-`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` stores dispatch/session/approval/GitHub projection state and dispatch artifacts live under `dispatch/artifacts/`. `agent/agent.sqlite3` stores online daemon tasks, conversation messages, tool calls, events, and final results for natural-language A2A tasks sent to the running Issue Finder agent.
+`state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` is the unified source for dispatch, native threads/turns/items/events/outbox, approvals, A2A mappings, and GitHub projection; dispatch artifacts live under `dispatch/artifacts/`.
 
 Use `ISSUE_FINDER_HOME` for isolated testing or demos:
 
@@ -446,7 +427,7 @@ By default it does not read complete conversation bodies, system prompts, tool o
 
 When dispatch state is used, `handoff.json` is imported as an issue review candidate first. Review approval writes a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, session/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands can import the matching ready inbox handoff automatically when local dispatch state does not exist yet, but they return `pending_issue_review` until `dispatch review approve <approval-request-id>` creates the package. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, typed `dispatch_events`, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes.
 
-Native Codex communication uses the official app-server stdio protocol. After the local review and dispatch approvals, `dispatch execute` calls `thread/start` for `--new-session` or `thread/resume` for an explicit `--session`, then calls `turn/start`. It binds both the thread and turn to the prepared workspace through absolute `cwd` and runtime workspace roots, assigns a deterministic thread name, supplies `clientUserMessageId`, and sends a short prompt containing absolute paths to `codex.md` and the approved package rather than embedding the package JSON. Issue Finder never guesses the currently focused desktop thread. Session sync/search uses `thread/list` with `searchTerm`; transcript reads use `thread/turns/list` and `thread/items/list`, with `thread/read(includeTurns)` as the official fallback when the installed store reports that item pagination is unavailable. Session rename, fork, and archive remain approval-gated mutations. The separate `agent send` A2A endpoint controls Issue Finder's own local LLM daemon; it is not the Codex thread transport. Likewise, `dispatch a2a` is an offline approved artifact gateway, not a substitute for app-server `turn/start`.
+Native Codex communication uses a bidirectional app-server worker. The default transport starts or connects to the installer-managed daemon and uses its Unix socket/WebSocket control connection; set `ISSUE_FINDER_CODEX_TRANSPORT=stdio` only for an explicit fallback or test. The worker owns pending request routing, notifications, server requests, bounded queues, graceful shutdown, and disconnect events. `dispatch/dispatch.sqlite3` projects the same stream into native threads, turns, items, events, outbox messages, and pending server requests. After local review and dispatch approvals, `dispatch execute` calls `thread/start` for `--new-session` or `thread/resume` for an explicit `--session`, then calls `turn/start` with a stable `clientUserMessageId`. It binds the thread and turn to the prepared workspace and sends only absolute context/package paths. Issue Finder never guesses the focused desktop thread. A2A remains an explicitly invoked artifact mapping gateway onto this dispatch state, not an alternate agent loop or store.
 
 The candidate task board is a derived library-level read model over recommendation events, inbox items, and dispatch state. It is a query surface, not a persisted source of truth. Dispatch terminal outcomes remain visible as terminal board status even if an inbox item was marked done or archived; archive and dismiss feedback only affect display state. Reactivation is also projected locally and does not change recommendation feed score or memory ranking adjustments.
 

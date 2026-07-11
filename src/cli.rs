@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::agent::cli_args::AgentArgs;
 use crate::dispatch::cli_args::{AgentsArgs, DispatchArgs, SessionsArgs};
 
 #[derive(Debug, Parser)]
@@ -48,8 +47,6 @@ pub enum Command {
     Memory(MemoryArgs),
     /// List and call Issue Finder's JSON tool contract.
     Tools(ToolsArgs),
-    /// Run and call the local Issue Finder A2A agent daemon.
-    Agent(AgentArgs),
     /// Check local readiness.
     Doctor,
 }
@@ -385,7 +382,6 @@ mod tests {
     use clap::Parser;
 
     use super::{Cli, Command};
-    use crate::agent::cli_args::AgentCommand;
     use crate::dispatch::cli_args::DispatchCommand;
 
     #[test]
@@ -452,52 +448,5 @@ mod tests {
         assert!(
             matches!(args.command, Some(DispatchCommand::Status(status)) if status.run_id == "run-1")
         );
-    }
-
-    #[test]
-    fn agent_send_parses_natural_language_goal_and_a2a_endpoint() {
-        let cli = Cli::try_parse_from([
-            "issue-finder",
-            "agent",
-            "send",
-            "搜索全网仓库并推荐 issue",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8788",
-            "--limit",
-            "5",
-            "--max-turns",
-            "3",
-            "--wait",
-        ])
-        .unwrap();
-
-        let Command::Agent(args) = cli.command else {
-            panic!("expected agent command");
-        };
-        let AgentCommand::Send(send) = args.command else {
-            panic!("expected agent send subcommand");
-        };
-        assert_eq!(send.goal, "搜索全网仓库并推荐 issue");
-        assert_eq!(send.host, "127.0.0.1");
-        assert_eq!(send.port, 8788);
-        assert_eq!(send.limit, Some(5));
-        assert_eq!(send.max_turns, Some(3));
-        assert!(send.wait);
-    }
-
-    #[test]
-    fn agent_daemon_uses_local_defaults() {
-        let cli = Cli::try_parse_from(["issue-finder", "agent", "daemon"]).unwrap();
-
-        let Command::Agent(args) = cli.command else {
-            panic!("expected agent command");
-        };
-        let AgentCommand::Daemon(daemon) = args.command else {
-            panic!("expected agent daemon subcommand");
-        };
-        assert_eq!(daemon.host, "127.0.0.1");
-        assert_eq!(daemon.port, 8787);
     }
 }

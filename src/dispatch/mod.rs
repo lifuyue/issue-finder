@@ -10,6 +10,7 @@ pub mod github_interaction_policy;
 pub mod github_projection;
 pub mod memory;
 pub mod model;
+pub mod native_runtime;
 mod output;
 pub mod packaging;
 pub mod policy;

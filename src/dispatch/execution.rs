@@ -3,7 +3,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::adapters::{
-    codex_app_server::{CodexAppServerAdapter, CodexAppServerStdioTransport},
     AdapterSession, AdapterStartSessionRequest, AdapterTurn, NativeExecutionAdapter,
 };
 use super::events::{dispatch_run_event, run_session_event};
@@ -13,6 +12,7 @@ use super::model::{
     CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
     DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus, NewAgentSessionLink, NewArtifact,
 };
+use super::native_runtime::{NativeThreadManager, NativeThreadStore, SendTurnRequest};
 use super::store::DispatchStore;
 use super::task_package::IssueTaskPackage;
 
@@ -73,9 +73,107 @@ pub fn execute_approved_codex_app_server_dispatch(
         );
     }
 
-    let transport = CodexAppServerStdioTransport::connect()?;
-    let mut adapter = CodexAppServerAdapter::new(transport);
+    let runtime = tokio::runtime::Runtime::new()?;
+    let native_store = NativeThreadStore::open(&store.paths())?;
+    let manager = runtime.block_on(NativeThreadManager::connect(native_store))?;
+    let mut adapter = NativeRuntimeExecutionAdapter { runtime, manager };
     execute_approved_dispatch(store, &mut adapter, run_id)
+}
+
+struct NativeRuntimeExecutionAdapter {
+    runtime: tokio::runtime::Runtime,
+    manager: NativeThreadManager,
+}
+
+impl NativeExecutionAdapter for NativeRuntimeExecutionAdapter {
+    fn adapter_start_session(
+        &mut self,
+        request: AdapterStartSessionRequest,
+    ) -> Result<AdapterSession> {
+        let id = self.runtime.block_on(
+            self.manager
+                .start_thread(&request.display_name, &request.cwd),
+        )?;
+        if let Some(goal) = request.goal.as_deref() {
+            self.runtime.block_on(self.manager.set_goal(&id, goal))?;
+        }
+        Ok(AdapterSession {
+            native_session_id: id,
+            display_name: Some(request.display_name),
+            goal: request.goal,
+            metadata_json: request.metadata_json,
+        })
+    }
+    fn adapter_resume_session(&mut self, id: &str) -> Result<AdapterSession> {
+        self.runtime.block_on(self.manager.resume(id))?;
+        Ok(runtime_session(id))
+    }
+    fn adapter_fork_session(&mut self, _: &str) -> Result<AdapterSession> {
+        anyhow::bail!("fork requires the native thread mutation flow")
+    }
+    fn adapter_rename_session(&mut self, id: &str, name: &str) -> Result<AdapterSession> {
+        self.runtime.block_on(self.manager.rename(id, name))?;
+        Ok(AdapterSession {
+            display_name: Some(name.to_string()),
+            ..runtime_session(id)
+        })
+    }
+    fn adapter_set_goal(&mut self, id: &str, goal: &str) -> Result<AdapterSession> {
+        self.runtime.block_on(self.manager.set_goal(id, goal))?;
+        Ok(AdapterSession {
+            goal: Some(goal.to_string()),
+            ..runtime_session(id)
+        })
+    }
+    fn adapter_set_metadata(&mut self, id: &str, metadata_json: Value) -> Result<AdapterSession> {
+        Ok(AdapterSession {
+            metadata_json,
+            ..runtime_session(id)
+        })
+    }
+    fn adapter_start_turn(
+        &mut self,
+        id: &str,
+        prompt: &str,
+        cwd: &str,
+        client_id: &str,
+    ) -> Result<AdapterTurn> {
+        let started = self.runtime.block_on(self.manager.send(SendTurnRequest {
+            thread_id: id.to_string(),
+            prompt: prompt.to_string(),
+            cwd: cwd.to_string(),
+            client_user_message_id: client_id.to_string(),
+        }))?;
+        Ok(AdapterTurn {
+            native_turn_id: started.turn_id,
+            status: Some("running".to_string()),
+        })
+    }
+    fn adapter_read_transcript(&mut self, _: &str) -> Result<Value> {
+        anyhow::bail!("transcript reads use NativeThreadStore")
+    }
+    fn adapter_archive_session(&mut self, _: &str) -> Result<AdapterSession> {
+        anyhow::bail!("archive requires the native thread mutation flow")
+    }
+    fn adapter_list_sessions(&mut self, _: Option<usize>) -> Result<Vec<AdapterSession>> {
+        anyhow::bail!("thread lists use NativeThreadStore")
+    }
+    fn adapter_search_sessions(
+        &mut self,
+        _: &str,
+        _: Option<usize>,
+    ) -> Result<Vec<AdapterSession>> {
+        anyhow::bail!("thread search uses NativeThreadStore")
+    }
+}
+
+fn runtime_session(id: &str) -> AdapterSession {
+    AdapterSession {
+        native_session_id: id.to_string(),
+        display_name: None,
+        goal: None,
+        metadata_json: Value::Null,
+    }
 }
 
 struct ExecutionContext {
