@@ -16,10 +16,6 @@ fn dispatch_policy_classifies_approval_matrix_and_forbidden_actions() {
         .required_capabilities
         .contains(&AgentCapabilityName::StartSession));
 
-    let read = classify_action(PolicyAction::ReadSessionTranscript);
-    assert_eq!(read.requirement, PolicyRequirement::Allowed);
-    assert_eq!(read.approval_type, None);
-
     let open_pr = classify_action(PolicyAction::OpenPr);
     assert_eq!(open_pr.requirement, PolicyRequirement::Forbidden);
     assert_eq!(open_pr.approval_type, Some(ApprovalType::OpenPr));

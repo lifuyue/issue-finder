@@ -276,7 +276,6 @@ You are an Issue Finder worktree child thread for <scope>.
 
 Read:
 - docs/superpowers/specs/2026-06-20-worktree-thread-orchestration-design.md
-- docs/superpowers/specs/2026-06-18-agent-dispatch-control-plane-design.md
 - docs/superpowers/specs/2026-06-18-hybrid-contribution-memory-design.md
 - relevant source and tests for your scope
 

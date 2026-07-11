@@ -126,7 +126,7 @@ sessionContext
 suggestedGitHubReply
 ```
 
-Optional artifacts are `patch`, `pr_link`, `session_link`, and `validation_log`.
+Optional artifacts are `patch`, `pr_link`, `thread_id`, and `validation_log`.
 
 ## Tool And CLI Contract
 

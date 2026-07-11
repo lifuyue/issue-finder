@@ -101,7 +101,7 @@ pub struct DispatchProposalRequest {
     pub issue: String,
     pub agent_id: String,
     pub requested_by: String,
-    pub selected_session_link_id: Option<String>,
+    pub selected_thread_id: Option<String>,
     pub new_session: bool,
 }
 
@@ -135,7 +135,7 @@ impl DispatchRuntime {
         let approval_latencies = approval_requests.iter().map(approval_latency).collect();
         let artifacts = self.store.list_artifacts_for_run(run_id)?;
         let failures = self.store.list_dispatch_failures_for_run(run_id)?;
-        let selected_thread_id = run.selected_session_link_id.clone();
+        let selected_thread_id = run.selected_thread_id.clone();
 
         Ok(DispatchStatusSnapshot {
             run,
@@ -254,16 +254,16 @@ impl DispatchRuntime {
     }
 
     pub fn propose_dispatch(&self, request: DispatchProposalRequest) -> Result<DispatchProposal> {
-        if request.new_session && request.selected_session_link_id.is_some() {
-            anyhow::bail!("new_session cannot be combined with selected_session_link_id");
+        if request.new_session && request.selected_thread_id.is_some() {
+            anyhow::bail!("new_session cannot be combined with selected_thread_id");
         }
 
         let agent = self.store.get_agent_profile(&request.agent_id)?;
         let issue_task =
             packaging::ensure_packaged_issue_task_for_issue(&self.store, &request.issue)?;
         let issue_key = issue_task.issue_key.clone();
-        let selected_session_link_id = request.selected_session_link_id;
-        let dispatch_capability = if selected_session_link_id.is_some() {
+        let selected_thread_id = request.selected_thread_id;
+        let dispatch_capability = if selected_thread_id.is_some() {
             PolicyAction::ResumeDispatch
         } else {
             PolicyAction::StartDispatch
@@ -277,20 +277,20 @@ impl DispatchRuntime {
             status: DispatchRunStatus::Proposed,
             requested_by: request.requested_by,
             approval_state: ApprovalStatus::Pending,
-            selected_session_link_id,
+            selected_thread_id,
         })?;
         let approval_request = self.store.create_approval_request(NewApprovalRequest {
             run_id: Some(run.id.clone()),
             approval_type: ApprovalType::Dispatch,
             status: ApprovalStatus::Pending,
-            prompt: dispatch_approval_prompt(&issue_key, &run.agent_id, run.selected_session_link_id.as_deref()),
+            prompt: dispatch_approval_prompt(&issue_key, &run.agent_id, run.selected_thread_id.as_deref()),
             details_json: json!({
                 "issueKey": issue_key,
                 "agentId": run.agent_id,
-                "executionMode": if run.selected_session_link_id.is_some() { "resume_thread" } else { "start_thread" },
-                "newSession": run.selected_session_link_id.is_none(),
+                "executionMode": if run.selected_thread_id.is_some() { "resume_thread" } else { "start_thread" },
+                "newSession": run.selected_thread_id.is_none(),
                 "requestedNewSession": request.new_session,
-                "selectedThreadId": run.selected_session_link_id,
+                "selectedThreadId": run.selected_thread_id,
                 "policy": policy
             }),
         })?;

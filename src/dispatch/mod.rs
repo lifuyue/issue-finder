@@ -31,17 +31,16 @@ pub use github_projection::{
 pub use model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AdapterProbeResult,
     AdapterProbeStatus, AgentArtifact, AgentCapability, AgentCapabilityName, AgentProfile,
-    AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus, ApprovalType,
-    CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind,
-    DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
+    ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus, DispatchEvent,
+    DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
+    DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRun,
+    DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
     DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
     GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTask,
     IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
-    NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
-    NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
-    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
-    PolicyAction, PolicyRequirement, SessionTranscriptItem, TranscriptPayloadStorage,
+    NewAgentProfile, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision,
+    NewIssueTask, NewMemoryEvent, PolicyAction, PolicyRequirement,
 };
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;

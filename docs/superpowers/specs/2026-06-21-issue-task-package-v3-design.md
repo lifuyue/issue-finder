@@ -48,6 +48,6 @@ outcome_contract
 
 ## Outcome
 
-The required result artifact is `fix_result.json`. It must include status, summary, changed files, reproduction evidence, success criteria status, validation, residual risks, failure reason when applicable, session context, and a suggested GitHub reply. Optional artifacts are `patch`, `pr_link`, `session_link`, and `validation_log`.
+The required result artifact is `fix_result.json`. It must include status, summary, changed files, reproduction evidence, success criteria status, validation, residual risks, failure reason when applicable, thread context, and a suggested GitHub reply. Optional artifacts are `patch`, `pr_link`, `thread_id`, and `validation_log`.
 
 Existing local v2 package artifacts are not migrated in place. Re-importing and approving a ready handoff creates a v3 package artifact.

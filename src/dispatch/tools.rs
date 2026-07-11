@@ -268,7 +268,7 @@ pub fn execute_dispatch_tool(
                     issue: args.issue,
                     agent_id: args.agent.unwrap_or_else(|| "codex".to_string()),
                     requested_by: "tool".to_string(),
-                    selected_session_link_id: normalized_optional(args.session),
+                    selected_thread_id: normalized_optional(args.session),
                     new_session: args.new_session.unwrap_or(false),
                 })
                 .map_err(map_issue_ref_error)?;

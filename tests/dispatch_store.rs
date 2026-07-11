@@ -2,16 +2,15 @@ use std::fs;
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    AdapterProbeStatus, AgentCapabilityName, AgentSessionStatus, ApprovalStatus, ApprovalType,
-    CapabilityStatus, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
-    DispatchStore, DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
+    AdapterProbeStatus, AgentCapabilityName, ApprovalStatus, ApprovalType, CapabilityStatus,
+    DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailureClass,
+    DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus, DispatchStore,
+    DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
     GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType,
     IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType,
-    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewAgentSessionLink,
-    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
-    NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision, NewIssueTask,
-    NewMemoryEvent, NewSessionTranscriptItem, TranscriptPayloadStorage,
+    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewApprovalRequest, NewArtifact,
+    NewDispatchEvent, NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome,
+    NewGitHubInteraction, NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -87,18 +86,7 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     assert_eq!(updated.title, "Fix parser panic in tokenizer");
     assert_eq!(updated.status, IssueTaskStatus::LlmConfirmed);
 
-    let session = store
-        .create_session_link(NewAgentSessionLink {
-            agent_id: agent.id.clone(),
-            native_session_id: "thread_123".to_string(),
-            issue_task_id: Some(task.id.clone()),
-            display_name: "issue-finder: owner/repo#123 - Fix parser panic".to_string(),
-            goal: Some("Fix owner/repo#123".to_string()),
-            status: AgentSessionStatus::Linked,
-            metadata_json: json!({ "threadId": "thread_123" }),
-        })
-        .unwrap();
-    assert_eq!(session.native_session_id, "thread_123");
+    let thread_id = "thread_123".to_string();
 
     let run = store
         .create_dispatch_run(NewDispatchRun {
@@ -107,7 +95,7 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
             status: DispatchRunStatus::Proposed,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Pending,
-            selected_session_link_id: Some(session.id.clone()),
+            selected_thread_id: Some(thread_id.clone()),
         })
         .unwrap();
     assert_eq!(run.approval_state, ApprovalStatus::Pending);
@@ -121,11 +109,11 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     let event = store
         .append_dispatch_event(NewDispatchEvent {
             run_id: Some(run.id.clone()),
-            session_link_id: Some(session.id.clone()),
+            thread_id: Some(thread_id.clone()),
             issue_task_id: Some(task.id.clone()),
-            event_kind: DispatchEventKind::SessionStarted,
-            subject_type: DispatchSubjectType::Session,
-            subject_id: Some(session.id.clone()),
+            event_kind: DispatchEventKind::ThreadStarted,
+            subject_type: DispatchSubjectType::Thread,
+            subject_id: Some(thread_id.clone()),
             source: DispatchEventSource::Adapter,
             severity: DispatchEventSeverity::Info,
             correlation_id: Some(run.id.clone()),
@@ -135,7 +123,7 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         })
         .unwrap();
     assert_eq!(event.payload_json["status"], "ok");
-    assert_eq!(event.event_kind, DispatchEventKind::SessionStarted);
+    assert_eq!(event.event_kind, DispatchEventKind::ThreadStarted);
     assert_eq!(event.sequence, 1);
     assert_eq!(
         store.list_dispatch_events_for_run(&run.id).unwrap().len(),
@@ -353,42 +341,6 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         probe.id
     );
 
-    let replay_item = store
-        .append_session_transcript_item(NewSessionTranscriptItem {
-            session_link_id: session.id.clone(),
-            turn_id: Some("turn_1".to_string()),
-            item_index: 0,
-            item_type: "message".to_string(),
-            text: Some("hello".to_string()),
-            payload_artifact_id: None,
-            payload_storage: TranscriptPayloadStorage::Inline,
-            metadata_json: json!({}),
-        })
-        .unwrap();
-    assert_eq!(
-        replay_item.payload_storage,
-        TranscriptPayloadStorage::Inline
-    );
-    assert_eq!(
-        store
-            .list_session_transcript_items(&session.id)
-            .unwrap()
-            .len(),
-        1
-    );
-
-    let active_session = store
-        .update_session_link_status(&session.id, AgentSessionStatus::Active)
-        .unwrap();
-    assert_eq!(active_session.status, AgentSessionStatus::Active);
-    assert_eq!(
-        store
-            .list_session_links_for_issue_task(&task.id)
-            .unwrap()
-            .len(),
-        1
-    );
-
     let done_task = store
         .update_issue_task_status(&task.id, IssueTaskStatus::Done)
         .unwrap();
@@ -572,7 +524,7 @@ fn dispatch_store_persists_outcomes_idempotently_and_rejects_conflicts() {
             status: DispatchRunStatus::Running,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     let input = NewDispatchRunOutcome {

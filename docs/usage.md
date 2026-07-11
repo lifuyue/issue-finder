@@ -13,12 +13,12 @@ Discover good first issues
   -> Store the task in the local inbox
   -> Import handoff for issue review when dispatch or projection is requested
   -> Create IssueTaskPackage v3 only after review approval
-  -> Track optional dispatch state, session links, and result artifacts
+  -> Track native Codex threads, turns, items, approvals, and result artifacts
   -> Project local candidate/task board state for queries
   -> Generate a daily report
 ```
 
-`handoff.json` remains the canonical prepared handoff artifact. In the dispatch control plane, prepared handoffs and future task packages are durable artifacts tracked alongside runs, session links, approvals, events, and result artifacts. `handoff.md` is the human-readable summary. `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, `codex.md`, and `context/*.md` give downstream coding agents a safer starting point. See [Agent-Safe Preparation Runtime](./agent-safe-preparation-runtime.md) for the full artifact model.
+`handoff.json` remains the canonical prepared handoff artifact. In the dispatch control plane, prepared handoffs and task packages are durable artifacts tracked alongside runs, native Codex threads, approvals, events, and result artifacts. `handoff.md` is the human-readable summary. `agent-policy.json`, `probe.json`, `prepare-events.jsonl`, `codex.md`, and `context/*.md` give downstream coding agents a safer starting point. See [Agent-Safe Preparation Runtime](./agent-safe-preparation-runtime.md) for the full artifact model.
 
 ## Requirements
 
@@ -119,16 +119,6 @@ Inspect local dispatch state:
 issue-finder agents list
 issue-finder agents capabilities codex
 issue-finder agents probe codex
-issue-finder sessions list --agent codex
-issue-finder sessions sync --agent codex --limit 20
-issue-finder sessions search --issue owner/repo#123
-issue-finder sessions read <session-link-id>
-issue-finder sessions replay <session-link-id>
-issue-finder sessions rename <session-link-id> --name "issue-finder: owner/repo#123 - short title"
-issue-finder sessions fork <session-link-id>
-issue-finder sessions archive <session-link-id>
-issue-finder sessions approve <approval-request-id>
-issue-finder sessions reject <approval-request-id>
 issue-finder dispatch package import-handoff <inbox-id>
 issue-finder dispatch review list
 issue-finder dispatch review show <approval-request-id>
@@ -136,7 +126,7 @@ issue-finder dispatch review approve <approval-request-id>
 issue-finder dispatch review reject <approval-request-id> --reason "..."
 issue-finder dispatch owner/repo#123 --agent codex
 issue-finder dispatch owner/repo#123 --agent codex --new-session
-issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>
+issue-finder dispatch owner/repo#123 --agent codex --session <codex-thread-id>
 issue-finder dispatch approve <run-id>
 issue-finder dispatch execute <run-id>
 issue-finder dispatch a2a export owner/repo#123
@@ -241,16 +231,6 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder agents list` | List local execution agent profiles |
 | `issue-finder agents capabilities codex` | List one agent's declared native capabilities; wired Codex app-server session capabilities are experimental, while unwired capabilities such as `stream_events`, `interrupt_run`, `review_mode`, and `open_pr` are reported as unsupported |
 | `issue-finder agents probe codex` | Start the discovered Codex app-server, complete its initialize handshake, run `thread/list`, and cache the result; method mappings alone never count as support |
-| `issue-finder sessions list --agent codex` | List local links to native sessions for one agent |
-| `issue-finder sessions sync --agent codex --limit 20` | Sync recent native Codex sessions into local session links |
-| `issue-finder sessions search --issue owner/repo#123` | Search local session links for a GitHub issue |
-| `issue-finder sessions read <session-link-id>` | Read a native session transcript into a local artifact |
-| `issue-finder sessions replay <session-link-id>` | List normalized replay items for a local session link |
-| `issue-finder sessions rename <session-link-id> --name <name>` | Create an approval request to rename a native session |
-| `issue-finder sessions fork <session-link-id>` | Create an approval request to fork a native session into a new local session link |
-| `issue-finder sessions archive <session-link-id>` | Create an approval request to archive a native session |
-| `issue-finder sessions approve <approval-request-id>` | Approve and execute a pending native session mutation |
-| `issue-finder sessions reject <approval-request-id>` | Reject a pending native session mutation |
 | `issue-finder dispatch package import-handoff <id>` | Import an existing inbox handoff as an `issue_review` candidate and create an approval request |
 | `issue-finder dispatch review list` | List pending and resolved issue review requests |
 | `issue-finder dispatch review show <approval-request-id>` | Show one issue review request, including imported handoff/package evidence |
@@ -258,7 +238,7 @@ issue-finder eval agent-loop --offline --output <dir>
 | `issue-finder dispatch review reject <approval-request-id>` | Reject one issue review without dismissing the recommendation |
 | `issue-finder dispatch owner/repo#123 --agent codex` | Create a pending dispatch approval for a new native session by default; returns `pending_issue_review` first if the package has not been review-approved |
 | `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Explicit form of the default new-session dispatch proposal; returns `pending_issue_review` first if the package has not been review-approved |
-| `issue-finder dispatch owner/repo#123 --agent codex --session <session-link-or-native-id>` | Create a pending approval to continue an existing local session link or native session; returns `pending_issue_review` first if needed |
+| `issue-finder dispatch owner/repo#123 --agent codex --session <codex-thread-id>` | Create a pending approval to continue one explicitly selected native Codex thread; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch propose owner/repo#123 --agent codex --new-session` | Explicit subcommand form for the same approval-gated dispatch proposal |
 | `issue-finder dispatch approve <run-id>` | Resolve a pending dispatch approval and move the run to `approved` |
 | `issue-finder dispatch reject <run-id>` | Reject a pending dispatch approval and cancel the run |
@@ -425,7 +405,7 @@ By default it does not read complete conversation bodies, system prompts, tool o
 
 `probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
 
-When dispatch state is used, `handoff.json` is imported as an issue review candidate first. Review approval writes a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, session/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands can import the matching ready inbox handoff automatically when local dispatch state does not exist yet, but they return `pending_issue_review` until `dispatch review approve <approval-request-id>` creates the package. The dispatch store records the package artifact path, user profile snapshot artifact, selected native session link, approval requests, typed `dispatch_events`, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes.
+When dispatch state is used, `handoff.json` is imported as an issue review candidate first. Review approval writes a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, thread/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands can import the matching ready inbox handoff automatically when local dispatch state does not exist yet, but they return `pending_issue_review` until `dispatch review approve <approval-request-id>` creates the package. The dispatch store records the package artifact path, user profile snapshot artifact, selected native Codex thread ID, approval requests, typed `dispatch_events`, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes.
 
 Native Codex communication uses a bidirectional app-server worker. The default transport starts or connects to the installer-managed daemon and uses its Unix socket/WebSocket control connection; set `ISSUE_FINDER_CODEX_TRANSPORT=stdio` only for an explicit fallback or test. The worker owns pending request routing, notifications, server requests, bounded queues, graceful shutdown, and disconnect events. `dispatch/dispatch.sqlite3` projects the same stream into native threads, turns, items, events, outbox messages, and pending server requests. After local review and dispatch approvals, `dispatch execute` calls `thread/start` for `--new-session` or `thread/resume` for an explicit `--session`, then calls `turn/start` with a stable `clientUserMessageId`. It binds the thread and turn to the prepared workspace and sends only absolute context/package paths. Issue Finder never guesses the focused desktop thread. A2A remains an explicitly invoked artifact mapping gateway onto this dispatch state, not an alternate agent loop or store.
 

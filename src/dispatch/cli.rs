@@ -250,7 +250,7 @@ fn propose_dispatch_cli(
         issue,
         agent_id: agent,
         requested_by: "cli".to_string(),
-        selected_session_link_id: session,
+        selected_thread_id: session,
         new_session,
     })?;
     render_cli_output(json, &proposal, || render_dispatch_proposal(&proposal))

@@ -95,7 +95,7 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
             status: DispatchRunStatus::Running,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     let result_path = dir.path().join("fix_result.json");

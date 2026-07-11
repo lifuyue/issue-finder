@@ -11,17 +11,16 @@ use crate::paths::{atomic_write, sanitize_repo_name, IssueFinderPaths};
 
 use super::model::{
     AdapterProbeResult, AdapterProbeStatus, AgentArtifact, AgentCapability, AgentCapabilityName,
-    AgentProfile, AgentSessionLink, AgentSessionStatus, ApprovalRequest, ApprovalStatus,
-    ApprovalType, CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity,
-    DispatchEventSource, DispatchFailure, DispatchFailureClass, DispatchOutcomeFailureClass,
-    DispatchOutcomeKind, DispatchRun, DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType,
-    DispatchTaskClass, DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
+    AgentProfile, ApprovalRequest, ApprovalStatus, ApprovalType, CapabilityStatus, DispatchEvent,
+    DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailure,
+    DispatchFailureClass, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRun,
+    DispatchRunOutcome, DispatchRunStatus, DispatchSubjectType, DispatchTaskClass,
+    DispatchValidationOutcome, GitHubInteraction, GitHubInteractionDecision,
     GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTask,
     IssueTaskStatus, MemoryEvent, MemoryEventType, NewAdapterProbeResult, NewAgentCapability,
-    NewAgentProfile, NewAgentSessionLink, NewApprovalRequest, NewArtifact, NewDispatchEvent,
-    NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction,
-    NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent, NewSessionTranscriptItem,
-    SessionTranscriptItem, TranscriptPayloadStorage,
+    NewAgentProfile, NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure,
+    NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision,
+    NewIssueTask, NewMemoryEvent,
 };
 use super::task_package::IssueTaskPackage;
 
@@ -306,7 +305,7 @@ impl DispatchStore {
         self.conn.execute(
             "INSERT INTO dispatch_runs (
                 id, issue_task_id, agent_id, status, requested_by, approval_state,
-                created_at, selected_session_link_id
+                created_at, selected_thread_id
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
@@ -317,7 +316,7 @@ impl DispatchStore {
                 input.requested_by,
                 input.approval_state.as_str(),
                 created_at,
-                input.selected_session_link_id
+                input.selected_thread_id
             ],
         )?;
         self.get_dispatch_run(&id)
@@ -328,7 +327,7 @@ impl DispatchStore {
         self.conn
             .query_row(
                 "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
-                        created_at, started_at, completed_at, selected_session_link_id,
+                        created_at, started_at, completed_at, selected_thread_id,
                         result_artifact_id, failure_reason
                  FROM dispatch_runs
                  WHERE id = ?1",
@@ -344,7 +343,7 @@ impl DispatchStore {
     ) -> Result<Vec<DispatchRun>> {
         let mut statement = self.conn.prepare(
             "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
-                    created_at, started_at, completed_at, selected_session_link_id,
+                    created_at, started_at, completed_at, selected_thread_id,
                     result_artifact_id, failure_reason
              FROM dispatch_runs
              WHERE issue_task_id = ?1
@@ -354,16 +353,12 @@ impl DispatchStore {
         collect_rows(rows)
     }
 
-    pub fn set_dispatch_run_session(
-        &self,
-        run_id: &str,
-        session_link_id: &str,
-    ) -> Result<DispatchRun> {
+    pub fn set_dispatch_run_thread(&self, run_id: &str, thread_id: &str) -> Result<DispatchRun> {
         self.conn.execute(
             "UPDATE dispatch_runs
-             SET selected_session_link_id = ?2
+             SET selected_thread_id = ?2
              WHERE id = ?1",
-            params![run_id, session_link_id],
+            params![run_id, thread_id],
         )?;
         self.get_dispatch_run(run_id)
     }
@@ -549,162 +544,12 @@ impl DispatchStore {
         collect_rows(rows)
     }
 
-    pub fn create_session_link(&self, input: NewAgentSessionLink) -> Result<AgentSessionLink> {
-        let id = next_id("session-link");
-        let created_at = now();
-        self.conn.execute(
-            "INSERT INTO agent_session_links (
-                id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                status, metadata_json, created_at, last_seen_at
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-            params![
-                id,
-                input.agent_id,
-                input.native_session_id,
-                input.issue_task_id,
-                input.display_name,
-                input.goal,
-                input.status.as_str(),
-                json_text(&input.metadata_json)?,
-                created_at
-            ],
-        )?;
-        self.get_session_link(&id)
-            .with_context(|| format!("session link {id} was not persisted"))
-    }
-
-    pub fn get_session_link(&self, id: &str) -> Result<AgentSessionLink> {
-        self.conn
-            .query_row(
-                "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                        status, metadata_json, created_at, last_seen_at, archived_at
-                 FROM agent_session_links
-                 WHERE id = ?1",
-                params![id],
-                agent_session_link_from_row,
-            )
-            .with_context(|| format!("session link {id} not found"))
-    }
-
-    pub fn update_session_link_status(
-        &self,
-        session_link_id: &str,
-        status: AgentSessionStatus,
-    ) -> Result<AgentSessionLink> {
-        let now = now();
-        let archived_at = if status == AgentSessionStatus::Archived {
-            Some(now.as_str())
-        } else {
-            None
-        };
-        self.conn.execute(
-            "UPDATE agent_session_links
-             SET status = ?2,
-                 last_seen_at = ?3,
-                 archived_at = COALESCE(?4, archived_at)
-             WHERE id = ?1",
-            params![session_link_id, status.as_str(), now, archived_at],
-        )?;
-        self.get_session_link(session_link_id)
-    }
-
-    pub fn rename_session_link(
-        &self,
-        session_link_id: &str,
-        display_name: &str,
-    ) -> Result<AgentSessionLink> {
-        self.conn.execute(
-            "UPDATE agent_session_links
-             SET display_name = ?2,
-                 last_seen_at = ?3
-             WHERE id = ?1",
-            params![session_link_id, display_name, now()],
-        )?;
-        self.get_session_link(session_link_id)
-    }
-
-    pub fn list_session_links_for_issue_task(
-        &self,
-        issue_task_id: &str,
-    ) -> Result<Vec<AgentSessionLink>> {
-        let mut statement = self.conn.prepare(
-            "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                    status, metadata_json, created_at, last_seen_at, archived_at
-             FROM agent_session_links
-             WHERE issue_task_id = ?1
-             ORDER BY last_seen_at DESC, id",
-        )?;
-        let rows = statement.query_map(params![issue_task_id], agent_session_link_from_row)?;
-        collect_rows(rows)
-    }
-
-    pub fn list_session_links(&self, agent_id: Option<&str>) -> Result<Vec<AgentSessionLink>> {
-        if let Some(agent_id) = agent_id {
-            let mut statement = self.conn.prepare(
-                "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                        status, metadata_json, created_at, last_seen_at, archived_at
-                 FROM agent_session_links
-                 WHERE agent_id = ?1
-                 ORDER BY last_seen_at DESC, id",
-            )?;
-            let rows = statement.query_map(params![agent_id], agent_session_link_from_row)?;
-            return collect_rows(rows);
-        }
-
-        let mut statement = self.conn.prepare(
-            "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                    status, metadata_json, created_at, last_seen_at, archived_at
-             FROM agent_session_links
-             ORDER BY last_seen_at DESC, id",
-        )?;
-        let rows = statement.query_map([], agent_session_link_from_row)?;
-        collect_rows(rows)
-    }
-
-    pub fn find_session_link_by_native_id(
-        &self,
-        agent_id: &str,
-        native_session_id: &str,
-    ) -> Result<AgentSessionLink> {
-        self.conn
-            .query_row(
-                "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                        status, metadata_json, created_at, last_seen_at, archived_at
-                 FROM agent_session_links
-                 WHERE agent_id = ?1 AND native_session_id = ?2",
-                params![agent_id, native_session_id],
-                agent_session_link_from_row,
-            )
-            .with_context(|| {
-                format!("session link {native_session_id} for agent {agent_id} not found")
-            })
-    }
-
-    pub fn find_session_link_by_native_id_opt(
-        &self,
-        agent_id: &str,
-        native_session_id: &str,
-    ) -> Result<Option<AgentSessionLink>> {
-        self.conn
-            .query_row(
-                "SELECT id, agent_id, native_session_id, issue_task_id, display_name, goal,
-                        status, metadata_json, created_at, last_seen_at, archived_at
-                 FROM agent_session_links
-                 WHERE agent_id = ?1 AND native_session_id = ?2",
-                params![agent_id, native_session_id],
-                agent_session_link_from_row,
-            )
-            .optional()
-            .map_err(Into::into)
-    }
-
     pub fn append_dispatch_event(&self, input: NewDispatchEvent) -> Result<DispatchEvent> {
         let id = next_id("dispatch-event");
         let created_at = now();
         self.conn.execute(
             "INSERT INTO dispatch_events (
-                id, run_id, session_link_id, issue_task_id, event_kind,
+                id, run_id, thread_id, issue_task_id, event_kind,
                 subject_type, subject_id, source, severity, correlation_id,
                 causation_id, native_event_id, payload_json, created_at
              )
@@ -712,7 +557,7 @@ impl DispatchStore {
             params![
                 id,
                 input.run_id,
-                input.session_link_id,
+                input.thread_id,
                 input.issue_task_id,
                 input.event_kind.as_str(),
                 input.subject_type.as_str(),
@@ -733,7 +578,7 @@ impl DispatchStore {
     pub fn get_dispatch_event(&self, id: &str) -> Result<DispatchEvent> {
         self.conn
             .query_row(
-                "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+                "SELECT id, sequence, run_id, thread_id, issue_task_id, event_kind,
                         subject_type, subject_id, source, severity, correlation_id,
                         causation_id, native_event_id, payload_json, created_at
                  FROM dispatch_events
@@ -746,7 +591,7 @@ impl DispatchStore {
 
     pub fn list_dispatch_events_for_run(&self, run_id: &str) -> Result<Vec<DispatchEvent>> {
         let mut statement = self.conn.prepare(
-            "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+            "SELECT id, sequence, run_id, thread_id, issue_task_id, event_kind,
                     subject_type, subject_id, source, severity, correlation_id,
                     causation_id, native_event_id, payload_json, created_at
              FROM dispatch_events
@@ -757,19 +602,16 @@ impl DispatchStore {
         collect_rows(rows)
     }
 
-    pub fn list_dispatch_events_for_session(
-        &self,
-        session_link_id: &str,
-    ) -> Result<Vec<DispatchEvent>> {
+    pub fn list_dispatch_events_for_session(&self, thread_id: &str) -> Result<Vec<DispatchEvent>> {
         let mut statement = self.conn.prepare(
-            "SELECT id, sequence, run_id, session_link_id, issue_task_id, event_kind,
+            "SELECT id, sequence, run_id, thread_id, issue_task_id, event_kind,
                     subject_type, subject_id, source, severity, correlation_id,
                     causation_id, native_event_id, payload_json, created_at
              FROM dispatch_events
-             WHERE session_link_id = ?1
+             WHERE thread_id = ?1
              ORDER BY sequence",
         )?;
-        let rows = statement.query_map(params![session_link_id], dispatch_event_from_row)?;
+        let rows = statement.query_map(params![thread_id], dispatch_event_from_row)?;
         collect_rows(rows)
     }
 
@@ -1339,84 +1181,31 @@ impl DispatchStore {
         let rows = statement.query_map(params![agent_id], adapter_probe_result_from_row)?;
         collect_rows(rows)
     }
-
-    pub fn append_session_transcript_item(
-        &self,
-        input: NewSessionTranscriptItem,
-    ) -> Result<SessionTranscriptItem> {
-        let id = next_id("transcript-item");
-        let created_at = now();
-        self.conn.execute(
-            "INSERT INTO session_transcript_items (
-                id, session_link_id, turn_id, item_index, item_type, text,
-                payload_artifact_id, payload_storage, metadata_json, created_at
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                id,
-                input.session_link_id,
-                input.turn_id,
-                input.item_index,
-                input.item_type,
-                input.text,
-                input.payload_artifact_id,
-                input.payload_storage.as_str(),
-                json_text(&input.metadata_json)?,
-                created_at
-            ],
-        )?;
-        self.get_session_transcript_item(&id)
-            .with_context(|| format!("transcript item {id} was not persisted"))
-    }
-
-    pub fn get_session_transcript_item(&self, id: &str) -> Result<SessionTranscriptItem> {
-        self.conn
-            .query_row(
-                "SELECT id, session_link_id, turn_id, item_index, item_type, text,
-                        payload_artifact_id, payload_storage, metadata_json, created_at
-                 FROM session_transcript_items
-                 WHERE id = ?1",
-                params![id],
-                session_transcript_item_from_row,
-            )
-            .with_context(|| format!("transcript item {id} not found"))
-    }
-
-    pub fn list_session_transcript_items(
-        &self,
-        session_link_id: &str,
-    ) -> Result<Vec<SessionTranscriptItem>> {
-        let mut statement = self.conn.prepare(
-            "SELECT id, session_link_id, turn_id, item_index, item_type, text,
-                    payload_artifact_id, payload_storage, metadata_json, created_at
-             FROM session_transcript_items
-             WHERE session_link_id = ?1
-             ORDER BY item_index, id",
-        )?;
-        let rows =
-            statement.query_map(params![session_link_id], session_transcript_item_from_row)?;
-        collect_rows(rows)
-    }
 }
 
 fn initialize_schema(conn: &Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
-        0 => create_schema_v2(conn)?,
-        1 => migrate_schema_v1_to_v2(conn)?,
-        2 => create_schema_v2(conn)?,
+        0 => create_schema_v3(conn)?,
+        1 => migrate_schema_v1_to_v3(conn)?,
+        2 => migrate_schema_v2_to_v3(conn)?,
+        3 => create_schema_v3(conn)?,
         other => anyhow::bail!("unsupported dispatch database schema version {other}"),
     }
     Ok(())
 }
 
-fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
-    create_schema_v2(conn)?;
+fn migrate_schema_v1_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "ALTER TABLE dispatch_runs RENAME COLUMN selected_session_link_id TO selected_thread_id",
+        [],
+    )?;
+    create_schema_v3(conn)?;
     if table_exists(conn, "agent_events")? {
         conn.execute_batch(
             r#"
             INSERT INTO dispatch_events (
-                id, run_id, session_link_id, issue_task_id, event_kind,
+                id, run_id, thread_id, issue_task_id, event_kind,
                 subject_type, subject_id, source, severity, correlation_id,
                 causation_id, native_event_id, payload_json, created_at
             )
@@ -1430,19 +1219,16 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
                     WHEN 'dispatch_outcome_recorded' THEN 'dispatch_outcome_recorded'
                     WHEN 'dispatch_starting' THEN 'dispatch_starting'
                     WHEN 'dispatch_failed' THEN 'dispatch_failed'
-                    WHEN 'session_synced' THEN 'session_synced'
-                    WHEN 'session_transcript_read' THEN 'session_transcript_read'
-                    WHEN 'session_started' THEN 'session_started'
-                    WHEN 'session_resumed' THEN 'session_resumed'
-                    WHEN 'session_renamed' THEN 'session_renamed'
-                    WHEN 'session_forked' THEN 'session_forked'
-                    WHEN 'session_archived' THEN 'session_archived'
+                    WHEN 'session_synced' THEN 'legacy'
+                    WHEN 'session_transcript_read' THEN 'legacy'
+                    WHEN 'session_started' THEN 'thread_started'
+                    WHEN 'session_resumed' THEN 'thread_resumed'
                     WHEN 'turn_started' THEN 'turn_started'
                     WHEN 'a2a_result_imported' THEN 'a2a_result_imported'
                     ELSE 'legacy'
                 END,
                 CASE
-                    WHEN session_link_id IS NOT NULL THEN 'session'
+                    WHEN session_link_id IS NOT NULL THEN 'thread'
                     WHEN run_id IS NOT NULL THEN 'dispatch_run'
                     ELSE 'system'
                 END,
@@ -1464,14 +1250,62 @@ fn migrate_schema_v1_to_v2(conn: &Connection) -> Result<()> {
             ORDER BY created_at, id;
 
             DROP TABLE agent_events;
-            PRAGMA user_version = 2;
+            PRAGMA user_version = 3;
             "#,
         )?;
     }
     Ok(())
 }
 
-fn create_schema_v2(conn: &Connection) -> Result<()> {
+fn migrate_schema_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        PRAGMA foreign_keys = OFF;
+        ALTER TABLE dispatch_runs RENAME COLUMN selected_session_link_id TO selected_thread_id;
+        ALTER TABLE dispatch_events RENAME TO dispatch_events_v2;
+        CREATE TABLE dispatch_events (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            run_id TEXT,
+            thread_id TEXT,
+            issue_task_id TEXT,
+            event_kind TEXT NOT NULL,
+            subject_type TEXT NOT NULL,
+            subject_id TEXT,
+            source TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            correlation_id TEXT,
+            causation_id TEXT,
+            native_event_id TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
+        );
+        INSERT INTO dispatch_events
+        SELECT sequence, id, run_id, session_link_id, issue_task_id,
+               CASE event_kind
+                   WHEN 'session_started' THEN 'thread_started'
+                   WHEN 'session_resumed' THEN 'thread_resumed'
+                   ELSE event_kind
+               END,
+               CASE subject_type WHEN 'session' THEN 'thread' ELSE subject_type END,
+               subject_id, source, severity, correlation_id, causation_id,
+               native_event_id, payload_json, created_at
+        FROM dispatch_events_v2;
+        DROP TABLE dispatch_events_v2;
+        DROP TABLE IF EXISTS session_transcript_items;
+        DROP TABLE IF EXISTS agent_session_links;
+        CREATE INDEX IF NOT EXISTS idx_dispatch_events_run ON dispatch_events(run_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_events_thread ON dispatch_events(thread_id, sequence);
+        PRAGMA user_version = 3;
+        PRAGMA foreign_keys = ON;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn create_schema_v3(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS agent_profiles (
@@ -1518,7 +1352,7 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             started_at TEXT,
             completed_at TEXT,
-            selected_session_link_id TEXT,
+            selected_thread_id TEXT,
             result_artifact_id TEXT,
             failure_reason TEXT,
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE CASCADE,
@@ -1541,28 +1375,11 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             FOREIGN KEY (result_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
         );
 
-        CREATE TABLE IF NOT EXISTS agent_session_links (
-            id TEXT PRIMARY KEY,
-            agent_id TEXT NOT NULL,
-            native_session_id TEXT NOT NULL,
-            issue_task_id TEXT,
-            display_name TEXT NOT NULL,
-            goal TEXT,
-            status TEXT NOT NULL,
-            metadata_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL,
-            archived_at TEXT,
-            UNIQUE (agent_id, native_session_id),
-            FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE CASCADE,
-            FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
-        );
-
         CREATE TABLE IF NOT EXISTS dispatch_events (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             id TEXT NOT NULL UNIQUE,
             run_id TEXT,
-            session_link_id TEXT,
+            thread_id TEXT,
             issue_task_id TEXT,
             event_kind TEXT NOT NULL,
             subject_type TEXT NOT NULL,
@@ -1575,7 +1392,6 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             payload_json TEXT NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (session_link_id) REFERENCES agent_session_links(id) ON DELETE SET NULL,
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
         );
 
@@ -1675,35 +1491,18 @@ fn create_schema_v2(conn: &Connection) -> Result<()> {
             FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS session_transcript_items (
-            id TEXT PRIMARY KEY,
-            session_link_id TEXT NOT NULL,
-            turn_id TEXT,
-            item_index INTEGER NOT NULL,
-            item_type TEXT NOT NULL,
-            text TEXT,
-            payload_artifact_id TEXT,
-            payload_storage TEXT NOT NULL,
-            metadata_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (session_link_id) REFERENCES agent_session_links(id) ON DELETE CASCADE,
-            FOREIGN KEY (payload_artifact_id) REFERENCES agent_artifacts(id) ON DELETE SET NULL
-        );
-
         CREATE INDEX IF NOT EXISTS idx_issue_tasks_issue_key ON issue_tasks(issue_key);
         CREATE INDEX IF NOT EXISTS idx_dispatch_runs_issue_task ON dispatch_runs(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_run_outcomes_run ON dispatch_run_outcomes(run_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_session_links_issue_task ON agent_session_links(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_events_run ON dispatch_events(run_id, sequence);
-        CREATE INDEX IF NOT EXISTS idx_dispatch_events_session ON dispatch_events(session_link_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_events_thread ON dispatch_events(thread_id, sequence);
         CREATE INDEX IF NOT EXISTS idx_agent_artifacts_issue_task ON agent_artifacts(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_github_interactions_issue_task ON github_interactions(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_github_interaction_decisions_issue_task ON github_interaction_decisions(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_github_interaction_decisions_run ON github_interaction_decisions(run_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_failures_run ON dispatch_failures(run_id);
         CREATE INDEX IF NOT EXISTS idx_adapter_probe_agent ON adapter_probe_results(agent_id, capability, checked_at);
-        CREATE INDEX IF NOT EXISTS idx_session_transcript_items_session ON session_transcript_items(session_link_id, item_index);
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
         "#,
     )?;
     Ok(())
@@ -1778,7 +1577,7 @@ fn dispatch_run_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRun> {
         created_at: row.get(6)?,
         started_at: row.get(7)?,
         completed_at: row.get(8)?,
-        selected_session_link_id: row.get(9)?,
+        selected_thread_id: row.get(9)?,
         result_artifact_id: row.get(10)?,
         failure_reason: row.get(11)?,
     })
@@ -1814,24 +1613,6 @@ fn dispatch_run_outcome_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRunO
     })
 }
 
-fn agent_session_link_from_row(row: &Row<'_>) -> rusqlite::Result<AgentSessionLink> {
-    let status: String = row.get(6)?;
-    let metadata: String = row.get(7)?;
-    Ok(AgentSessionLink {
-        id: row.get(0)?,
-        agent_id: row.get(1)?,
-        native_session_id: row.get(2)?,
-        issue_task_id: row.get(3)?,
-        display_name: row.get(4)?,
-        goal: row.get(5)?,
-        status: parse_enum(&status, AgentSessionStatus::parse_value)?,
-        metadata_json: parse_json(&metadata)?,
-        created_at: row.get(8)?,
-        last_seen_at: row.get(9)?,
-        archived_at: row.get(10)?,
-    })
-}
-
 fn dispatch_event_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchEvent> {
     let event_kind: String = row.get(5)?;
     let subject_type: String = row.get(6)?;
@@ -1842,7 +1623,7 @@ fn dispatch_event_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchEvent> {
         id: row.get(0)?,
         sequence: row.get(1)?,
         run_id: row.get(2)?,
-        session_link_id: row.get(3)?,
+        thread_id: row.get(3)?,
         issue_task_id: row.get(4)?,
         event_kind: parse_enum(&event_kind, DispatchEventKind::parse_value)?,
         subject_type: parse_enum(&subject_type, DispatchSubjectType::parse_value)?,
@@ -1975,23 +1756,6 @@ fn adapter_probe_result_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterProbe
         expires_at: row.get(8)?,
         error_code: row.get(9)?,
         details_json: parse_json(&details)?,
-    })
-}
-
-fn session_transcript_item_from_row(row: &Row<'_>) -> rusqlite::Result<SessionTranscriptItem> {
-    let payload_storage: String = row.get(7)?;
-    let metadata: String = row.get(8)?;
-    Ok(SessionTranscriptItem {
-        id: row.get(0)?,
-        session_link_id: row.get(1)?,
-        turn_id: row.get(2)?,
-        item_index: row.get(3)?,
-        item_type: row.get(4)?,
-        text: row.get(5)?,
-        payload_artifact_id: row.get(6)?,
-        payload_storage: parse_enum(&payload_storage, TranscriptPayloadStorage::parse_value)?,
-        metadata_json: parse_json(&metadata)?,
-        created_at: row.get(9)?,
     })
 }
 

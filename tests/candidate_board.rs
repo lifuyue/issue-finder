@@ -80,7 +80,7 @@ fn candidate_board_projects_review_package_and_running_lifecycle() {
             status: DispatchRunStatus::Running,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
 
@@ -168,7 +168,7 @@ fn dispatch_terminal_outcome_wins_over_inbox_done_and_archive_display() {
             status: DispatchRunStatus::Running,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     store

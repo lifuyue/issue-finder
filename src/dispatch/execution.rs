@@ -5,12 +5,12 @@ use serde_json::{json, Value};
 use super::adapters::{
     AdapterSession, AdapterStartSessionRequest, AdapterTurn, NativeExecutionAdapter,
 };
-use super::events::{dispatch_run_event, run_session_event};
+use super::events::{dispatch_run_event, run_thread_event};
 use super::failure::execution_failure;
 use super::model::{
-    AgentArtifact, AgentCapabilityName, AgentSessionLink, AgentSessionStatus, ApprovalStatus,
-    CapabilityStatus, DispatchEvent, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchRun, DispatchRunStatus, IssueTask, IssueTaskStatus, NewAgentSessionLink, NewArtifact,
+    AgentArtifact, AgentCapabilityName, ApprovalStatus, CapabilityStatus, DispatchEvent,
+    DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchRun, DispatchRunStatus,
+    IssueTask, IssueTaskStatus, NewArtifact,
 };
 use super::native_runtime::{NativeThreadManager, NativeThreadStore, SendTurnRequest};
 use super::store::DispatchStore;
@@ -20,7 +20,7 @@ use super::task_package::IssueTaskPackage;
 #[serde(rename_all = "camelCase")]
 pub struct DispatchExecutionResult {
     pub run: DispatchRun,
-    pub session: AgentSessionLink,
+    pub thread: AdapterSession,
     pub turn: AdapterTurn,
     pub prompt_artifact: AgentArtifact,
     pub events: Vec<DispatchEvent>,
@@ -222,7 +222,7 @@ fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<Exec
         .to_string_lossy()
         .to_string();
 
-    let required_capability = if run.selected_session_link_id.is_some() {
+    let required_capability = if run.selected_thread_id.is_some() {
         AgentCapabilityName::ResumeSession
     } else {
         AgentCapabilityName::StartSession
@@ -277,28 +277,23 @@ where
         }),
     ))?);
 
-    let (session_link, native_session, session_event_type) =
-        match starting_run.selected_session_link_id.as_deref() {
-            Some(session_link_id) => resume_session(
-                store,
-                adapter,
-                &starting_run,
-                session_link_id,
-                &session_setup,
-            )?,
-            None => start_session(
-                store,
-                adapter,
-                &starting_run,
-                &context.issue_task,
-                &session_setup,
-            )?,
-        };
+    let (native_session, thread_event_type) = match starting_run.selected_thread_id.as_deref() {
+        Some(thread_id) => {
+            resume_session(store, adapter, &starting_run, thread_id, &session_setup)?
+        }
+        None => start_session(
+            store,
+            adapter,
+            &starting_run,
+            &context.issue_task,
+            &session_setup,
+        )?,
+    };
 
-    events.push(store.append_dispatch_event(run_session_event(
+    events.push(store.append_dispatch_event(run_thread_event(
         &starting_run,
-        &session_link.id,
-        session_event_type,
+        &native_session.native_session_id,
+        thread_event_type,
         DispatchEventSource::Adapter,
         Some(native_session.native_session_id.clone()),
         json!({
@@ -308,7 +303,7 @@ where
         }),
     ))?);
 
-    let run = store.set_dispatch_run_session(&starting_run.id, &session_link.id)?;
+    let run = store.set_dispatch_run_thread(&starting_run.id, &native_session.native_session_id)?;
     let prompt = dispatch_turn_prompt(
         &context.issue_task,
         &context.package_artifact,
@@ -329,14 +324,14 @@ where
     )?;
     let client_user_message_id = format!("issue-finder:{}", run.id);
     let turn = adapter.adapter_start_turn(
-        &session_link.native_session_id,
+        &native_session.native_session_id,
         &prompt,
         &workspace_path,
         &client_user_message_id,
     )?;
-    events.push(store.append_dispatch_event(run_session_event(
+    events.push(store.append_dispatch_event(run_thread_event(
         &run,
-        &session_link.id,
+        &native_session.native_session_id,
         DispatchEventKind::TurnStarted,
         DispatchEventSource::Adapter,
         Some(turn.native_turn_id.clone()),
@@ -348,14 +343,12 @@ where
     ))?);
 
     store.update_issue_task_status(&context.issue_task.id, IssueTaskStatus::InProgress)?;
-    store.update_session_link_status(&session_link.id, AgentSessionStatus::Active)?;
     let run_status = dispatch_status_for_turn(&turn);
     let run = store.update_dispatch_run_status(&run.id, run_status, None)?;
-    let session = store.get_session_link(&session_link.id)?;
 
     Ok(DispatchExecutionResult {
         run,
-        session,
+        thread: native_session,
         turn,
         prompt_artifact,
         events,
@@ -381,7 +374,7 @@ fn start_session<A>(
     run: &DispatchRun,
     issue_task: &IssueTask,
     setup: &NativeSessionSetup<'_>,
-) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
+) -> Result<(AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
 {
@@ -391,76 +384,28 @@ where
         metadata_json: setup.metadata.clone(),
         cwd: setup.cwd.to_string(),
     })?;
-    let session_link = store.create_session_link(NewAgentSessionLink {
-        agent_id: run.agent_id.clone(),
-        native_session_id: native_session.native_session_id.clone(),
-        issue_task_id: Some(issue_task.id.clone()),
-        display_name: native_session
-            .display_name
-            .clone()
-            .unwrap_or_else(|| setup.display_name.to_string()),
-        goal: native_session
-            .goal
-            .clone()
-            .or_else(|| Some(setup.goal.to_string())),
-        status: AgentSessionStatus::Active,
-        metadata_json: setup.metadata.clone(),
-    })?;
-    Ok((
-        session_link,
-        native_session,
-        DispatchEventKind::SessionStarted,
-    ))
+    let _ = (store, run, issue_task);
+    Ok((native_session, DispatchEventKind::ThreadStarted))
 }
 
 fn resume_session<A>(
     store: &DispatchStore,
     adapter: &mut A,
     run: &DispatchRun,
-    session_link_id: &str,
+    thread_id: &str,
     setup: &NativeSessionSetup<'_>,
-) -> Result<(AgentSessionLink, AdapterSession, DispatchEventKind)>
+) -> Result<(AdapterSession, DispatchEventKind)>
 where
     A: NativeExecutionAdapter,
 {
-    let session_link = match store.get_session_link(session_link_id).or_else(|_| {
-        store
-            .find_session_link_by_native_id_opt(&run.agent_id, session_link_id)?
-            .context("native thread is not projected yet")
-    }) {
-        Ok(link) => link,
-        Err(_) => store.create_session_link(NewAgentSessionLink {
-            agent_id: run.agent_id.clone(),
-            native_session_id: session_link_id.to_string(),
-            issue_task_id: Some(run.issue_task_id.clone()),
-            display_name: setup.display_name.to_string(),
-            goal: Some(setup.goal.to_string()),
-            status: AgentSessionStatus::Active,
-            metadata_json: setup.metadata.clone(),
-        })?,
-    };
-    if session_link.agent_id != run.agent_id {
-        anyhow::bail!(
-            "session link {} belongs to agent {}, not {}",
-            session_link.id,
-            session_link.agent_id,
-            run.agent_id
-        );
-    }
-
-    let mut native_session = adapter.adapter_resume_session(&session_link.native_session_id)?;
+    let _ = (store, run);
+    let mut native_session = adapter.adapter_resume_session(thread_id)?;
     native_session =
         adapter.adapter_rename_session(&native_session.native_session_id, setup.display_name)?;
     native_session = adapter.adapter_set_goal(&native_session.native_session_id, setup.goal)?;
     native_session =
         adapter.adapter_set_metadata(&native_session.native_session_id, setup.metadata.clone())?;
-    let session_link =
-        store.update_session_link_status(&session_link.id, AgentSessionStatus::Active)?;
-    Ok((
-        session_link,
-        native_session,
-        DispatchEventKind::SessionResumed,
-    ))
+    Ok((native_session, DispatchEventKind::ThreadResumed))
 }
 
 struct NativeSessionSetup<'a> {

@@ -266,11 +266,10 @@ pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResul
 
 pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> String {
     format!(
-        "Dispatch run {} started native turn {}.\nSession: {} native={}\nPrompt artifact: {}",
+        "Dispatch run {} started native turn {}.\nThread: {}\nPrompt artifact: {}",
         result.run.id,
         result.turn.native_turn_id,
-        result.session.id,
-        result.session.native_session_id,
+        result.thread.native_session_id,
         result.prompt_artifact.path
     )
 }

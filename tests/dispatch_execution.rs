@@ -4,10 +4,9 @@ use issue_finder::dispatch::adapters::{
 };
 use issue_finder::dispatch::execution::execute_approved_dispatch;
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchEventKind,
-    DispatchFailureClass, DispatchProposalRequest, DispatchRunStatus, DispatchRuntime,
-    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability, NewAgentProfile,
-    NewAgentSessionLink, NewIssueTask,
+    AgentCapabilityName, ApprovalStatus, CapabilityStatus, DispatchEventKind, DispatchFailureClass,
+    DispatchProposalRequest, DispatchRunStatus, DispatchRuntime, IssueTaskPackage,
+    IssueTaskPackageIssue, IssueTaskStatus, NewAgentCapability, NewAgentProfile, NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff};
@@ -29,7 +28,7 @@ fn execution_starts_new_native_session_after_approval() {
             issue: "owner/repo#123".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -43,12 +42,11 @@ fn execution_starts_new_native_session_after_approval() {
 
     assert_eq!(result.run.status, DispatchRunStatus::Running);
     assert_eq!(result.run.approval_state, ApprovalStatus::Approved);
-    assert_eq!(result.session.native_session_id, "native_started_1");
+    assert_eq!(result.thread.native_session_id, "native_started_1");
     assert_eq!(
-        result.session.display_name,
+        result.thread.display_name.unwrap(),
         "issue-finder: owner/repo#123 - Fix parser panic"
     );
-    assert_eq!(result.session.status, AgentSessionStatus::Active);
     assert_eq!(result.turn.native_turn_id, "turn_1");
     assert_eq!(result.prompt_artifact.kind, "dispatch_prompt");
     let prompt = String::from_utf8(
@@ -73,7 +71,7 @@ fn execution_starts_new_native_session_after_approval() {
         vec![
             DispatchEventKind::DispatchApprovalResolved,
             DispatchEventKind::DispatchStarting,
-            DispatchEventKind::SessionStarted,
+            DispatchEventKind::ThreadStarted,
             DispatchEventKind::TurnStarted
         ]
     );
@@ -88,29 +86,17 @@ fn execution_starts_new_native_session_after_approval() {
 }
 
 #[test]
-fn execution_resumes_selected_session_after_approval() {
+fn execution_resumes_selected_thread_after_approval() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths).unwrap();
-    let task = create_packaged_task(&runtime, 456);
-    let session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "codex".to_string(),
-            native_session_id: "native_existing".to_string(),
-            issue_task_id: Some(task.id.clone()),
-            display_name: "old".to_string(),
-            goal: None,
-            status: AgentSessionStatus::Idle,
-            metadata_json: json!({}),
-        })
-        .unwrap();
+    create_packaged_task(&runtime, 456);
     let proposal = runtime
         .propose_dispatch(DispatchProposalRequest {
             issue: "owner/repo#456".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: Some(session.id.clone()),
+            selected_thread_id: Some("native_existing".to_string()),
             new_session: false,
         })
         .unwrap();
@@ -123,8 +109,7 @@ fn execution_resumes_selected_session_after_approval() {
         execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id).unwrap();
 
     assert_eq!(result.run.status, DispatchRunStatus::Running);
-    assert_eq!(result.session.id, session.id);
-    assert_eq!(result.session.status, AgentSessionStatus::Active);
+    assert_eq!(result.thread.native_session_id, "native_existing");
     assert_eq!(
         adapter.calls,
         vec![
@@ -142,32 +127,20 @@ fn dispatch_proposal_accepts_native_session_id_selector() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths).unwrap();
-    let task = create_packaged_task(&runtime, 457);
-    let _session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "codex".to_string(),
-            native_session_id: "native_existing_457".to_string(),
-            issue_task_id: Some(task.id.clone()),
-            display_name: "old".to_string(),
-            goal: None,
-            status: AgentSessionStatus::Idle,
-            metadata_json: json!({}),
-        })
-        .unwrap();
+    create_packaged_task(&runtime, 457);
 
     let proposal = runtime
         .propose_dispatch(DispatchProposalRequest {
             issue: "owner/repo#457".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: Some("native_existing_457".to_string()),
+            selected_thread_id: Some("native_existing_457".to_string()),
             new_session: false,
         })
         .unwrap();
 
     assert_eq!(
-        proposal.run.selected_session_link_id.as_deref(),
+        proposal.run.selected_thread_id.as_deref(),
         Some("native_existing_457")
     );
     assert_eq!(
@@ -201,7 +174,7 @@ fn dispatch_proposal_records_actual_new_session_mode_when_flag_is_omitted() {
             issue: "owner/repo#458".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: false,
         })
         .unwrap();
@@ -241,7 +214,7 @@ fn dispatch_proposal_auto_imports_ready_handoff_from_inbox() {
             issue: "owner/repo#458".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap_err();
@@ -314,7 +287,7 @@ fn dispatch_auto_import_rejects_mismatched_inbox_handoff_payload() {
             issue: "owner/repo#459".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap_err();
@@ -338,7 +311,7 @@ fn execution_records_needs_user_when_native_turn_waits_for_approval() {
             issue: "owner/repo#555".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -372,7 +345,7 @@ fn execution_requires_approved_dispatch() {
             issue: "owner/repo#789".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -404,7 +377,7 @@ fn execution_records_structured_failure_and_trace_timeline() {
             issue: "owner/repo#790".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -455,7 +428,7 @@ fn dispatch_approval_marks_issue_task_dispatched() {
             issue: "owner/repo#246".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -474,37 +447,25 @@ fn dispatch_approval_marks_issue_task_dispatched() {
 }
 
 #[test]
-fn dispatch_proposal_rejects_new_session_with_selected_session() {
+fn dispatch_proposal_rejects_new_session_with_selected_thread() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths).unwrap();
-    let task = create_packaged_task(&runtime, 654);
-    let session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "codex".to_string(),
-            native_session_id: "native_existing".to_string(),
-            issue_task_id: Some(task.id),
-            display_name: "old".to_string(),
-            goal: None,
-            status: AgentSessionStatus::Idle,
-            metadata_json: json!({}),
-        })
-        .unwrap();
+    create_packaged_task(&runtime, 654);
 
     let error = runtime
         .propose_dispatch(DispatchProposalRequest {
             issue: "owner/repo#654".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: Some(session.id),
+            selected_thread_id: Some("native_existing".to_string()),
             new_session: true,
         })
         .unwrap_err();
 
     assert!(error
         .to_string()
-        .contains("new_session cannot be combined with selected_session_link_id"));
+        .contains("new_session cannot be combined with selected_thread_id"));
 }
 
 #[test]
@@ -539,7 +500,7 @@ fn dispatch_proposal_rejects_agent_without_required_capability() {
             issue: "owner/repo#987".to_string(),
             agent_id: "limited-agent".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap_err();

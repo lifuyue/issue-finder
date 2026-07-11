@@ -24,7 +24,7 @@ fn dispatch_approval_resolution_records_memory_signals() {
             issue: "owner/repo#123".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -48,7 +48,7 @@ fn dispatch_approval_resolution_records_memory_signals() {
             issue: "owner/repo#123".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();
@@ -102,7 +102,7 @@ fn issue_review_rejection_records_memory_and_blocks_dispatch() {
             issue: "owner/repo#456".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap_err();
@@ -126,7 +126,7 @@ fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
             issue: "owner/repo#456".to_string(),
             agent_id: "codex".to_string(),
             requested_by: "test".to_string(),
-            selected_session_link_id: None,
+            selected_thread_id: None,
             new_session: true,
         })
         .unwrap();

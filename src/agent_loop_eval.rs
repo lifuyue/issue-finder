@@ -13,10 +13,10 @@ use crate::dispatch::adapters::{
 };
 use crate::dispatch::execution::execute_approved_dispatch;
 use crate::dispatch::{
-    AgentSessionStatus, ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind,
-    DispatchOutcomeRecordRequest, DispatchProposalRequest, DispatchRunStatus, DispatchTaskClass,
-    DispatchValidationOutcome, GitHubCommentWriter, GitHubInteractionStatus, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, NewAgentSessionLink, NewIssueTask, PostedGitHubComment,
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchOutcomeRecordRequest,
+    DispatchProposalRequest, DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome,
+    GitHubCommentWriter, GitHubInteractionStatus, IssueTaskPackage, IssueTaskPackageIssue,
+    IssueTaskStatus, NewIssueTask, PostedGitHubComment,
 };
 use crate::github::GitHubIssue;
 use crate::github_enrichment::EnrichedIssue;
@@ -183,7 +183,7 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
         issue: "owner/repo#101".to_string(),
         agent_id: "codex".to_string(),
         requested_by: "agent_loop_eval".to_string(),
-        selected_session_link_id: None,
+        selected_thread_id: None,
         new_session: true,
     })?;
     runtime.resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)?;
@@ -383,21 +383,12 @@ fn github_policy_observations() -> Result<Vec<String>> {
 fn session_resume_observations() -> Result<Vec<String>> {
     let home = EvalHome::new("session-resume")?;
     let runtime = crate::dispatch::DispatchRuntime::open(home.paths.clone())?;
-    let task = create_packaged_task(&runtime, 505)?;
-    let session = runtime.store().create_session_link(NewAgentSessionLink {
-        agent_id: "codex".to_string(),
-        native_session_id: "native_existing_505".to_string(),
-        issue_task_id: Some(task.id.clone()),
-        display_name: "old session".to_string(),
-        goal: None,
-        status: AgentSessionStatus::Idle,
-        metadata_json: json!({}),
-    })?;
+    create_packaged_task(&runtime, 505)?;
     let proposal = runtime.propose_dispatch(DispatchProposalRequest {
         issue: "owner/repo#505".to_string(),
         agent_id: "codex".to_string(),
         requested_by: "agent_loop_eval".to_string(),
-        selected_session_link_id: Some("native_existing_505".to_string()),
+        selected_thread_id: Some("native_existing_505".to_string()),
         new_session: false,
     })?;
     runtime.resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)?;
@@ -405,7 +396,7 @@ fn session_resume_observations() -> Result<Vec<String>> {
     let execution = execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id)?;
 
     let mut observations = Vec::new();
-    if proposal.run.selected_session_link_id.as_deref() == Some("native_existing_505") {
+    if proposal.run.selected_thread_id.as_deref() == Some("native_existing_505") {
         observations.push("explicit_native_thread_id_preserved".to_string());
     }
     if adapter
@@ -418,8 +409,7 @@ fn session_resume_observations() -> Result<Vec<String>> {
     if execution.run.status == DispatchRunStatus::Running {
         observations.push("resumed_session_started_agent_turn".to_string());
     }
-    if execution.session.id == session.id && execution.session.status == AgentSessionStatus::Active
-    {
+    if execution.thread.native_session_id == "native_existing_505" {
         observations.push("native_thread_remains_continuity_anchor".to_string());
     }
     Ok(observations)

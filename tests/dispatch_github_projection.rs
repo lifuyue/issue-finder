@@ -250,7 +250,7 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
             status: DispatchRunStatus::Completed,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     let fix_result = runtime
@@ -334,7 +334,7 @@ fn final_github_comment_requires_explicit_suggested_reply() {
             status: DispatchRunStatus::Completed,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     let fix_result = runtime
@@ -395,7 +395,7 @@ fn context_gap_with_suggested_reply_drafts_clarification_comment() {
             status: DispatchRunStatus::NeedsUser,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
-            selected_session_link_id: None,
+            selected_thread_id: None,
         })
         .unwrap();
     let fix_result = runtime

@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
-    AgentCapabilityName, AgentSessionStatus, ApprovalStatus, CapabilityStatus, DispatchEventKind,
+    AgentCapabilityName, ApprovalStatus, CapabilityStatus, DispatchEventKind,
     DispatchEventSeverity, DispatchEventSource, DispatchRunStatus, DispatchRuntime,
     DispatchSubjectType, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus,
-    NewAgentCapability, NewAgentProfile, NewAgentSessionLink, NewArtifact, NewDispatchEvent,
-    NewDispatchRun, NewIssueTask,
+    NewAgentCapability, NewAgentProfile, NewArtifact, NewDispatchEvent, NewDispatchRun,
+    NewIssueTask,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff, WrittenHandoff};
@@ -244,18 +244,7 @@ async fn dispatch_read_tools_use_local_state_only() {
             category: Some("high_value_ready".to_string()),
         })
         .unwrap();
-    let session = runtime
-        .store()
-        .create_session_link(NewAgentSessionLink {
-            agent_id: "codex".to_string(),
-            native_session_id: "thread_123".to_string(),
-            issue_task_id: Some(task.id.clone()),
-            display_name: "issue-finder: owner/repo#123 - Fix parser panic".to_string(),
-            goal: Some("Fix owner/repo#123".to_string()),
-            status: AgentSessionStatus::Linked,
-            metadata_json: serde_json::json!({ "threadId": "thread_123" }),
-        })
-        .unwrap();
+    let thread_id = "thread_123".to_string();
     let run = runtime
         .store()
         .create_dispatch_run(NewDispatchRun {
@@ -264,18 +253,18 @@ async fn dispatch_read_tools_use_local_state_only() {
             status: DispatchRunStatus::Proposed,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Pending,
-            selected_session_link_id: Some(session.id.clone()),
+            selected_thread_id: Some(thread_id.clone()),
         })
         .unwrap();
     runtime
         .store()
         .append_dispatch_event(NewDispatchEvent {
             run_id: Some(run.id.clone()),
-            session_link_id: Some(session.id),
+            thread_id: Some(thread_id),
             issue_task_id: Some(task.id.clone()),
             event_kind: DispatchEventKind::Legacy,
-            subject_type: DispatchSubjectType::Session,
-            subject_id: run.selected_session_link_id.clone(),
+            subject_type: DispatchSubjectType::Thread,
+            subject_id: run.selected_thread_id.clone(),
             source: DispatchEventSource::Runtime,
             severity: DispatchEventSeverity::Info,
             correlation_id: Some(run.id.clone()),

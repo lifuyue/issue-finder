@@ -75,7 +75,7 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             "fix_result.json".to_string(),
             "patch".to_string(),
             "pr_link".to_string(),
-            "session_link".to_string(),
+            "thread_id".to_string(),
             "validation_log".to_string(),
         ],
         callback: A2aCallbackPolicy {
