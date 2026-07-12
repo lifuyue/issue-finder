@@ -17,6 +17,7 @@ use crate::dispatch::adapters::codex_app_server::{
 };
 
 const QUEUE_CAPACITY: usize = 128;
+const DEFAULT_RPC_TIMEOUT_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppServerTransportMode {
@@ -69,7 +70,9 @@ impl AppServerClient {
             .as_deref()
         {
             Some("stdio") => AppServerTransportMode::Stdio,
+            Some("daemon") => AppServerTransportMode::DaemonSocket,
             Some(other) => anyhow::bail!("unsupported ISSUE_FINDER_CODEX_TRANSPORT {other}"),
+            None if !codex_config_override_args().is_empty() => AppServerTransportMode::Stdio,
             None => AppServerTransportMode::DaemonSocket,
         };
         match mode {
@@ -179,15 +182,22 @@ impl AppServerClient {
     }
 
     pub async fn request(&self, method: impl Into<String>, params: Value) -> Result<Value> {
+        let method = method.into();
+        let timeout = rpc_timeout();
         let (reply, rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::Request {
-                method: method.into(),
+        tokio::time::timeout(
+            timeout,
+            self.command_tx.send(ClientCommand::Request {
+                method: method.clone(),
                 params,
                 reply,
-            })
-            .await?;
-        rx.await?
+            }),
+        )
+        .await
+        .with_context(|| format!("timed out queueing app-server {method}"))??;
+        tokio::time::timeout(timeout, rx)
+            .await
+            .with_context(|| format!("timed out waiting for app-server {method}"))??
     }
 
     pub async fn respond(
@@ -196,10 +206,17 @@ impl AppServerClient {
         result: std::result::Result<Value, Value>,
     ) -> Result<()> {
         let (reply, rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::Respond { id, result, reply })
-            .await?;
-        rx.await?
+        let timeout = rpc_timeout();
+        tokio::time::timeout(
+            timeout,
+            self.command_tx
+                .send(ClientCommand::Respond { id, result, reply }),
+        )
+        .await
+        .context("timed out queueing app-server response")??;
+        tokio::time::timeout(timeout, rx)
+            .await
+            .context("timed out waiting for app-server response acknowledgement")??
     }
 
     pub async fn next_event(&mut self) -> Option<AppServerEvent> {
@@ -215,6 +232,15 @@ impl AppServerClient {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await;
         self.worker.abort();
     }
+}
+
+fn rpc_timeout() -> std::time::Duration {
+    let seconds = std::env::var("ISSUE_FINDER_CODEX_RPC_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_RPC_TIMEOUT_SECONDS);
+    std::time::Duration::from_secs(seconds)
 }
 
 fn codex_control_socket_path() -> PathBuf {

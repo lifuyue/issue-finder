@@ -56,6 +56,31 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
                 println!("threadId={thread_id} turnId={}", started.turn_id);
                 return;
             }
+            if let Some(turn) = check.latest_turn(&thread_id).unwrap() {
+                if matches!(turn.status.as_str(), "interrupted" | "failed" | "canceled") {
+                    let items = check.items(&thread_id).unwrap();
+                    assert!(items.iter().any(|item| {
+                        item.item_type == "userMessage"
+                            && item.payload.to_string().contains(&marker)
+                    }));
+                    assert_eq!(
+                        items
+                            .iter()
+                            .filter(|item| {
+                                item.item_type == "userMessage"
+                                    && item.payload.to_string().contains(&marker)
+                            })
+                            .count(),
+                        1,
+                        "disconnect recovery must not duplicate the submitted user turn"
+                    );
+                    println!(
+                        "threadId={thread_id} turnId={} recoveredAs=needs_user status={}",
+                        started.turn_id, turn.status
+                    );
+                    return;
+                }
+            }
         }
         panic!("timed out waiting for native runtime response");
     });
@@ -194,7 +219,7 @@ fn real_daemon_approval_request_is_persisted_and_declined() {
                 .into_iter()
                 .find(|request| request.method.contains("requestApproval"))
             {
-                let id = serde_json::from_str(&request.id).unwrap();
+                let id = request.wire_id;
                 manager.decide_approval(id, "decline").await.unwrap();
                 let _ = manager.interrupt(&thread_id, &turn.turn_id).await;
                 println!(

@@ -99,7 +99,11 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
         })
         .unwrap();
     let result_path = dir.path().join("fix_result.json");
-    std::fs::write(&result_path, r#"{"summary":"fixed"}"#).unwrap();
+    std::fs::write(
+        &result_path,
+        r#"{"status":"fix_ready","summary":"fixed","validationOutcome":"passed"}"#,
+    )
+    .unwrap();
 
     let imported = runtime
         .import_a2a_result(

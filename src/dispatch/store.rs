@@ -426,6 +426,23 @@ impl DispatchStore {
         self.get_dispatch_run(run_id)
     }
 
+    pub fn claim_dispatch_run_for_execution(&self, run_id: &str) -> Result<DispatchRun> {
+        let started_at = now();
+        let changed = self.conn.execute(
+            "UPDATE dispatch_runs SET status='starting', started_at=COALESCE(started_at,?2), failure_reason=NULL WHERE id=?1 AND status='approved' AND approval_state='approved'",
+            params![run_id, started_at],
+        )?;
+        if changed != 1 {
+            let run = self.get_dispatch_run(run_id)?;
+            anyhow::bail!(
+                "dispatch run {run_id} cannot be executed from status {} with approval {}",
+                run.status,
+                run.approval_state
+            );
+        }
+        self.get_dispatch_run(run_id)
+    }
+
     pub fn record_dispatch_run_outcome(
         &self,
         input: NewDispatchRunOutcome,

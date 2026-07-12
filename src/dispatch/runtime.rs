@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::paths::IssueFinderPaths;
@@ -220,6 +220,21 @@ impl DispatchRuntime {
         let outcome_request = outcome.or_else(|| {
             status.and_then(|status| {
                 terminal_outcome_for_status(status).map(|outcome_kind| {
+                    let inferred_validation = if outcome_kind == DispatchOutcomeKind::FixReady {
+                        self.store
+                            .read_artifact_bytes(&result.artifact.id)
+                            .ok()
+                            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                            .and_then(|value| {
+                                value
+                                    .get("validationOutcome")
+                                    .or_else(|| value.pointer("/validation/outcome"))
+                                    .and_then(Value::as_str)
+                                    .and_then(DispatchValidationOutcome::parse_value)
+                            })
+                    } else {
+                        None
+                    };
                     DispatchOutcomeRecordRequest {
                         run_id: run_id.to_string(),
                         idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
@@ -227,7 +242,7 @@ impl DispatchRuntime {
                         failure_class: None,
                         failure_detail: None,
                         task_class: None,
-                        validation_outcome: None,
+                        validation_outcome: inferred_validation,
                         result_artifact_id: Some(result.artifact.id.clone()),
                         metadata_json: json!({
                             "source": "a2a_import_result",
@@ -369,6 +384,8 @@ impl DispatchRuntime {
         request: DispatchOutcomeRecordRequest,
     ) -> Result<DispatchOutcomeRecordResult> {
         let run = self.store.get_dispatch_run(&request.run_id)?;
+        let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
+        super::outcome_validator::validate_outcome(&self.store, &run, &issue_task, &request)?;
         let already_recorded = self
             .store
             .find_dispatch_run_outcome_by_run(&run.id)?
@@ -444,6 +461,45 @@ impl DispatchRuntime {
 
     pub fn execute_dispatch(&self, run_id: &str) -> Result<DispatchExecutionResult> {
         execute_approved_codex_app_server_dispatch(&self.store, run_id)
+    }
+
+    pub fn sync_dispatch(&self, run_id: &str) -> Result<DispatchStatusSnapshot> {
+        let run = self.store.get_dispatch_run(run_id)?;
+        if let Some(thread_id) = run.selected_thread_id.as_deref() {
+            let runtime = tokio::runtime::Runtime::new()?;
+            let native_store = super::native_runtime::NativeThreadStore::open(&self.store.paths())?;
+            let manager = runtime.block_on(super::native_runtime::NativeThreadManager::connect(
+                native_store,
+            ))?;
+            runtime.block_on(manager.reconcile(thread_id))?;
+            let check = super::native_runtime::NativeThreadStore::open(&self.store.paths())?;
+            if let Some(turn) = check.latest_turn(thread_id)? {
+                let normalized = turn.status.trim().to_ascii_lowercase().replace('-', "_");
+                if matches!(
+                    normalized.as_str(),
+                    "needs_user" | "needs_approval" | "waiting_for_approval"
+                ) {
+                    self.store.update_dispatch_run_status(
+                        run_id,
+                        DispatchRunStatus::NeedsUser,
+                        None,
+                    )?;
+                } else if matches!(
+                    normalized.as_str(),
+                    "failed" | "error" | "interrupted" | "canceled"
+                ) {
+                    self.store.update_dispatch_run_status(
+                        run_id,
+                        DispatchRunStatus::Failed,
+                        Some(format!(
+                            "native turn {} ended with {}",
+                            turn.id, turn.status
+                        )),
+                    )?;
+                }
+            }
+        }
+        self.dispatch_status(run_id)
     }
 
     pub fn draft_github_tracking_comment(
@@ -576,14 +632,8 @@ fn codex_capabilities() -> Vec<(AgentCapabilityName, CapabilityStatus, serde_jso
                 mapping.capability,
                 AgentCapabilityName::StartSession
                     | AgentCapabilityName::ResumeSession
-                    | AgentCapabilityName::ForkSession
                     | AgentCapabilityName::RenameSession
-                    | AgentCapabilityName::ListSessions
-                    | AgentCapabilityName::SearchSessions
-                    | AgentCapabilityName::ReadTranscript
                     | AgentCapabilityName::SetGoal
-                    | AgentCapabilityName::SetMetadata
-                    | AgentCapabilityName::ArchiveSession
             );
             if wired_to_runtime {
                 (

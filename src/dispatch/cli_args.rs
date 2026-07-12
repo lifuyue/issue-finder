@@ -81,6 +81,8 @@ pub enum DispatchCommand {
     Reject(DispatchApprovalArgs),
     /// Execute an approved dispatch through the run's native adapter.
     Execute(DispatchExecuteArgs),
+    /// Reconcile one non-terminal dispatch with its native Codex thread.
+    Sync(DispatchStatusArgs),
     /// Map task packages and results to local A2A artifacts.
     A2a(DispatchA2aArgs),
     /// Record a normalized dispatch outcome.

@@ -567,6 +567,47 @@ fn dispatch_store_persists_outcomes_idempotently_and_rejects_conflicts() {
     assert!(conflict.to_string().contains("already has outcome"));
 }
 
+#[test]
+fn dispatch_execution_claim_is_single_winner() {
+    let dir = tempdir().unwrap();
+    let store = DispatchStore::open(test_paths(dir.path())).unwrap();
+    seed_agent(&store);
+    let task = store
+        .upsert_issue_task(NewIssueTask {
+            repo_full_name: "owner/repo".to_string(),
+            issue_number: 100,
+            title: "Atomic claim".to_string(),
+            url: "https://github.com/owner/repo/issues/100".to_string(),
+            status: IssueTaskStatus::Dispatched,
+            priority: None,
+            category: None,
+        })
+        .unwrap();
+    let run = store
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id,
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Approved,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_thread_id: None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        store
+            .claim_dispatch_run_for_execution(&run.id)
+            .unwrap()
+            .status,
+        DispatchRunStatus::Starting
+    );
+    assert!(store
+        .claim_dispatch_run_for_execution(&run.id)
+        .unwrap_err()
+        .to_string()
+        .contains("cannot be executed"));
+}
+
 fn seed_agent(store: &DispatchStore) {
     store
         .create_agent_profile(NewAgentProfile {

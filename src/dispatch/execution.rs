@@ -35,8 +35,7 @@ where
     A: NativeExecutionAdapter,
 {
     let context = prepare_execution_context(store, run_id)?;
-    let starting_run =
-        store.update_dispatch_run_status(&context.run.id, DispatchRunStatus::Starting, None)?;
+    let starting_run = store.claim_dispatch_run_for_execution(&context.run.id)?;
     match execute_started_dispatch(store, adapter, context, starting_run) {
         Ok(result) => Ok(result),
         Err(error) => {
@@ -229,7 +228,6 @@ fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<Exec
     };
     ensure_capability(store, &run.agent_id, required_capability)?;
     ensure_capability(store, &run.agent_id, AgentCapabilityName::SetGoal)?;
-    ensure_capability(store, &run.agent_id, AgentCapabilityName::SetMetadata)?;
 
     Ok(ExecutionContext {
         run,

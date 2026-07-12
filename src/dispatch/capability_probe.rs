@@ -87,10 +87,13 @@ fn record_probe(
         });
     let binary_unavailable = startup_probe_status == Some("binary_unavailable");
     let handshake_failed = startup_probe_status == Some("handshake_failed");
+    let handshake_succeeded = startup_probe_status == Some("handshake_succeeded");
     let status = if capability.status == CapabilityStatus::Unsupported {
         AdapterProbeStatus::Unsupported
     } else if binary_unavailable || handshake_failed {
         AdapterProbeStatus::Failed
+    } else if adapter == "codex_app_server" && handshake_succeeded {
+        AdapterProbeStatus::Unverified
     } else {
         AdapterProbeStatus::Supported
     };
@@ -107,6 +110,8 @@ fn record_probe(
         Some("binary_unavailable".to_string())
     } else if handshake_failed {
         Some("app_server_handshake_failed".to_string())
+    } else if status == AdapterProbeStatus::Unverified {
+        Some("method_conformance_not_run".to_string())
     } else {
         None
     };

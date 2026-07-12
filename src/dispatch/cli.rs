@@ -100,6 +100,10 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
             let result = runtime.execute_dispatch(&args.run_id)?;
             render_cli_output(args.json, &result, || render_dispatch_execution(&result))
         }
+        Some(DispatchCommand::Sync(args)) => {
+            let result = runtime.sync_dispatch(&args.run_id)?;
+            render_cli_output(args.json, &result, || render_dispatch_status(&result))
+        }
         Some(DispatchCommand::A2a(args)) => match args.command {
             DispatchA2aCommand::Export(args) => {
                 let result = runtime.export_a2a_task(&args.issue)?;

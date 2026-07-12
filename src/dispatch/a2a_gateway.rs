@@ -10,8 +10,7 @@ use super::events::dispatch_run_event;
 use super::model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, ApprovalRequest,
     ApprovalStatus, ApprovalType, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchRun, DispatchRunOutcome, DispatchRunStatus, IssueTask, IssueTaskStatus,
-    NewApprovalRequest, NewArtifact,
+    DispatchRun, DispatchRunOutcome, DispatchRunStatus, IssueTask, NewApprovalRequest, NewArtifact,
 };
 use super::store::DispatchStore;
 
@@ -173,13 +172,8 @@ pub fn import_result(
     if kind == "fix_result" {
         store.set_dispatch_run_result_artifact(&run.id, &artifact.id)?;
     }
-    let run = match status {
-        Some(status) => store.update_dispatch_run_status(&run.id, status, None)?,
-        None => store.get_dispatch_run(&run.id)?,
-    };
-    if kind == "fix_result" && run.status == DispatchRunStatus::Completed {
-        store.update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
-    }
+    let _ = status;
+    let run = store.get_dispatch_run(&run.id)?;
 
     Ok(A2aResultImport {
         run,

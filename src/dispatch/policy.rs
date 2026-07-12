@@ -25,7 +25,6 @@ pub fn classify_action(action: PolicyAction) -> PolicyDecision {
             vec![
                 AgentCapabilityName::StartSession,
                 AgentCapabilityName::SetGoal,
-                AgentCapabilityName::SetMetadata,
             ],
             "dispatch to an execution agent requires approval",
         ),
@@ -36,7 +35,6 @@ pub fn classify_action(action: PolicyAction) -> PolicyDecision {
             vec![
                 AgentCapabilityName::ResumeSession,
                 AgentCapabilityName::SetGoal,
-                AgentCapabilityName::SetMetadata,
             ],
             "resuming a native execution session for a task requires approval",
         ),

@@ -75,10 +75,12 @@ reference pass.
 
 Verified runs in this implementation round:
 
-1. Inspect ran 15 canonical tasks in Docker with every scorer and termination passing,
-   zero unexpected GitHub requests, and no Issue Finder worktree change. Four sandboxes
-   were configured; sample timestamps proved a peak overlap of three, so the report does
-   not overclaim concurrency four.
+1. Inspect ran all 40 Inspect-eligible canonical reference/conformance tasks in Docker in
+   `runs/20260712T153045Z`: 40/40 passed every scorer and hard gate with four configured
+   sandboxes. A retained earlier failure exposed that integration oracles depended on an
+   unavailable Cargo workspace; the image now supplies release-built test executables to
+   the isolated harness instead of weakening the oracle. This proves harness/product
+   contract consistency; it is not reported as model or agent capability.
 2. Harbor ran F01, F02, F03, and D01 with separate no-network verifier containers and
    scalar plus dimensional rewards of 1.0.
 3. Harbor's F01 no-op negative control completed without verifier exception and received
@@ -92,6 +94,23 @@ Verified runs in this implementation round:
    isolated synthetic Rust repositories. C01, C02, C03, and C04 each received reward 1.0
    from separate verifier containers; C03 correctly requested missing context without a
    source change, and C04 honestly reported the injected validation failure.
+7. After runtime hardening, Harbor reran D07 with separate agent and verifier images and
+   no product source mounted. Outcome, policy, safety, artifact, recovery, and measured
+   efficiency rewards were all 1.0. Capability completion is additionally gated by a
+   versioned evidence registry rather than generated-directory presence.
+
+The runtime hardening adds an atomic single-winner dispatch claim, idempotent native
+outbox behavior, connection-epoch-scoped approval requests, bounded async JSON-RPC calls,
+explicit reconciliation, and a product-owned outcome validator. `fix_ready` is accepted
+only when the result artifact belongs to the current run and issue and contains a passed
+`fix_result` validation outcome. A disconnect may honestly reconcile to `needs_user`;
+the benchmark forbids duplicate user messages and does not relabel interruption as
+recovery success.
+
+The verifier fails closed when an authoritative artifact root, complete observed-domain
+manifest, native events, non-empty ATIF trajectory, or digest-bound artifact is absent.
+Self-reporting the expected outcome without those independent files receives zero reward;
+an adversarial regression test locks this boundary.
 
 The subsequent native-runtime recheck installed the official standalone Codex 0.144.1 and
 proved an authenticated daemon round trip. Failed repetitions exposed two independent

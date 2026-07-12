@@ -230,6 +230,7 @@ string_enum!(PolicyRequirement {
 
 string_enum!(AdapterProbeStatus {
     Supported => "supported",
+    Unverified => "unverified",
     Unsupported => "unsupported",
     Failed => "failed",
 });

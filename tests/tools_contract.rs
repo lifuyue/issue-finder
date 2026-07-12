@@ -338,7 +338,17 @@ async fn dispatch_read_tools_use_local_state_only() {
         Some("handshake_failed") => assert!(startup["probe"]["error"].is_string()),
         other => panic!("unexpected Codex startup probe status: {other:?}"),
     }
-    for unsupported_capability in ["interrupt_run", "review_mode", "stream_events"] {
+    for unsupported_capability in [
+        "fork_session",
+        "list_sessions",
+        "search_sessions",
+        "read_transcript",
+        "set_metadata",
+        "archive_session",
+        "interrupt_run",
+        "review_mode",
+        "stream_events",
+    ] {
         assert!(
             capability_items.iter().any(|item| {
                 item["capability"] == unsupported_capability && item["status"] == "unsupported"
@@ -349,14 +359,8 @@ async fn dispatch_read_tools_use_local_state_only() {
     for experimental_capability in [
         "start_session",
         "resume_session",
-        "fork_session",
         "rename_session",
-        "list_sessions",
-        "search_sessions",
-        "read_transcript",
         "set_goal",
-        "set_metadata",
-        "archive_session",
     ] {
         assert!(
             capability_items.iter().any(|item| {
@@ -695,7 +699,11 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
     );
 
     let result_path = dir.path().join("fix_result.json");
-    fs::write(&result_path, r#"{"summary":"fixed in local artifact"}"#).unwrap();
+    fs::write(
+        &result_path,
+        r#"{"status":"fix_ready","summary":"fixed in local artifact","validationOutcome":"passed"}"#,
+    )
+    .unwrap();
     let import_result_args = serde_json::json!({
         "runId": run_id,
         "path": result_path,

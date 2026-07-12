@@ -17,17 +17,22 @@ pub struct StartedTurn {
 pub struct NativeThreadManager {
     client: AppServerClient,
     store: NativeThreadStore,
+    connection_epoch: String,
 }
 
 impl NativeThreadManager {
     pub async fn connect(store: NativeThreadStore) -> Result<Self> {
+        store.orphan_pending_server_requests()?;
         Ok(Self {
             client: AppServerClient::connect().await?,
             store,
+            connection_epoch: connection_epoch(),
         })
     }
     pub async fn reconnect(&mut self, thread_ids: &[String]) -> Result<()> {
+        self.store.orphan_pending_server_requests()?;
         self.client = AppServerClient::connect().await?;
+        self.connection_epoch = connection_epoch();
         for thread_id in thread_ids {
             self.resume(thread_id).await?;
             self.reconcile(thread_id).await?;
@@ -79,13 +84,36 @@ impl NativeThreadManager {
     pub async fn send(&self, request: SendTurnRequest) -> Result<StartedTurn> {
         let outbox_id = format!("outbox:{}", request.client_user_message_id);
         let payload = json!({"threadId":request.thread_id,"clientUserMessageId":request.client_user_message_id,"input":[{"type":"text","text":request.prompt}],"cwd":request.cwd,"runtimeWorkspaceRoots":[request.cwd],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[request.cwd],"networkAccess":false}});
-        self.store.enqueue(
+        let inserted = self.store.enqueue(
             &outbox_id,
             &request.thread_id,
             "turn/start",
             Some(&request.client_user_message_id),
             &payload,
         )?;
+        if !inserted {
+            let existing = self
+                .store
+                .outbox_entry(&outbox_id)?
+                .context("native outbox entry disappeared")?;
+            if existing.thread_id != request.thread_id || existing.payload != payload {
+                anyhow::bail!("native outbox idempotency conflict for {outbox_id}");
+            }
+            if existing.status == "sent" {
+                let turn_id = existing
+                    .turn_id
+                    .context("sent native outbox entry has no turn id")?;
+                return Ok(StartedTurn {
+                    thread_id: request.thread_id,
+                    turn_id,
+                    client_user_message_id: request.client_user_message_id,
+                });
+            }
+            anyhow::bail!(
+                "native outbox {outbox_id} has uncertain status {}; reconcile before retry",
+                existing.status
+            );
+        }
         let value = self.client.request("turn/start", payload).await?;
         let turn = value.get("turn").context("turn/start missing turn")?;
         self.store.upsert_turn(&request.thread_id, turn)?;
@@ -164,8 +192,11 @@ impl NativeThreadManager {
                 },
             )?,
             AppServerEvent::ServerRequest(request) => {
+                let scoped_id = format!("{}:{}", self.connection_epoch, request.id);
                 self.store.record_server_request(
-                    &request.id.to_string(),
+                    &scoped_id,
+                    &self.connection_epoch,
+                    &request.id,
                     &request.method,
                     &request.params,
                 )?;
@@ -196,7 +227,7 @@ impl NativeThreadManager {
             .respond(id.clone(), Ok(response.clone()))
             .await?;
         self.store
-            .resolve_server_request(&id.to_string(), &response)
+            .resolve_server_request(&format!("{}:{}", self.connection_epoch, id), &response)
     }
     pub async fn answer_user_input(&self, id: Value, answers: Value) -> Result<()> {
         let response = json!({"answers": answers});
@@ -204,18 +235,25 @@ impl NativeThreadManager {
             .respond(id.clone(), Ok(response.clone()))
             .await?;
         self.store
-            .resolve_server_request(&id.to_string(), &response)
+            .resolve_server_request(&format!("{}:{}", self.connection_epoch, id), &response)
     }
     pub async fn resolve_mcp_elicitation(&self, id: Value, response: Value) -> Result<()> {
         self.client
             .respond(id.clone(), Ok(response.clone()))
             .await?;
         self.store
-            .resolve_server_request(&id.to_string(), &response)
+            .resolve_server_request(&format!("{}:{}", self.connection_epoch, id), &response)
     }
     pub async fn shutdown(self) {
         self.client.shutdown().await
     }
+}
+fn connection_epoch() -> String {
+    format!(
+        "{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    )
 }
 fn lossless(method: &str) -> bool {
     matches!(

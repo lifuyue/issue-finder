@@ -21,7 +21,7 @@ fn native_store_projects_thread_turn_item_and_outbox_into_one_database() {
             &json!({"id":"item-1","type":"agentMessage","text":"ok"}),
         )
         .unwrap();
-    store
+    assert!(store
         .enqueue(
             "outbox-1",
             "thread-1",
@@ -29,7 +29,16 @@ fn native_store_projects_thread_turn_item_and_outbox_into_one_database() {
             Some("client-1"),
             &json!({"input":[]}),
         )
-        .unwrap();
+        .unwrap());
+    assert!(!store
+        .enqueue(
+            "outbox-1",
+            "thread-1",
+            "turn/start",
+            Some("client-1"),
+            &json!({"input":[]}),
+        )
+        .unwrap());
     store.mark_sent("outbox-1", Some("turn-1")).unwrap();
     assert_eq!(
         store.thread("thread-1").unwrap().unwrap().name.as_deref(),

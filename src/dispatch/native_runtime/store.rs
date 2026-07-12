@@ -38,7 +38,16 @@ pub struct NativeItem {
 #[serde(rename_all = "camelCase")]
 pub struct NativePendingRequest {
     pub id: String,
+    pub wire_id: Value,
     pub method: String,
+    pub payload: Value,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeOutboxEntry {
+    pub id: String,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub status: String,
     pub payload: Value,
 }
 
@@ -69,6 +78,21 @@ impl NativeThreadStore {
         CREATE INDEX IF NOT EXISTS idx_native_events_thread ON native_runtime_events(thread_id,sequence);
     "#)?;
         self.migrate_native_items_identity()?;
+        self.ensure_pending_request_scope_columns()?;
+        Ok(())
+    }
+    fn ensure_pending_request_scope_columns(&self) -> Result<()> {
+        let columns = self
+            .conn
+            .prepare("PRAGMA table_info(native_pending_server_requests)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !columns.iter().any(|name| name == "connection_epoch") {
+            self.conn.execute("ALTER TABLE native_pending_server_requests ADD COLUMN connection_epoch TEXT NOT NULL DEFAULT 'legacy'",[])?;
+        }
+        if !columns.iter().any(|name| name == "wire_id_json") {
+            self.conn.execute("ALTER TABLE native_pending_server_requests ADD COLUMN wire_id_json TEXT NOT NULL DEFAULT 'null'",[])?;
+        }
         Ok(())
     }
     fn migrate_native_items_identity(&self) -> Result<()> {
@@ -200,10 +224,29 @@ impl NativeThreadStore {
         method: &str,
         client_id: Option<&str>,
         payload: &Value,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let now = Utc::now().to_rfc3339();
-        self.conn.execute("INSERT OR IGNORE INTO native_outbox(id,thread_id,method,client_message_id,payload_json,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'pending',?6,?6)",params![id,thread_id,method,client_id,payload.to_string(),now])?;
-        Ok(())
+        let changed = self.conn.execute("INSERT OR IGNORE INTO native_outbox(id,thread_id,method,client_message_id,payload_json,status,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'pending',?6,?6)",params![id,thread_id,method,client_id,payload.to_string(),now])?;
+        Ok(changed == 1)
+    }
+    pub fn outbox_entry(&self, id: &str) -> Result<Option<NativeOutboxEntry>> {
+        self.conn
+            .query_row(
+                "SELECT id,thread_id,turn_id,status,payload_json FROM native_outbox WHERE id=?1",
+                params![id],
+                |row| {
+                    Ok(NativeOutboxEntry {
+                        id: row.get(0)?,
+                        thread_id: row.get(1)?,
+                        turn_id: row.get(2)?,
+                        status: row.get(3)?,
+                        payload: serde_json::from_str(&row.get::<_, String>(4)?)
+                            .unwrap_or(Value::Null),
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
     pub fn mark_sent(&self, id: &str, turn_id: Option<&str>) -> Result<()> {
         self.conn.execute("UPDATE native_outbox SET status='sent',turn_id=?2,attempts=attempts+1,updated_at=?3 WHERE id=?1",params![id,turn_id,Utc::now().to_rfc3339()])?;
@@ -211,16 +254,22 @@ impl NativeThreadStore {
     }
     pub fn record_server_request(
         &self,
-        request_id: &str,
+        scoped_id: &str,
+        connection_epoch: &str,
+        wire_id: &Value,
         method: &str,
         payload: &Value,
     ) -> Result<()> {
-        self.conn.execute("INSERT OR REPLACE INTO native_pending_server_requests(id,method,payload_json,status,created_at) VALUES(?1,?2,?3,'pending',?4)",params![request_id,method,payload.to_string(),Utc::now().to_rfc3339()])?;
+        let thread_id = payload.get("threadId").and_then(Value::as_str);
+        self.conn.execute("INSERT INTO native_pending_server_requests(id,thread_id,method,payload_json,status,created_at,connection_epoch,wire_id_json) VALUES(?1,?2,?3,?4,'pending',?5,?6,?7)",params![scoped_id,thread_id,method,payload.to_string(),Utc::now().to_rfc3339(),connection_epoch,wire_id.to_string()])?;
         Ok(())
     }
     pub fn resolve_server_request(&self, request_id: &str, response: &Value) -> Result<()> {
         self.conn.execute("UPDATE native_pending_server_requests SET status='resolved',response_json=?2,resolved_at=?3 WHERE id=?1", params![request_id,response.to_string(),Utc::now().to_rfc3339()])?;
         Ok(())
+    }
+    pub fn orphan_pending_server_requests(&self) -> Result<usize> {
+        self.conn.execute("UPDATE native_pending_server_requests SET status='orphaned',resolved_at=?1 WHERE status='pending'",params![Utc::now().to_rfc3339()]).map_err(Into::into)
     }
     pub fn thread(&self, id: &str) -> Result<Option<NativeThread>> {
         self.conn
@@ -258,13 +307,17 @@ impl NativeThreadStore {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
     }
+    pub fn latest_turn(&self, thread_id: &str) -> Result<Option<NativeTurn>> {
+        self.conn.query_row("SELECT id,thread_id,status,payload_json,updated_at FROM native_turns WHERE thread_id=?1 ORDER BY updated_at DESC,id DESC LIMIT 1",params![thread_id],|row| Ok(NativeTurn { id: row.get(0)?, thread_id: row.get(1)?, status: row.get(2)?, payload: serde_json::from_str(&row.get::<_,String>(3)?).unwrap_or(Value::Null), updated_at: row.get(4)? })).optional().map_err(Into::into)
+    }
     pub fn pending_server_requests(&self) -> Result<Vec<NativePendingRequest>> {
-        let mut statement=self.conn.prepare("SELECT id,method,payload_json FROM native_pending_server_requests WHERE status='pending' ORDER BY created_at,id")?;
+        let mut statement=self.conn.prepare("SELECT id,wire_id_json,method,payload_json FROM native_pending_server_requests WHERE status='pending' ORDER BY created_at,id")?;
         let rows = statement.query_map([], |r| {
             Ok(NativePendingRequest {
                 id: r.get(0)?,
-                method: r.get(1)?,
-                payload: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or(Value::Null),
+                wire_id: serde_json::from_str(&r.get::<_, String>(1)?).unwrap_or(Value::Null),
+                method: r.get(2)?,
+                payload: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or(Value::Null),
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
