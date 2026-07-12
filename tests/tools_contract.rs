@@ -324,6 +324,10 @@ async fn dispatch_read_tools_use_local_state_only() {
         .iter()
         .any(|method| method == "thread/start"));
     match startup["probe"]["status"].as_str() {
+        Some("not_run") => {
+            assert!(startup["probe"]["method"].is_null());
+            assert_eq!(startup["connectionModes"][1]["mode"], "stdio");
+        }
         Some("handshake_succeeded") => {
             assert_eq!(startup["probe"]["method"], "thread/list");
             assert_eq!(startup["connectionModes"][1]["mode"], "stdio");

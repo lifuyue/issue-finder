@@ -1,7 +1,10 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,8 @@ pub struct CodexTurnRecord {
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,14 +116,23 @@ pub struct CodexAppServerStdioTransport {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    stderr: BufReader<ChildStderr>,
     next_id: u64,
     mode: CodexAppServerConnectionMode,
+    request_timeout: Duration,
 }
 
 impl CodexAppServerStdioTransport {
     pub fn connect() -> Result<Self> {
         let command = discover_codex_binary()?;
-        Self::connect_stdio_with_command(&command)
+        match std::env::var("ISSUE_FINDER_CODEX_TRANSPORT")
+            .ok()
+            .as_deref()
+        {
+            Some("stdio") => Self::connect_stdio_with_command(&command),
+            Some(other) => anyhow::bail!("unsupported ISSUE_FINDER_CODEX_TRANSPORT {other}"),
+            None => Self::connect_with_command(&command),
+        }
     }
 
     pub fn connect_with_command(command: &str) -> Result<Self> {
@@ -140,7 +154,17 @@ impl CodexAppServerStdioTransport {
             CodexAppServerConnectionMode::DaemonProxy => ["app-server", "proxy"].as_slice(),
             CodexAppServerConnectionMode::Stdio => ["app-server", "--stdio"].as_slice(),
         };
-        Self::spawn_with_args(command, args, mode)
+        Self::spawn_with_args(command, args, mode, Duration::from_secs(10))
+    }
+
+    pub fn connect_with_command_and_timeout(command: &str, timeout: Duration) -> Result<Self> {
+        start_daemon(command)?;
+        Self::spawn_with_args(
+            command,
+            &["app-server", "proxy"],
+            CodexAppServerConnectionMode::DaemonProxy,
+            timeout,
+        )
     }
 
     pub fn connection_mode(&self) -> CodexAppServerConnectionMode {
@@ -151,12 +175,15 @@ impl CodexAppServerStdioTransport {
         command: &str,
         args: &[&str],
         mode: CodexAppServerConnectionMode,
+        request_timeout: Duration,
     ) -> Result<Self> {
+        let config_args = codex_config_override_args();
         let mut child = Command::new(command)
+            .args(&config_args)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("unable to start {command} {}", args.join(" ")))?;
         let stdin = child
@@ -167,12 +194,18 @@ impl CodexAppServerStdioTransport {
             .stdout
             .take()
             .context("codex app-server stdio stdout is unavailable")?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("codex app-server stderr is unavailable")?;
         let mut transport = Self {
             child,
             stdin,
             stdout: BufReader::new(stdout),
+            stderr: BufReader::new(stderr),
             next_id: 1,
             mode,
+            request_timeout,
         };
         transport.request(
             "initialize",
@@ -192,14 +225,69 @@ impl CodexAppServerStdioTransport {
 }
 
 fn start_daemon(command: &str) -> Result<()> {
-    let status = Command::new(command)
+    let config_args = codex_config_override_args();
+    let output = Command::new(command)
+        .args(&config_args)
         .args(["app-server", "daemon", "start"])
-        .status()
+        .output()
         .with_context(|| format!("unable to start {command} app-server daemon start"))?;
-    if !status.success() {
-        anyhow::bail!("{command} app-server daemon start exited with {status}");
+    if !output.status.success() {
+        let stderr = trim_output(&output.stderr);
+        let stdout = trim_output(&output.stdout);
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        anyhow::bail!(
+            "{command} app-server daemon start exited with {}: {detail}",
+            output.status
+        );
     }
     Ok(())
+}
+
+pub fn codex_config_override_args() -> Vec<String> {
+    codex_config_override_args_with(|name| std::env::var(name).ok())
+}
+
+fn codex_config_override_args_with(get: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let mut args = Vec::new();
+    let provider_id = get("ISSUE_FINDER_CODEX_MODEL_PROVIDER")
+        .filter(|value| {
+            !value.is_empty()
+                && value.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+        })
+        .unwrap_or_else(|| "cliproxy".to_string());
+    let mut push = |key: &str, env_name: &str| {
+        if let Some(value) = get(env_name) {
+            if !value.is_empty() {
+                args.push("-c".to_string());
+                args.push(format!("{key}={}", serde_json::to_string(&value).unwrap()));
+            }
+        }
+    };
+    push("model", "ISSUE_FINDER_CODEX_MODEL");
+    push("model_provider", "ISSUE_FINDER_CODEX_MODEL_PROVIDER");
+    push(
+        "model_reasoning_effort",
+        "ISSUE_FINDER_CODEX_REASONING_EFFORT",
+    );
+    push(
+        &format!("model_providers.{provider_id}.name"),
+        "ISSUE_FINDER_CODEX_PROVIDER_NAME",
+    );
+    push(
+        &format!("model_providers.{provider_id}.base_url"),
+        "ISSUE_FINDER_CODEX_BASE_URL",
+    );
+    push(
+        &format!("model_providers.{provider_id}.env_key"),
+        "ISSUE_FINDER_CODEX_API_KEY_ENV",
+    );
+    push(
+        &format!("model_providers.{provider_id}.wire_api"),
+        "ISSUE_FINDER_CODEX_WIRE_API",
+    );
+    args
 }
 
 impl CodexAppServerTransport for CodexAppServerStdioTransport {
@@ -219,12 +307,20 @@ impl CodexAppServerTransport for CodexAppServerStdioTransport {
         let mut line = String::new();
         loop {
             line.clear();
+            wait_for_stdout(&self.stdout, self.request_timeout)
+                .with_context(|| format!("timed out waiting for {method} response"))?;
             let read = self
                 .stdout
                 .read_line(&mut line)
                 .with_context(|| format!("unable to read {method} response"))?;
             if read == 0 {
-                anyhow::bail!("codex app-server closed before {method} response");
+                let mut stderr = String::new();
+                let _ = self.stderr.read_to_string(&mut stderr);
+                let stderr = stderr.trim();
+                if stderr.is_empty() {
+                    anyhow::bail!("codex app-server closed before {method} response");
+                }
+                anyhow::bail!("codex app-server closed before {method} response: {stderr}");
             }
             let message: Value = serde_json::from_str(line.trim_end()).with_context(|| {
                 format!("invalid codex app-server JSON while waiting for {method}")
@@ -250,6 +346,29 @@ impl CodexAppServerTransport for CodexAppServerStdioTransport {
         self.stdin.flush()?;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn wait_for_stdout(stdout: &BufReader<ChildStdout>, timeout: Duration) -> Result<()> {
+    let mut poll_fd = libc::pollfd {
+        fd: stdout.get_ref().as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let result = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
+    if result < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    if result == 0 {
+        anyhow::bail!("no app-server output within {timeout_ms} ms");
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn wait_for_stdout(_stdout: &BufReader<ChildStdout>, _timeout: Duration) -> Result<()> {
+    Ok(())
 }
 
 impl Drop for CodexAppServerStdioTransport {
@@ -394,14 +513,11 @@ where
         )?;
         let thread = decode_session(read_value.clone(), "thread/read")?;
         let turns = self.list_turns(thread_id)?;
-        let mut items = Vec::new();
+        let mut items = transcript_items_from_thread_read(&read_value).unwrap_or_default();
         for turn in &turns {
             match self.list_turn_items(thread_id, &turn.turn_id) {
-                Ok(turn_items) => items.extend(turn_items),
-                Err(error) if error.to_string().contains("not supported yet") => {
-                    items = transcript_items_from_thread_read(&read_value)?;
-                    break;
-                }
+                Ok(turn_items) => extend_unique_transcript_items(&mut items, turn_items),
+                Err(error) if error.to_string().contains("not supported yet") => break,
                 Err(error) => return Err(error),
             }
         }
@@ -519,6 +635,23 @@ where
             }),
         )?;
         decode_session(value, "thread/metadata/update")
+    }
+}
+
+fn extend_unique_transcript_items(
+    items: &mut Vec<CodexTranscriptItem>,
+    additional: Vec<CodexTranscriptItem>,
+) {
+    for item in additional {
+        let id = item.payload.get("id").and_then(Value::as_str);
+        let duplicate = id.is_some_and(|id| {
+            items
+                .iter()
+                .any(|existing| existing.payload.get("id").and_then(Value::as_str) == Some(id))
+        });
+        if !duplicate {
+            items.push(item);
+        }
     }
 }
 
@@ -677,17 +810,6 @@ pub fn codex_app_server_startup_metadata(command: &str) -> Value {
         .is_none()
         .then(|| command_error(command, &["app-server", "daemon", "version"]))
         .flatten();
-    let handshake = match CodexAppServerStdioTransport::connect_stdio_with_command(command) {
-        Ok(mut transport) => match transport.request(
-            "thread/list",
-            json!({ "limit": 1, "archived": false, "sortDirection": "desc" }),
-        ) {
-            Ok(_) => json!({ "status": "handshake_succeeded", "method": "thread/list" }),
-            Err(error) => json!({ "status": "handshake_failed", "error": error.to_string() }),
-        },
-        Err(error) => json!({ "status": "handshake_failed", "error": error.to_string() }),
-    };
-
     json!({
         "binary": binary,
         "cliVersion": cli_version,
@@ -707,8 +829,45 @@ pub fn codex_app_server_startup_metadata(command: &str) -> Value {
             }
         ],
         "supportedMethods": supported_method_names(),
-        "probe": handshake
+        "probe": { "status": "not_run" }
     })
+}
+
+pub fn probe_codex_app_server() -> Value {
+    let command = match discover_codex_binary() {
+        Ok(command) => command,
+        Err(error) => {
+            return json!({
+                "status": "binary_unavailable",
+                "error": error.to_string()
+            });
+        }
+    };
+    match CodexAppServerStdioTransport::connect_with_command(&command) {
+        Ok(mut transport) => match transport.request(
+            "thread/list",
+            json!({ "limit": 1, "archived": false, "sortDirection": "desc" }),
+        ) {
+            Ok(_) => json!({
+                "status": "handshake_succeeded",
+                "method": "thread/list",
+                "connectionMode": "daemon_proxy",
+                "binary": command
+            }),
+            Err(error) => json!({
+                "status": "handshake_failed",
+                "error": error.to_string(),
+                "connectionMode": "daemon_proxy",
+                "binary": command
+            }),
+        },
+        Err(error) => json!({
+            "status": "handshake_failed",
+            "error": error.to_string(),
+            "connectionMode": "daemon_proxy",
+            "binary": command
+        }),
+    }
 }
 
 pub fn dispatch_prompt() -> &'static str {
@@ -1009,5 +1168,31 @@ impl From<CodexTurn> for AdapterTurn {
             native_turn_id: turn.turn_id,
             status: turn.status,
         }
+    }
+}
+
+#[cfg(test)]
+mod config_override_tests {
+    use super::codex_config_override_args_with;
+
+    #[test]
+    fn native_runtime_config_uses_environment_key_name_without_secret_value() {
+        let args = codex_config_override_args_with(|name| match name {
+            "ISSUE_FINDER_CODEX_MODEL" => Some("gpt-test".to_string()),
+            "ISSUE_FINDER_CODEX_MODEL_PROVIDER" => Some("cliproxy".to_string()),
+            "ISSUE_FINDER_CODEX_REASONING_EFFORT" => Some("xhigh".to_string()),
+            "ISSUE_FINDER_CODEX_API_KEY_ENV" => Some("CLIPROXY_API_KEY".to_string()),
+            _ => None,
+        });
+
+        assert!(args.iter().any(|arg| arg == "model=\"gpt-test\""));
+        assert!(args.iter().any(|arg| arg == "model_provider=\"cliproxy\""));
+        assert!(args
+            .iter()
+            .any(|arg| arg == "model_reasoning_effort=\"xhigh\""));
+        assert!(args
+            .iter()
+            .any(|arg| arg == "model_providers.cliproxy.env_key=\"CLIPROXY_API_KEY\""));
+        assert!(!args.iter().any(|arg| arg.contains("secret")));
     }
 }

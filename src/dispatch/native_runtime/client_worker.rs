@@ -12,7 +12,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::dispatch::adapters::codex_app_server::discover_codex_binary;
+use crate::dispatch::adapters::codex_app_server::{
+    codex_config_override_args, discover_codex_binary,
+};
 
 const QUEUE_CAPACITY: usize = 128;
 
@@ -78,13 +80,25 @@ impl AppServerClient {
 
     async fn connect_daemon() -> Result<Self> {
         let binary = discover_codex_binary()?;
-        let status = Command::new(&binary)
+        let config_args = codex_config_override_args();
+        let output = Command::new(&binary)
+            .args(&config_args)
             .args(["app-server", "daemon", "start"])
-            .status()
+            .output()
             .await
             .context("unable to start Codex app-server daemon")?;
-        if !status.success() {
-            anyhow::bail!("Codex app-server daemon start failed with {status}");
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim()
+            } else {
+                stderr.trim()
+            };
+            anyhow::bail!(
+                "Codex app-server daemon start failed with {}: {detail}",
+                output.status
+            );
         }
         let socket = codex_control_socket_path();
         let stream = UnixStream::connect(&socket)
@@ -151,7 +165,9 @@ impl AppServerClient {
 
     async fn connect_stdio() -> Result<Self> {
         let binary = discover_codex_binary()?;
+        let config_args = codex_config_override_args();
         let mut child = Command::new(binary)
+            .args(&config_args)
             .args(["app-server", "--stdio"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

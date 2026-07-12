@@ -202,10 +202,34 @@ pub struct EvalArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum EvalCommand {
+    /// Print the versioned external evaluation capability contract.
+    Contract(EvalContractArgs),
     /// Generate offline or live recommendation evaluation reports.
     Recommendation(RecommendationEvalArgs),
     /// Generate offline agent loop evaluation reports.
     AgentLoop(AgentLoopEvalArgs),
+    /// Validate the default native Codex runtime through a real model turn.
+    NativeRuntime(NativeRuntimeEvalArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct NativeRuntimeEvalArgs {
+    /// Isolated workspace bound to the native thread and turn.
+    #[arg(long, default_value = "/tmp/issue-finder-native-runtime-eval")]
+    pub workspace: PathBuf,
+    /// Maximum wait for the marker-bearing model response.
+    #[arg(long, default_value_t = 120)]
+    pub timeout_seconds: u64,
+    /// Stable marker for deterministic transcript verification.
+    #[arg(long)]
+    pub marker: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct EvalContractArgs {
+    /// Print the contract as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

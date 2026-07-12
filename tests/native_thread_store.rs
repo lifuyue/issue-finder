@@ -38,6 +38,68 @@ fn native_store_projects_thread_turn_item_and_outbox_into_one_database() {
     assert_eq!(store.items("thread-1").unwrap()[0].payload["text"], "ok");
 }
 
+#[test]
+fn native_item_identity_is_scoped_to_its_thread() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path().to_path_buf());
+    let store = NativeThreadStore::open(&paths).unwrap();
+    for thread_id in ["thread-1", "thread-2"] {
+        store
+            .upsert_thread(&json!({"id":thread_id,"status":"idle"}))
+            .unwrap();
+        store
+            .upsert_item(
+                thread_id,
+                Some("turn-1"),
+                &json!({
+                    "id":"item-1",
+                    "type":"agentMessage",
+                    "text":format!("response for {thread_id}")
+                }),
+            )
+            .unwrap();
+    }
+
+    assert_eq!(store.items("thread-1").unwrap().len(), 1);
+    assert_eq!(store.items("thread-2").unwrap().len(), 1);
+    assert_eq!(
+        store.items("thread-1").unwrap()[0].payload["text"],
+        "response for thread-1"
+    );
+    assert_eq!(
+        store.items("thread-2").unwrap()[0].payload["text"],
+        "response for thread-2"
+    );
+}
+
+#[test]
+fn native_item_identity_is_scoped_to_its_turn() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path().to_path_buf());
+    let store = NativeThreadStore::open(&paths).unwrap();
+    store
+        .upsert_thread(&json!({"id":"thread-1","status":"idle"}))
+        .unwrap();
+    for turn_id in ["turn-1", "turn-2"] {
+        store
+            .upsert_item(
+                "thread-1",
+                Some(turn_id),
+                &json!({
+                    "id":"item-1",
+                    "type":"agentMessage",
+                    "text":format!("response for {turn_id}")
+                }),
+            )
+            .unwrap();
+    }
+
+    let items = store.items("thread-1").unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(items[1].turn_id.as_deref(), Some("turn-2"));
+}
+
 fn test_paths(home: std::path::PathBuf) -> IssueFinderPaths {
     IssueFinderPaths {
         config: home.join("config.toml"),

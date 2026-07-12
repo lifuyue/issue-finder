@@ -190,6 +190,17 @@ async fn main() -> Result<()> {
             println!("{}", handle_dispatch_cli(&paths, *args)?);
         }
         Command::Eval(args) => match args.command {
+            issue_finder::cli::EvalCommand::Contract(contract_args) => {
+                let contract = issue_finder::eval_contract::current_eval_contract();
+                if contract_args.json {
+                    println!("{}", serde_json::to_string_pretty(&contract)?);
+                } else {
+                    println!(
+                        "Issue Finder eval contract v{} (runtime: {})",
+                        contract.version, contract.default_runtime
+                    );
+                }
+            }
             issue_finder::cli::EvalCommand::Recommendation(eval_args) => {
                 if !eval_args.offline && !eval_args.live {
                     anyhow::bail!("choose either --offline or --live");
@@ -228,6 +239,18 @@ async fn main() -> Result<()> {
                     eval_args.output.display(),
                     report.metrics.total_samples
                 );
+            }
+            issue_finder::cli::EvalCommand::NativeRuntime(eval_args) => {
+                let marker = eval_args.marker.unwrap_or_else(|| {
+                    format!("IF-NATIVE-EVAL-{}", chrono::Utc::now().timestamp_millis())
+                });
+                let report = issue_finder::native_runtime_eval::run_native_runtime_eval(
+                    &eval_args.workspace.to_string_lossy(),
+                    eval_args.timeout_seconds,
+                    marker,
+                )
+                .await;
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
         },
         Command::Memory(args) => match args.command {

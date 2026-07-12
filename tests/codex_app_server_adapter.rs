@@ -11,6 +11,8 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
+use std::time::{Duration, Instant};
+#[cfg(unix)]
 use tempfile::tempdir;
 
 #[test]
@@ -211,6 +213,43 @@ exit 64
 
 #[cfg(unix)]
 #[test]
+fn codex_stdio_transport_bounds_unresponsive_requests() {
+    let dir = tempdir().unwrap();
+    let script_path = dir.path().join("hanging-codex");
+    fs::write(
+        &script_path,
+        r#"#!/bin/sh
+if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "start" ]; then
+  exit 0
+fi
+if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
+  read line
+  printf '%s\n' '{"id":1,"result":{}}'
+  while read line; do sleep 60; done
+fi
+"#,
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&script_path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions).unwrap();
+
+    let mut transport = CodexAppServerStdioTransport::connect_with_command_and_timeout(
+        script_path.to_str().unwrap(),
+        Duration::from_millis(100),
+    )
+    .unwrap();
+    let started = Instant::now();
+    let error = transport.request("thread/list", json!({})).unwrap_err();
+
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(error
+        .to_string()
+        .contains("timed out waiting for thread/list"));
+}
+
+#[cfg(unix)]
+#[test]
 fn codex_startup_metadata_records_version_commands_and_supported_methods() {
     let dir = tempdir().unwrap();
     let script_path = dir.path().join("fake-codex");
@@ -237,7 +276,10 @@ if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "version" ]; then
   echo '{"cliVersion":"9.9.9","serverVersion":"9.9.9"}'
   exit 0
 fi
-if [ "$1" = "app-server" ] && [ "$2" = "--stdio" ]; then
+if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "start" ]; then
+  exit 0
+fi
+if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
   read line
   printf '%s\n' '{"id":1,"result":{}}'
   read line
@@ -260,6 +302,7 @@ exit 64
     assert_eq!(metadata["appServerVersion"]["serverVersion"], "9.9.9");
     assert_eq!(metadata["connectionModes"][0]["mode"], "daemon_proxy");
     assert_eq!(metadata["connectionModes"][0]["available"], true);
+    assert_eq!(metadata["probe"]["status"], "not_run");
     assert!(metadata["supportedMethods"]
         .as_array()
         .unwrap()

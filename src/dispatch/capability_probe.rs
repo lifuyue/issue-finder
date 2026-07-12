@@ -3,6 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
+use super::adapters::codex_app_server::probe_codex_app_server;
 use super::model::{
     AdapterProbeResult, AdapterProbeStatus, AgentCapability, CapabilityStatus,
     NewAdapterProbeResult,
@@ -24,6 +25,7 @@ pub fn probe_agent(
 ) -> Result<AgentProbeReport> {
     let agent = store.get_agent_profile(agent_id)?;
     let capabilities = store.list_agent_capabilities(agent_id)?;
+    let runtime_probe = (agent.adapter == "codex_app_server").then(probe_codex_app_server);
     let mut probes = Vec::new();
     for capability in capabilities {
         if !refresh {
@@ -32,7 +34,12 @@ pub fn probe_agent(
                 continue;
             }
         }
-        probes.push(record_probe(store, &agent.adapter, capability)?);
+        probes.push(record_probe(
+            store,
+            &agent.adapter,
+            capability,
+            runtime_probe.as_ref(),
+        )?);
     }
     Ok(AgentProbeReport {
         agent_id: agent.id,
@@ -67,17 +74,23 @@ fn record_probe(
     store: &DispatchStore,
     adapter: &str,
     capability: AgentCapability,
+    runtime_probe: Option<&Value>,
 ) -> Result<AdapterProbeResult> {
-    let startup_probe_status = capability
-        .details_json
-        .pointer("/startup/probe/status")
-        .and_then(Value::as_str);
+    let startup_probe_status = runtime_probe
+        .and_then(|probe| probe.get("status"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            capability
+                .details_json
+                .pointer("/startup/probe/status")
+                .and_then(Value::as_str)
+        });
     let binary_unavailable = startup_probe_status == Some("binary_unavailable");
     let handshake_failed = startup_probe_status == Some("handshake_failed");
-    let status = if binary_unavailable || handshake_failed {
-        AdapterProbeStatus::Failed
-    } else if capability.status == CapabilityStatus::Unsupported {
+    let status = if capability.status == CapabilityStatus::Unsupported {
         AdapterProbeStatus::Unsupported
+    } else if binary_unavailable || handshake_failed {
+        AdapterProbeStatus::Failed
     } else {
         AdapterProbeStatus::Supported
     };
@@ -88,28 +101,33 @@ fn record_probe(
         .get("method")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
-    let error_code = if binary_unavailable {
+    let error_code = if capability.status == CapabilityStatus::Unsupported {
+        Some("capability_unsupported".to_string())
+    } else if binary_unavailable {
         Some("binary_unavailable".to_string())
     } else if handshake_failed {
         Some("app_server_handshake_failed".to_string())
-    } else if capability.status == CapabilityStatus::Unsupported {
-        Some("capability_unsupported".to_string())
     } else {
         None
     };
+    let protocol_version = capability
+        .details_json
+        .get("protocol")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let mut details_json = capability.details_json;
+    if let (Some(runtime_probe), Some(details)) = (runtime_probe, details_json.as_object_mut()) {
+        details.insert("runtimeProbe".to_string(), runtime_probe.clone());
+    }
     store.record_adapter_probe(NewAdapterProbeResult {
         agent_id: capability.agent_id,
         adapter: adapter.to_string(),
         capability: capability.capability,
         method,
         status,
-        protocol_version: capability
-            .details_json
-            .get("protocol")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
+        protocol_version,
         expires_at,
         error_code,
-        details_json: capability.details_json,
+        details_json,
     })
 }

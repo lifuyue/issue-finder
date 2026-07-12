@@ -784,6 +784,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures",
+ "libc",
  "reqwest",
  "rusqlite",
  "serde",

@@ -31,7 +31,7 @@ Optional:
 - GitHub CLI (`gh`), useful for reusing an existing GitHub token
 - GitHub issue write permission, needed only if you explicitly approve and post GitHub comments through dispatch projection commands
 - OpenAI-compatible API key, used only when optional LLM summaries are enabled
-- Codex CLI with `app-server`, required only for native Codex thread dispatch. Set `ISSUE_FINDER_CODEX_BIN` to override discovery; otherwise Issue Finder validates the PATH binary and, on macOS, falls back to the Codex binary bundled with ChatGPT.app.
+- Codex CLI with `app-server`, required only for native Codex thread dispatch. Set `ISSUE_FINDER_CODEX_BIN` to override discovery; otherwise Issue Finder validates the PATH binary and, on macOS, can discover the Codex binary bundled with ChatGPT.app. The default daemon transport additionally requires the installer-managed standalone Codex under `CODEX_HOME/packages/standalone/current/codex`; the bundled binary alone is sufficient only for the explicitly selected stdio fallback.
 
 ## Installation
 
@@ -205,7 +205,19 @@ Run deterministic evaluation workflows:
 ```bash
 issue-finder eval recommendation --offline --output <dir>
 issue-finder eval agent-loop --offline --output <dir>
+issue-finder eval native-runtime --workspace <absolute-path> --timeout-seconds 120
 ```
+
+`eval native-runtime` is a real process-level acceptance probe, not a mock. Success
+requires an app-server handshake plus a completed authenticated model response containing
+the per-run marker in the persisted transcript. Runtime absence, failed/interrupted turns,
+and timeouts are emitted as structured `capability_unavailable` outcomes so an external
+harness can grade unavailable infrastructure separately from product correctness.
+
+The external engineering harness uses Inspect AI and Harbor as two runtime adapters over
+one task, evidence, ATIF, and independent-verifier contract. The complete architecture,
+outcome semantics, hard gates, and canonical 50-task catalog are defined in
+[Evaluation Engineering](./evaluation-engineering.md).
 
 ## Command Reference
 
@@ -409,6 +421,10 @@ When dispatch state is used, `handoff.json` is imported as an issue review candi
 
 Native Codex communication uses a bidirectional app-server worker. The default transport starts or connects to the installer-managed daemon and uses its Unix socket/WebSocket control connection; set `ISSUE_FINDER_CODEX_TRANSPORT=stdio` only for an explicit fallback or test. The worker owns pending request routing, notifications, server requests, bounded queues, graceful shutdown, and disconnect events. `dispatch/dispatch.sqlite3` projects the same stream into native threads, turns, items, events, outbox messages, and pending server requests. After local review and dispatch approvals, `dispatch execute` calls `thread/start` for `--new-session` or `thread/resume` for an explicit `--session`, then calls `turn/start` with a stable `clientUserMessageId`. It binds the thread and turn to the prepared workspace and sends only absolute context/package paths. Issue Finder never guesses the focused desktop thread. A2A remains an explicitly invoked artifact mapping gateway onto this dispatch state, not an alternate agent loop or store.
 
+An external OpenAI-compatible provider can be selected without writing its secret into Issue Finder state. Set `ISSUE_FINDER_CODEX_MODEL`, `ISSUE_FINDER_CODEX_MODEL_PROVIDER`, `ISSUE_FINDER_CODEX_PROVIDER_NAME`, `ISSUE_FINDER_CODEX_BASE_URL`, `ISSUE_FINDER_CODEX_WIRE_API`, and `ISSUE_FINDER_CODEX_REASONING_EFFORT`; set `ISSUE_FINDER_CODEX_API_KEY_ENV` to the *name* of the inherited environment variable containing the credential. Provider and reasoning overrides are passed to every daemon or stdio app-server process, so a resumed thread uses the same runtime configuration.
+
+`agents probe codex --refresh` probes the same default daemon/proxy transport used by dispatch. A runtime handshake failure marks wired capabilities as failed but never rewrites permanent product-policy decisions such as `open_pr`, `review_mode`, or `stream_events`; those remain unsupported. A method mapping or CLI help response is not runtime evidence.
+
 The candidate task board is a derived library-level read model over recommendation events, inbox items, and dispatch state. It is a query surface, not a persisted source of truth. Dispatch terminal outcomes remain visible as terminal board status even if an inbox item was marked done or archived; archive and dismiss feedback only affect display state. Reactivation is also projected locally and does not change recommendation feed score or memory ranking adjustments.
 
 Runtime topic docs:
@@ -445,3 +461,15 @@ Not allowed for the Issue Finder process itself:
 
 Issue Finder writes suggested validation commands into the handoff package but does not run them automatically.
 Validation, build, lint, install, network-heavy, and project-defined script commands are classified as requiring approval or forbidden for downstream agents.
+# External evaluation contract
+
+Evaluation harnesses should negotiate capabilities before running:
+
+```bash
+issue-finder eval contract --json
+```
+
+The response is the product-side source of truth for runtime and artifact versions,
+normalized termination vocabulary, recovery boundaries, benchmark families, and safety
+invariants. Harnesses should reject unsupported versions instead of probing deprecated
+commands.

@@ -2,7 +2,7 @@ use issue_finder::dispatch::native_runtime::{
     NativeThreadManager, NativeThreadStore, SendTurnRequest,
 };
 use issue_finder::paths::IssueFinderPaths;
-use std::{fs, thread, time::Duration};
+use std::{fs, time::Duration};
 
 #[test]
 #[ignore = "requires the installed Codex daemon and authenticated desktop state"]
@@ -28,37 +28,30 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
             .send(SendTurnRequest {
                 thread_id: thread_id.clone(),
                 prompt: format!(
-                    "Write a 5000-word explanation of the marker `{marker}` without tools."
+                    "Reply with exactly `{marker} RECOVERED`. Do not use tools or edit files."
                 ),
                 cwd: workspace.to_string_lossy().to_string(),
                 client_user_message_id: format!("client-{marker}"),
             })
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Replace the live client while the turn is in flight. The daemon-owned turn
+        // must be recovered by reconciliation without another client message.
         manager
-            .steer(
-                &thread_id,
-                &started.turn_id,
-                &format!("Replace the draft with exactly `{marker} STEERED`."),
-                &format!("client-{marker}-steer"),
-            )
+            .reconnect(std::slice::from_ref(&thread_id))
             .await
             .unwrap();
-        for _ in 0..30 {
-            thread::sleep(Duration::from_secs(1));
+        for _ in 0..60 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
             manager.reconcile(&thread_id).await.unwrap();
             let check = NativeThreadStore::open(&paths).unwrap();
             if check.items(&thread_id).unwrap().iter().any(|item| {
-                item.payload
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|text| text.contains(&format!("{marker} STEERED")))
+                item.item_type == "agentMessage"
+                    && item
+                        .payload
+                        .to_string()
+                        .contains(&format!("{marker} RECOVERED"))
             }) {
-                manager
-                    .reconnect(std::slice::from_ref(&thread_id))
-                    .await
-                    .unwrap();
                 manager.reconcile(&thread_id).await.unwrap();
                 println!("threadId={thread_id} turnId={}", started.turn_id);
                 return;
@@ -66,6 +59,101 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
         }
         panic!("timed out waiting for native runtime response");
     });
+}
+
+#[test]
+#[ignore = "requires the installed Codex daemon and authenticated desktop state"]
+fn real_daemon_resumes_selected_thread_without_creating_another_thread() {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let marker = format!("IF-NATIVE-RESUME-{}", chrono::Utc::now().timestamp_millis());
+        let root = std::env::temp_dir().join(&marker);
+        let state = root.join("state");
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let paths = test_paths(state);
+        let store = NativeThreadStore::open(&paths).unwrap();
+        let mut manager = NativeThreadManager::connect(store).await.unwrap();
+        let selected_thread_id = manager
+            .start_thread(
+                &format!("Issue Finder native resume {marker}"),
+                workspace.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        manager
+            .send(SendTurnRequest {
+                thread_id: selected_thread_id.clone(),
+                prompt: format!(
+                    "Reply with exactly `{marker} SEED`. Do not use tools or edit files."
+                ),
+                cwd: workspace.to_string_lossy().to_string(),
+                client_user_message_id: format!("client-{marker}-seed"),
+            })
+            .await
+            .unwrap();
+        assert!(
+            wait_for_agent_marker(
+                &manager,
+                &paths,
+                &selected_thread_id,
+                &format!("{marker} SEED")
+            )
+            .await,
+            "seed turn did not produce a persisted agent response"
+        );
+
+        manager
+            .reconnect(std::slice::from_ref(&selected_thread_id))
+            .await
+            .unwrap();
+        let turn = manager
+            .send(SendTurnRequest {
+                thread_id: selected_thread_id.clone(),
+                prompt: format!(
+                    "Reply with exactly `{marker} RESUMED`. Do not use tools or edit files."
+                ),
+                cwd: workspace.to_string_lossy().to_string(),
+                client_user_message_id: format!("client-{marker}"),
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            wait_for_agent_marker(
+                &manager,
+                &paths,
+                &selected_thread_id,
+                &format!("{marker} RESUMED")
+            )
+            .await,
+            "timed out waiting for resumed native thread response"
+        );
+        assert_eq!(turn.thread_id, selected_thread_id);
+        println!(
+            "resumedThreadId={selected_thread_id} resumedTurnId={}",
+            turn.turn_id
+        );
+    });
+}
+
+async fn wait_for_agent_marker(
+    manager: &NativeThreadManager,
+    paths: &IssueFinderPaths,
+    thread_id: &str,
+    marker: &str,
+) -> bool {
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        manager.reconcile(thread_id).await.unwrap();
+        let check = NativeThreadStore::open(paths).unwrap();
+        if check.items(thread_id).unwrap().iter().any(|item| {
+            item.item_type == "agentMessage" && item.payload.to_string().contains(marker)
+        }) {
+            return true;
+        }
+    }
+    false
 }
 
 #[test]

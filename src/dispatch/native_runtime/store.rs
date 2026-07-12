@@ -60,7 +60,7 @@ impl NativeThreadStore {
         self.conn.execute_batch(r#"
         CREATE TABLE IF NOT EXISTS native_threads(id TEXT PRIMARY KEY,name TEXT,cwd TEXT,status_json TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS native_turns(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(thread_id) REFERENCES native_threads(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS native_items(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,turn_id TEXT,item_type TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(thread_id) REFERENCES native_threads(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS native_items(id TEXT NOT NULL,thread_id TEXT NOT NULL,turn_id TEXT NOT NULL DEFAULT '',item_type TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(thread_id,turn_id,id),FOREIGN KEY(thread_id) REFERENCES native_threads(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS native_runtime_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,thread_id TEXT,turn_id TEXT,method TEXT NOT NULL,delivery TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS native_outbox(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,turn_id TEXT,method TEXT NOT NULL,client_message_id TEXT,payload_json TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(client_message_id));
         CREATE TABLE IF NOT EXISTS native_pending_server_requests(id TEXT PRIMARY KEY,thread_id TEXT,method TEXT NOT NULL,payload_json TEXT NOT NULL,status TEXT NOT NULL,response_json TEXT,created_at TEXT NOT NULL,resolved_at TEXT);
@@ -68,6 +68,54 @@ impl NativeThreadStore {
         CREATE INDEX IF NOT EXISTS idx_native_items_thread ON native_items(thread_id,updated_at);
         CREATE INDEX IF NOT EXISTS idx_native_events_thread ON native_runtime_events(thread_id,sequence);
     "#)?;
+        self.migrate_native_items_identity()?;
+        Ok(())
+    }
+    fn migrate_native_items_identity(&self) -> Result<()> {
+        let mut statement = self.conn.prepare("PRAGMA table_info(native_items)")?;
+        let primary_key_columns = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(_, position)| *position > 0)
+            .map(|(name, position)| (position, name))
+            .collect::<Vec<_>>();
+        let mut primary_key_columns = primary_key_columns;
+        primary_key_columns.sort_by_key(|(position, _)| *position);
+        let names = primary_key_columns
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>();
+        if names == ["thread_id", "turn_id", "id"] {
+            return Ok(());
+        }
+        self.conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys=OFF;
+            BEGIN IMMEDIATE;
+            ALTER TABLE native_items RENAME TO native_items_legacy_identity;
+            CREATE TABLE native_items(
+                id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL DEFAULT '',
+                item_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(thread_id,turn_id,id),
+                FOREIGN KEY(thread_id) REFERENCES native_threads(id) ON DELETE CASCADE
+            );
+            INSERT INTO native_items(id,thread_id,turn_id,item_type,payload_json,created_at,updated_at)
+                SELECT id,thread_id,COALESCE(turn_id,''),item_type,payload_json,created_at,updated_at
+                FROM native_items_legacy_identity;
+            DROP TABLE native_items_legacy_identity;
+            CREATE INDEX idx_native_items_thread ON native_items(thread_id,created_at);
+            COMMIT;
+            PRAGMA foreign_keys=ON;
+            "#,
+        )?;
         Ok(())
     }
 
@@ -142,7 +190,7 @@ impl NativeThreadStore {
             .and_then(Value::as_str)
             .unwrap_or("unknown");
         let now = Utc::now().to_rfc3339();
-        self.conn.execute("INSERT INTO native_items(id,thread_id,turn_id,item_type,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at",params![id,thread_id,turn_id,kind,value.to_string(),now])?;
+        self.conn.execute("INSERT INTO native_items(id,thread_id,turn_id,item_type,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(thread_id,turn_id,id) DO UPDATE SET item_type=excluded.item_type,payload_json=excluded.payload_json,updated_at=excluded.updated_at",params![id,thread_id,turn_id.unwrap_or(""),kind,value.to_string(),now])?;
         Ok(())
     }
     pub fn enqueue(
@@ -199,7 +247,9 @@ impl NativeThreadStore {
             Ok(NativeItem {
                 id: r.get(0)?,
                 thread_id: r.get(1)?,
-                turn_id: r.get(2)?,
+                turn_id: r
+                    .get::<_, String>(2)
+                    .map(|value| (!value.is_empty()).then_some(value))?,
                 item_type: r.get(3)?,
                 payload: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null),
                 updated_at: r.get(5)?,
