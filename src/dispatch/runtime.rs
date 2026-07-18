@@ -215,42 +215,37 @@ impl DispatchRuntime {
         status: Option<DispatchRunStatus>,
         outcome: Option<DispatchOutcomeRecordRequest>,
     ) -> Result<A2aResultImport> {
+        let inferred_outcome = status.and_then(terminal_outcome_for_status);
+        let imported_validation = if outcome
+            .as_ref()
+            .map(|request| request.outcome_kind == DispatchOutcomeKind::FixReady)
+            .unwrap_or(inferred_outcome == Some(DispatchOutcomeKind::FixReady))
+        {
+            Some(a2a_gateway::validate_fix_result_import(
+                path,
+                kind,
+                content_type,
+            )?)
+        } else {
+            None
+        };
         let mut result =
             a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)?;
         let outcome_request = outcome.or_else(|| {
-            status.and_then(|status| {
-                terminal_outcome_for_status(status).map(|outcome_kind| {
-                    let inferred_validation = if outcome_kind == DispatchOutcomeKind::FixReady {
-                        self.store
-                            .read_artifact_bytes(&result.artifact.id)
-                            .ok()
-                            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-                            .and_then(|value| {
-                                value
-                                    .get("validationOutcome")
-                                    .or_else(|| value.pointer("/validation/outcome"))
-                                    .and_then(Value::as_str)
-                                    .and_then(DispatchValidationOutcome::parse_value)
-                            })
-                    } else {
-                        None
-                    };
-                    DispatchOutcomeRecordRequest {
-                        run_id: run_id.to_string(),
-                        idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
-                        outcome_kind,
-                        failure_class: None,
-                        failure_detail: None,
-                        task_class: None,
-                        validation_outcome: inferred_validation,
-                        result_artifact_id: Some(result.artifact.id.clone()),
-                        metadata_json: json!({
-                            "source": "a2a_import_result",
-                            "artifactKind": kind,
-                            "coarseTerminalOutcome": true
-                        }),
-                    }
-                })
+            inferred_outcome.map(|outcome_kind| DispatchOutcomeRecordRequest {
+                run_id: run_id.to_string(),
+                idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
+                outcome_kind,
+                failure_class: None,
+                failure_detail: None,
+                task_class: None,
+                validation_outcome: imported_validation,
+                result_artifact_id: Some(result.artifact.id.clone()),
+                metadata_json: json!({
+                    "source": "a2a_import_result",
+                    "artifactKind": kind,
+                    "coarseTerminalOutcome": true
+                }),
             })
         });
         if let Some(mut request) = outcome_request {
@@ -386,10 +381,6 @@ impl DispatchRuntime {
         let run = self.store.get_dispatch_run(&request.run_id)?;
         let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
         super::outcome_validator::validate_outcome(&self.store, &run, &issue_task, &request)?;
-        let already_recorded = self
-            .store
-            .find_dispatch_run_outcome_by_run(&run.id)?
-            .is_some();
         let idempotency_key = request
             .idempotency_key
             .clone()
@@ -407,15 +398,7 @@ impl DispatchRuntime {
                 result_artifact_id: request.result_artifact_id.clone(),
                 metadata_json: request.metadata_json,
             })?;
-        if already_recorded {
-            let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
-            return Ok(DispatchOutcomeRecordResult {
-                run,
-                issue_task,
-                outcome,
-            });
-        }
-
+        crate::eval_fault::crash_at("after_outcome_insert_before_projection");
         if let Some(artifact_id) = outcome.result_artifact_id.as_deref() {
             if run.result_artifact_id.as_deref() != Some(artifact_id) {
                 self.store
@@ -437,19 +420,30 @@ impl DispatchRuntime {
                 .update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
         }
         run = self.store.get_dispatch_run(&run.id)?;
-        self.store.append_dispatch_event(dispatch_run_event(
-            &run,
-            DispatchEventKind::DispatchOutcomeRecorded,
-            DispatchEventSource::Runtime,
-            DispatchEventSeverity::Info,
-            json!({
-                "outcomeId": outcome.id,
-                "outcomeKind": outcome.outcome_kind,
-                "failureClass": outcome.failure_class,
-                "taskClass": outcome.task_class,
-                "validationOutcome": outcome.validation_outcome,
-            }),
-        ))?;
+        let outcome_event_exists = self
+            .store
+            .list_dispatch_events_for_run(&run.id)?
+            .into_iter()
+            .any(|event| {
+                event.event_kind == DispatchEventKind::DispatchOutcomeRecorded
+                    && event.payload_json.get("outcomeId").and_then(Value::as_str)
+                        == Some(outcome.id.as_str())
+            });
+        if !outcome_event_exists {
+            self.store.append_dispatch_event(dispatch_run_event(
+                &run,
+                DispatchEventKind::DispatchOutcomeRecorded,
+                DispatchEventSource::Runtime,
+                DispatchEventSeverity::Info,
+                json!({
+                    "outcomeId": outcome.id,
+                    "outcomeKind": outcome.outcome_kind,
+                    "failureClass": outcome.failure_class,
+                    "taskClass": outcome.task_class,
+                    "validationOutcome": outcome.validation_outcome,
+                }),
+            ))?;
+        }
 
         let issue_task = self.store.get_issue_task(&run.issue_task_id)?;
         Ok(DispatchOutcomeRecordResult {
@@ -593,6 +587,13 @@ fn ensure_builtin_agents(store: &DispatchStore) -> Result<()> {
         }),
         enabled: true,
     })?;
+
+    // Built-in capability declarations are seeded as one stable set. Runtime-specific
+    // handshake facts belong to explicit adapter probes; opening an unrelated command
+    // must not rewrite capability audit state from the caller's PATH or CODEX_HOME.
+    if !store.list_agent_capabilities("codex")?.is_empty() {
+        return Ok(());
+    }
 
     for (capability, status, details) in codex_capabilities() {
         store.upsert_agent_capability(NewAgentCapability {

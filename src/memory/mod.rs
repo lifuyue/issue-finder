@@ -1,4 +1,5 @@
 pub mod activation;
+mod authority;
 pub mod commands;
 pub mod consumption;
 pub mod controls;

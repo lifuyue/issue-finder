@@ -169,6 +169,57 @@ fn completed_a2a_fix_result_marks_issue_task_fix_ready() {
     );
 }
 
+#[test]
+fn incomplete_a2a_fix_result_is_rejected_without_partial_import() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths).unwrap();
+    let task = create_packaged_task(&runtime);
+    let run = runtime
+        .store()
+        .create_dispatch_run(NewDispatchRun {
+            issue_task_id: task.id.clone(),
+            agent_id: "codex".to_string(),
+            status: DispatchRunStatus::Running,
+            requested_by: "test".to_string(),
+            approval_state: ApprovalStatus::Approved,
+            selected_thread_id: None,
+        })
+        .unwrap();
+    let result_path = dir.path().join("incomplete-fix-result.json");
+    std::fs::write(&result_path, r#"{"status":"fix_ready"}"#).unwrap();
+
+    let error = runtime
+        .import_a2a_result(
+            &run.id,
+            &result_path,
+            "fix_result",
+            "application/json",
+            Some(DispatchRunStatus::Completed),
+            None,
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("validationOutcome=passed"));
+    let persisted = runtime.store().get_dispatch_run(&run.id).unwrap();
+    assert_eq!(persisted.status, DispatchRunStatus::Running);
+    assert_eq!(persisted.result_artifact_id, None);
+    assert!(runtime
+        .store()
+        .list_artifacts_for_run(&run.id)
+        .unwrap()
+        .is_empty());
+    assert!(runtime
+        .store()
+        .list_dispatch_events_for_run(&run.id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        runtime.store().get_issue_task(&task.id).unwrap().status,
+        IssueTaskStatus::UserApproved
+    );
+}
+
 fn create_packaged_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::IssueTask {
     let task = runtime
         .store()

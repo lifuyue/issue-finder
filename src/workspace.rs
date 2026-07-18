@@ -46,14 +46,21 @@ pub fn prepare_workspace(
         true
     });
 
-    let branch = issue_finder_branch_name(issue);
-    if dirty {
+    let target_branch = issue_finder_branch_name(issue);
+    let branch = if dirty {
         warnings.push(
             "Workspace has local changes; Issue Finder did not reset or overwrite it".to_string(),
         );
+        detect_current_branch(&workspace_path).unwrap_or_else(|error| {
+            warnings.push(format!(
+                "Unable to detect current workspace branch: {error}"
+            ));
+            "HEAD".to_string()
+        })
     } else {
-        checkout_issue_finder_branch(&workspace_path, &default_branch, &branch)?;
-    }
+        checkout_issue_finder_branch(&workspace_path, &default_branch, &target_branch)?;
+        target_branch
+    };
 
     let scan = scan_repository(&workspace_path, issue);
     warnings.extend(scan.warnings.clone());
@@ -126,6 +133,11 @@ fn is_dirty(path: &Path) -> Result<bool> {
     Ok(!run_git_capture(Some(path), &["status", "--porcelain"])?
         .trim()
         .is_empty())
+}
+
+fn detect_current_branch(path: &Path) -> Result<String> {
+    let branch = run_git_capture(Some(path), &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    Ok(branch.trim().to_string())
 }
 
 fn checkout_issue_finder_branch(path: &Path, default_branch: &str, branch: &str) -> Result<()> {

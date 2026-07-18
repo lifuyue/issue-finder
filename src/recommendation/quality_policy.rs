@@ -311,6 +311,8 @@ fn has_possible_resolution_evidence(text: &str) -> bool {
             "could verify",
             "fixed in",
             "fixed via",
+            "fix shipped in",
+            "fix has shipped",
             "looks fixed",
             "needs verification",
             "resolved by",

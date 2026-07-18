@@ -23,9 +23,10 @@ use tempfile::tempdir;
 
 #[test]
 fn prepares_existing_local_git_workspace() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -52,10 +53,103 @@ fn prepares_existing_local_git_workspace() {
 }
 
 #[test]
+fn dirty_workspace_is_preserved_without_branch_switch() {
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
+
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let remote = create_remote_repo(dir.path());
+    clone_into_workspace(&remote, &paths, "owner/dirty");
+    let workspace_path = paths.workspace_path_for("owner/dirty");
+    let unrelated = workspace_path.join("local-notes.txt");
+    let local_contents = "uncommitted user work\n";
+    fs::write(&unrelated, local_contents).unwrap();
+    let branch_before = git_output(&workspace_path, &["branch", "--show-current"]);
+
+    let workspace = prepare_workspace(&paths, &issue("owner/dirty", 13)).unwrap();
+
+    assert!(workspace.info.dirty);
+    assert_eq!(branch_before, "main");
+    assert_eq!(workspace.info.branch, branch_before);
+    assert_eq!(
+        git_output(&workspace_path, &["branch", "--show-current"]),
+        branch_before
+    );
+    assert_eq!(fs::read_to_string(&unrelated).unwrap(), local_contents);
+    assert!(workspace.warnings.iter().any(|warning| {
+        warning == "Workspace has local changes; Issue Finder did not reset or overwrite it"
+    }));
+    assert!(!workspace_path
+        .join(".git/refs/heads/issue-finder/13-fix-rust-cli-parser")
+        .exists());
+}
+
+#[tokio::test]
+async fn dirty_workspace_prepare_stops_with_needs_user_before_handoff() {
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
+
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let remote = create_remote_repo(dir.path());
+    clone_into_workspace(&remote, &paths, "owner/dirty-prepare");
+    let workspace_path = paths.workspace_path_for("owner/dirty-prepare");
+    let unrelated = workspace_path.join("local-notes.txt");
+    fs::write(&unrelated, "uncommitted user work\n").unwrap();
+    let issue = issue("owner/dirty-prepare", 14);
+
+    let outcome = prepare_value_issue_with_options(
+        &paths,
+        &Config::default(),
+        ranked_value(issue.clone(), 82, 72),
+        PrepareOptions {
+            explicit_prepare: true,
+            gate_bypass_reason: None,
+            recommendation_source: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let workflow::PrepareOutcome::NeedsUser(item) = outcome else {
+        panic!("dirty workspace must stop with needs_user");
+    };
+    assert!(item.reason.contains("unrelated local changes"));
+    assert_eq!(
+        fs::read_to_string(&unrelated).unwrap(),
+        "uncommitted user work\n"
+    );
+    assert_eq!(
+        git_output(&workspace_path, &["branch", "--show-current"]),
+        "main"
+    );
+    assert!(load_index(&paths).unwrap().items.is_empty());
+    let inbox_item = paths.inbox_item_dir(&handoff_id(&issue));
+    assert!(!inbox_item.join("handoff.json").exists());
+    assert!(!inbox_item.join("CODEX.md").exists());
+    let events = fs::read_to_string(inbox_item.join("prepare-events.jsonl")).unwrap();
+    assert!(events.contains("\"type\":\"prepare_needs_user\""));
+    let workspace_event = events
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["type"] == "workspace_prepared")
+        .unwrap();
+    assert_eq!(workspace_event["branch"], "main");
+}
+
+#[test]
 fn workspace_prepare_fails_when_issue_finder_branch_cannot_be_created() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -75,9 +169,10 @@ fn workspace_prepare_fails_when_issue_finder_branch_cannot_be_created() {
 
 #[tokio::test]
 async fn daily_continues_after_single_prepare_failure() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -112,9 +207,10 @@ async fn daily_continues_after_single_prepare_failure() {
 
 #[tokio::test]
 async fn daily_skips_low_attention_triage_candidates() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -136,9 +232,10 @@ async fn daily_skips_low_attention_triage_candidates() {
 
 #[tokio::test]
 async fn daily_continues_after_single_output_write_failure() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -173,9 +270,10 @@ async fn daily_continues_after_single_output_write_failure() {
 
 #[tokio::test]
 async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -217,9 +315,10 @@ async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
 
 #[tokio::test]
 async fn prepare_writes_agent_safe_runtime_artifacts_without_running_scripts() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -314,9 +413,10 @@ async fn prepare_writes_agent_safe_runtime_artifacts_without_running_scripts() {
 
 #[tokio::test]
 async fn prepare_preserves_llm_summary_enhancement() {
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for workspace integration tests"
+    );
 
     let (base_url, handle) = start_llm_server();
     let dir = tempdir().unwrap();
@@ -604,4 +704,19 @@ fn run_git(cwd: &Path, args: &[&str]) {
         args.join(" "),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn git_output(cwd: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }

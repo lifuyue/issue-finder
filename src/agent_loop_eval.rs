@@ -247,21 +247,14 @@ fn package_insufficiency_observations() -> Vec<String> {
     });
     package.outcome_contract.required_artifact.clear();
     package.outcome_contract.required_fields.clear();
-    let mut observations = Vec::new();
-    let findings = package_contract_findings(&package);
-    if findings
-        .iter()
-        .any(|finding| finding == "missing_outcome_contract")
-    {
-        observations.push("package_missing_outcome_contract_detected".to_string());
+    match package.validate_for_execution() {
+        Ok(()) => Vec::new(),
+        Err(error) if error.to_string().contains("outcome contract") => vec![
+            "package_missing_outcome_contract_detected".to_string(),
+            "package_marked_insufficient_for_agent_loop".to_string(),
+        ],
+        Err(_) => Vec::new(),
     }
-    if findings
-        .iter()
-        .any(|finding| finding == "required_fix_result_contract_unavailable")
-    {
-        observations.push("package_marked_insufficient_for_agent_loop".to_string());
-    }
-    observations
 }
 
 fn lifecycle_reactivation_observations() -> Vec<String> {
@@ -495,32 +488,6 @@ fn memory_governance_observations() -> Result<Vec<String>> {
         observations.push("suppressed_scope_blocks_profile_drift".to_string());
     }
     Ok(observations)
-}
-
-fn package_contract_findings(package: &IssueTaskPackage) -> Vec<String> {
-    let mut findings = Vec::new();
-    if package.outcome_contract.required_artifact.trim().is_empty()
-        || package.outcome_contract.required_fields.is_empty()
-    {
-        findings.push("missing_outcome_contract".to_string());
-    }
-    let has_summary = package
-        .outcome_contract
-        .required_fields
-        .iter()
-        .any(|field| field == "summary");
-    let has_status = package
-        .outcome_contract
-        .required_fields
-        .iter()
-        .any(|field| field == "status");
-    if package.outcome_contract.required_artifact != "fix_result.json"
-        || !has_summary
-        || !has_status
-    {
-        findings.push("required_fix_result_contract_unavailable".to_string());
-    }
-    findings
 }
 
 fn create_packaged_task(

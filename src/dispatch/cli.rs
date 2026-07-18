@@ -50,6 +50,16 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
                 args.json,
             )
         }
+        Some(DispatchCommand::Board(args)) => {
+            let board = crate::candidate_board::load_task_board(paths)?;
+            render_cli_output(args.json, &board, || {
+                let visible = board.active().len();
+                format!(
+                    "Candidate board: {} items ({visible} visible)",
+                    board.items.len()
+                )
+            })
+        }
         Some(DispatchCommand::Package(args)) => match args.command {
             DispatchPackageCommand::ImportHandoff(args) => {
                 let result = runtime.import_handoff_from_inbox(&args.inbox_id)?;

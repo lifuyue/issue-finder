@@ -81,6 +81,38 @@ fn runtime_handshake_failure_does_not_rewrite_unsupported_product_policy() {
     );
 }
 
+#[test]
+fn opening_runtime_does_not_rewrite_persisted_capability_audit_state() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
+    runtime
+        .store()
+        .upsert_agent_capability(NewAgentCapability {
+            agent_id: "codex".to_string(),
+            capability: AgentCapabilityName::StartSession,
+            status: CapabilityStatus::Experimental,
+            details_json: json!({
+                "protocol": "codex_app_server_json_rpc",
+                "method": "thread/start",
+                "auditMarker": "persisted-before-unrelated-command"
+            }),
+        })
+        .unwrap();
+    drop(runtime);
+
+    let reopened = DispatchRuntime::open(paths).unwrap();
+    let capability = reopened
+        .store()
+        .get_agent_capability("codex", AgentCapabilityName::StartSession)
+        .unwrap();
+
+    assert_eq!(
+        capability.details_json["auditMarker"],
+        "persisted-before-unrelated-command"
+    );
+}
+
 fn test_paths(root: &std::path::Path) -> IssueFinderPaths {
     IssueFinderPaths {
         home: root.to_path_buf(),

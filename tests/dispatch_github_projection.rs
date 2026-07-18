@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
+use std::process::Command;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
@@ -472,6 +473,55 @@ fn reqwest_github_comment_writer_posts_to_configured_mock_api() {
     assert!(request.starts_with("POST /repos/owner/repo/issues/123/comments HTTP/1.1"));
     assert!(request.contains("authorization: Bearer test-token"));
     assert!(request.contains(r#""body":"tracking body""#));
+}
+
+#[test]
+fn dispatch_cli_posts_without_dropping_blocking_http_runtime_inside_tokio() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _file_env_lock = env_lock::EnvLock::acquire();
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths.clone()).unwrap();
+    imported_issue_task(&runtime);
+    let draft = runtime
+        .draft_github_tracking_comment("owner/repo#123", Some("CLI tracking body".to_string()))
+        .unwrap()
+        .draft
+        .unwrap();
+    runtime
+        .approve_github_interaction(&draft.interaction.id)
+        .unwrap();
+    let mut config = Config::default();
+    config.github.token = "test-token".to_string();
+    config.save(&paths).unwrap();
+    let mock = start_mock_comment_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+        .args([
+            "dispatch",
+            "github",
+            "post",
+            &draft.interaction.id,
+            "--json",
+        ])
+        .env("ISSUE_FINDER_HOME", dir.path())
+        .env("ISSUE_FINDER_GITHUB_API_BASE", &mock.base_url)
+        .env_remove("GITHUB_TOKEN")
+        .output()
+        .unwrap();
+    let request = mock.join();
+
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["interaction"]["status"], "posted");
+    assert!(
+        request.contains(r#""body":"<!-- issue-finder:tracking_comment -->\nCLI tracking body""#)
+    );
 }
 
 #[derive(Debug, Default)]

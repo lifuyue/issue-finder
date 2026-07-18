@@ -187,7 +187,11 @@ async fn main() -> Result<()> {
             println!("{}", handle_agents_cli(&paths, args)?);
         }
         Command::Dispatch(args) => {
-            println!("{}", handle_dispatch_cli(&paths, *args)?);
+            let dispatch_paths = paths.clone();
+            let output =
+                tokio::task::spawn_blocking(move || handle_dispatch_cli(&dispatch_paths, *args))
+                    .await??;
+            println!("{output}");
         }
         Command::Eval(args) => match args.command {
             issue_finder::cli::EvalCommand::Contract(contract_args) => {
@@ -206,8 +210,14 @@ async fn main() -> Result<()> {
                     anyhow::bail!("choose either --offline or --live");
                 }
                 if eval_args.offline {
-                    let report =
-                        issue_finder::recommendation::eval::run_offline_eval(&eval_args.output)?;
+                    let report = if let Some(dataset) = eval_args.dataset.as_deref() {
+                        issue_finder::recommendation::eval::run_external_dataset_eval(
+                            dataset,
+                            &eval_args.output,
+                        )?
+                    } else {
+                        issue_finder::recommendation::eval::run_offline_eval(&eval_args.output)?
+                    };
                     println!(
                         "Wrote offline recommendation eval to {} ({} samples).",
                         eval_args.output.display(),
@@ -251,6 +261,15 @@ async fn main() -> Result<()> {
                 )
                 .await;
                 println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            issue_finder::cli::EvalCommand::RecoveryPrepare(eval_args) => {
+                let scenario = issue_finder::recovery_eval::prepare_recovery_eval(
+                    paths,
+                    &eval_args.scenario,
+                    &eval_args.workspace.to_string_lossy(),
+                    eval_args.marker,
+                )?;
+                println!("{}", serde_json::to_string_pretty(&scenario)?);
             }
         },
         Command::Memory(args) => match args.command {

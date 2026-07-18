@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use crate::memory::activation::{
     MemoryActivationEngine, MemoryActivationRequest, MemoryActivationResult,
 };
+use crate::memory::authority::contradicted_by_newer_user_fact;
 use crate::memory::dreaming::{
     MemoryDreamEngine, MemoryDreamRequest, MemoryDreamResult, MemoryDreamSynthesizer,
 };
@@ -91,18 +92,21 @@ impl MemoryControlPlane {
             return Ok(Vec::new());
         }
 
-        let mut eligible = hints
-            .into_iter()
-            .filter(|hint| hint_matches_request(hint, request))
-            .filter(|hint| !hint_is_expired(hint, request.now.as_deref()))
-            .filter_map(|hint| {
-                let effective_weight = effective_weight(&hint)?;
-                Some(MemoryDecisionHint {
-                    hint,
-                    effective_weight,
-                })
-            })
-            .collect::<Vec<_>>();
+        let mut eligible = Vec::new();
+        for hint in hints.into_iter().filter(|hint| {
+            hint_matches_request(hint, request) && !hint_is_expired(hint, request.now.as_deref())
+        }) {
+            let Some(effective_weight) = effective_weight(&hint) else {
+                continue;
+            };
+            if contradicted_by_newer_user_fact(store, &hint)? {
+                continue;
+            }
+            eligible.push(MemoryDecisionHint {
+                hint,
+                effective_weight,
+            });
+        }
 
         eligible.sort_by(|left, right| {
             hint_priority(&right.hint)

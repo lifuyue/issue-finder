@@ -4,15 +4,14 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
+use crate::memory::authority::{dispatch_outcome_for_conflict, hint_prediction};
 use crate::memory::model::{
     MemoryDream, MemoryDreamRun, MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger,
     MemoryDreamType, MemoryHint, MemoryHintScopeType, MemoryHintStatus, MemoryHintType,
     MemoryModelStatus, MemoryNode, MemoryRawEvent, MemoryRawEventType, MemorySubjectType,
     NewMemoryDream, NewMemoryHint,
 };
-use crate::memory::outcome_projection::{
-    outcome_feedback_input_from_raw_event, project_raw_dispatch_outcome, OutcomePriorKind,
-};
+use crate::memory::outcome_projection::{project_raw_dispatch_outcome, OutcomePriorKind};
 use crate::memory::store::MemoryStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -703,60 +702,6 @@ fn feedback_kind(event: &MemoryRawEvent) -> Option<&'static str> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct HintPrediction {
-    agent_id: Option<String>,
-    task_type: Option<String>,
-    predicts_success: bool,
-}
-
-fn dispatch_outcome_for_conflict(event: &MemoryRawEvent) -> Option<(String, String, bool)> {
-    let input = outcome_feedback_input_from_raw_event(event)?;
-    let succeeded = match input.outcome_kind.as_str() {
-        "fix_ready" | "completed_no_change" => true,
-        "failed" | "blocked" => false,
-        _ => return None,
-    };
-    let task_class = input.task_class_or_unknown().to_string();
-    Some((input.agent_id?, task_class, succeeded))
-}
-
-impl HintPrediction {
-    fn matches(&self, agent_id: &str, task_type: &str) -> bool {
-        self.agent_id
-            .as_deref()
-            .is_none_or(|value| value == agent_id)
-            && self
-                .task_type
-                .as_deref()
-                .is_none_or(|value| value == task_type)
-    }
-}
-
-fn hint_prediction(hint: &MemoryHint) -> Option<HintPrediction> {
-    let outcome = first_json_string(
-        &hint.policy_json,
-        &[
-            "prediction",
-            "predicts",
-            "outcome",
-            "expectedOutcome",
-            "recommendation",
-        ],
-    )?
-    .to_ascii_lowercase();
-    let predicts_success = match outcome.as_str() {
-        "success" | "succeeded" | "succeeds" | "prefer" | "preferred" | "positive" => true,
-        "failure" | "failed" | "fails" | "avoid" | "negative" => false,
-        _ => return None,
-    };
-    Some(HintPrediction {
-        agent_id: first_json_string(&hint.policy_json, &["agentId", "agent_id"]),
-        task_type: first_json_string(&hint.policy_json, &["taskType", "task_type"]),
-        predicts_success,
-    })
-}
-
 fn repo_from_event(event: &MemoryRawEvent) -> Option<String> {
     if event.subject_type == MemorySubjectType::Repo {
         return Some(event.subject_ref.clone());
@@ -782,10 +727,6 @@ fn event_summary(event: &MemoryRawEvent) -> String {
         event.subject_type.as_str(),
         event.subject_ref
     )
-}
-
-fn first_json_string(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| json_string(value, key))
 }
 
 fn json_string(value: &Value, key: &str) -> Option<String> {

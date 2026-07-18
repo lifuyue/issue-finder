@@ -115,6 +115,7 @@ impl NativeThreadManager {
             );
         }
         let value = self.client.request("turn/start", payload).await?;
+        crate::eval_fault::crash_at("after_turn_accept_before_projection");
         let turn = value.get("turn").context("turn/start missing turn")?;
         self.store.upsert_turn(&request.thread_id, turn)?;
         let turn_id = turn
@@ -173,6 +174,60 @@ impl NativeThreadManager {
                 .flatten()
             {
                 self.store.upsert_item(thread_id, tid, item)?;
+            }
+        }
+        self.reconcile_pending_outbox(thread_id, thread)?;
+        Ok(())
+    }
+
+    fn reconcile_pending_outbox(&self, thread_id: &str, thread: &Value) -> Result<()> {
+        let turns = thread
+            .get("turns")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for entry in self.store.pending_outbox_entries(thread_id)? {
+            let client_message_id = entry
+                .payload
+                .get("clientUserMessageId")
+                .and_then(Value::as_str);
+            let prompt = entry
+                .payload
+                .get("input")
+                .and_then(Value::as_array)
+                .and_then(|input| input.first())
+                .and_then(|item| item.get("text"))
+                .and_then(Value::as_str);
+            let matches = turns
+                .iter()
+                .filter(|turn| {
+                    client_message_id.is_some_and(|expected| {
+                        turn.get("clientUserMessageId").and_then(Value::as_str) == Some(expected)
+                            || turn
+                                .get("items")
+                                .and_then(Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .any(|item| {
+                                    item.get("clientUserMessageId").and_then(Value::as_str)
+                                        == Some(expected)
+                                        || item.get("id").and_then(Value::as_str) == Some(expected)
+                                })
+                    }) || prompt.is_some_and(|expected| turn_contains_user_prompt(turn, expected))
+                })
+                .collect::<Vec<_>>();
+            if matches.len() > 1 {
+                anyhow::bail!(
+                    "native outbox {} matches multiple persisted turns and cannot be reconciled",
+                    entry.id
+                );
+            }
+            if let Some(turn) = matches.first() {
+                let turn_id = turn
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .context("reconciled native turn is missing id")?;
+                self.store.mark_sent(&entry.id, Some(turn_id))?;
             }
         }
         Ok(())
@@ -247,6 +302,23 @@ impl NativeThreadManager {
     pub async fn shutdown(self) {
         self.client.shutdown().await
     }
+}
+
+fn turn_contains_user_prompt(turn: &Value, expected: &str) -> bool {
+    turn.get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("userMessage")
+                && item.get("text").and_then(Value::as_str).or_else(|| {
+                    item.get("content")
+                        .and_then(Value::as_array)
+                        .and_then(|content| content.first())
+                        .and_then(|content| content.get("text"))
+                        .and_then(Value::as_str)
+                }) == Some(expected)
+        })
 }
 fn connection_epoch() -> String {
     format!(

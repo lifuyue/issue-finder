@@ -6,9 +6,10 @@ use issue_finder::handoff::HandoffMemoryContext;
 use issue_finder::memory::{
     apply_ranking_hints_to_ranked, handoff_memory_context_for_issue, MemoryDreamRun,
     MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType, MemoryHintScopeType,
-    MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryStore, NewMemoryDream,
-    NewMemoryHint,
+    MemoryHintStatus, MemoryHintType, MemoryModelStatus, MemoryQueryKind, MemoryStore,
+    NewMemoryDream, NewMemoryHint,
 };
+use issue_finder::memory::{memory_recall, memory_suppress_scope};
 use issue_finder::paths::IssueFinderPaths;
 use issue_finder::recommendation::RecommendationAssessment;
 use issue_finder::value_scoring::{RankedValueIssue, ValueAssessment};
@@ -138,6 +139,68 @@ fn handoff_memory_context_contains_approved_ranking_and_dispatch_hints_only() {
         .agent_selection_notes
         .iter()
         .any(|note| note.contains("Agent dispatch")));
+}
+
+#[test]
+fn recall_and_suppression_keep_repository_scope_isolated() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let store = MemoryStore::open(&paths).unwrap();
+    seed_dream(&store);
+    seed_scoped_hint(
+        &store,
+        "target-ranking",
+        MemoryHintType::Ranking,
+        MemoryHintStatus::Approved,
+        MemoryHintScopeType::Repo,
+        "owner/target",
+        "Target ranking hint",
+    );
+    seed_scoped_hint(
+        &store,
+        "control-ranking",
+        MemoryHintType::Ranking,
+        MemoryHintStatus::Approved,
+        MemoryHintScopeType::Repo,
+        "owner/control",
+        "Control ranking hint",
+    );
+
+    let target_before =
+        memory_recall(&paths, "owner/target#1", MemoryQueryKind::ScoutRanking, 3).unwrap();
+    let control_before =
+        memory_recall(&paths, "owner/control#2", MemoryQueryKind::ScoutRanking, 3).unwrap();
+    memory_suppress_scope(&paths, "repo:owner/target").unwrap();
+    let target_after =
+        memory_recall(&paths, "owner/target#1", MemoryQueryKind::ScoutRanking, 3).unwrap();
+    let control_after =
+        memory_recall(&paths, "owner/control#2", MemoryQueryKind::ScoutRanking, 3).unwrap();
+
+    assert_eq!(
+        target_before
+            .decision_eligible_hints
+            .iter()
+            .map(|hint| hint.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["target-ranking"]
+    );
+    assert_eq!(
+        control_before
+            .decision_eligible_hints
+            .iter()
+            .map(|hint| hint.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["control-ranking"]
+    );
+    assert!(target_after.decision_eligible_hints.is_empty());
+    assert_eq!(
+        control_after
+            .decision_eligible_hints
+            .iter()
+            .map(|hint| hint.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["control-ranking"]
+    );
 }
 
 fn seed_candidate_only_ranking_hint(paths: &IssueFinderPaths) {

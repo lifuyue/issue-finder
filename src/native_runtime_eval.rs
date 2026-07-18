@@ -22,6 +22,7 @@ pub struct NativeRuntimeEvalReport {
     pub marker: String,
     pub thread_id: Option<String>,
     pub turn_id: Option<String>,
+    pub turn_attempts: u32,
     pub terminal_turn_status: Option<String>,
     pub observed_item_types: Vec<String>,
     pub user_marker_observed: bool,
@@ -110,7 +111,7 @@ pub async fn run_native_runtime_eval(
         Ok(value) => value,
         Err(error) => {
             return unavailable_after_handshake(
-                workspace, marker, binary, started, None, None, error,
+                workspace, marker, binary, started, None, None, 0, "runtime", true, error,
             );
         }
     };
@@ -127,44 +128,77 @@ pub async fn run_native_runtime_eval(
             started,
             None,
             None,
+            0,
+            "runtime",
+            true,
             "thread/start response missing thread.id".to_string(),
         );
     };
     let prompt = format!(
         "Issue Finder native runtime acceptance. Reply with exactly `{marker} ACK`. Do not use tools, edit files, or perform external actions."
     );
+    let turn_params = json!({
+        "threadId": thread_id,
+        "clientUserMessageId": format!("issue-finder-native-eval-{marker}"),
+        "input": [{ "type": "text", "text": prompt }],
+        "cwd": workspace,
+        "runtimeWorkspaceRoots": [workspace],
+        "approvalPolicy": "on-request",
+        "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [workspace],
+            "networkAccess": false
+        }
+    });
+    let mut turn_attempts = 1;
     let turn = match timed_request(
         &client,
         "turn/start",
-        json!({
-            "threadId": thread_id,
-            "clientUserMessageId": format!("issue-finder-native-eval-{marker}"),
-            "input": [{ "type": "text", "text": prompt }],
-            "cwd": workspace,
-            "runtimeWorkspaceRoots": [workspace],
-            "approvalPolicy": "on-request",
-            "sandboxPolicy": {
-                "type": "workspaceWrite",
-                "writableRoots": [workspace],
-                "networkAccess": false
-            }
-        }),
+        turn_params.clone(),
         started,
         timeout_seconds,
     )
     .await
     {
         Ok(value) => value,
-        Err(error) => {
-            return unavailable_after_handshake(
-                workspace,
-                marker,
-                binary,
-                started,
-                Some(thread_id),
-                None,
-                error,
-            );
+        Err(first_error) => {
+            let (cause, retryable) = classify_runtime_error(&first_error);
+            if retryable && cause == "provider" {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                turn_attempts = 2;
+                match timed_request(&client, "turn/start", turn_params, started, timeout_seconds)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return unavailable_after_handshake(
+                            workspace,
+                            marker,
+                            binary,
+                            started,
+                            Some(thread_id),
+                            None,
+                            turn_attempts,
+                            cause,
+                            retryable,
+                            error,
+                        )
+                    }
+                }
+            } else {
+                return unavailable_after_handshake(
+                    workspace,
+                    marker,
+                    binary,
+                    started,
+                    Some(thread_id),
+                    None,
+                    turn_attempts,
+                    cause,
+                    retryable,
+                    first_error,
+                );
+            }
         }
     };
     let Some(turn_id) = turn
@@ -180,6 +214,9 @@ pub async fn run_native_runtime_eval(
             started,
             Some(thread_id),
             None,
+            turn_attempts,
+            "runtime",
+            true,
             "turn/start response missing turn.id".to_string(),
         );
     };
@@ -233,6 +270,7 @@ pub async fn run_native_runtime_eval(
                         marker,
                         thread_id: Some(thread_id),
                         turn_id: Some(turn_id),
+                        turn_attempts,
                         terminal_turn_status: last_status,
                         observed_item_types: item_types,
                         user_marker_observed,
@@ -257,6 +295,7 @@ pub async fn run_native_runtime_eval(
                         item_types,
                         user_marker_observed,
                         agent_marker_observed,
+                        turn_attempts,
                         error,
                     );
                 }
@@ -272,6 +311,7 @@ pub async fn run_native_runtime_eval(
                         item_types,
                         user_marker_observed,
                         agent_marker_observed,
+                        turn_attempts,
                         format!(
                             "timed out after {timeout_seconds} seconds waiting for model response"
                         ),
@@ -286,6 +326,9 @@ pub async fn run_native_runtime_eval(
                     started,
                     Some(thread_id),
                     Some(turn_id),
+                    turn_attempts,
+                    "runtime",
+                    true,
                     error,
                 );
             }
@@ -388,6 +431,11 @@ fn unavailable_report(
     retryable: bool,
     error: String,
 ) -> NativeRuntimeEvalReport {
+    let termination_kind = match cause {
+        "provider" => "provider",
+        "limit" => "limit",
+        _ => "normal",
+    };
     NativeRuntimeEvalReport {
         kind: "issue_finder_native_runtime_eval",
         version: 1,
@@ -396,7 +444,7 @@ fn unavailable_report(
             state: "capability_unavailable",
         },
         termination: NativeRuntimeTermination {
-            kind: "normal",
+            kind: termination_kind,
             cause,
             retryable,
         },
@@ -408,6 +456,7 @@ fn unavailable_report(
         marker,
         thread_id: None,
         turn_id: None,
+        turn_attempts: 0,
         terminal_turn_status: None,
         observed_item_types: Vec::new(),
         user_marker_observed: false,
@@ -417,6 +466,7 @@ fn unavailable_report(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn unavailable_after_handshake(
     workspace: &str,
     marker: String,
@@ -424,13 +474,17 @@ fn unavailable_after_handshake(
     started: Instant,
     thread_id: Option<String>,
     turn_id: Option<String>,
+    turn_attempts: u32,
+    cause: &'static str,
+    retryable: bool,
     error: String,
 ) -> NativeRuntimeEvalReport {
     NativeRuntimeEvalReport {
         protocol_handshake: true,
         thread_id,
         turn_id,
-        ..unavailable_report(workspace, marker, binary, started, "runtime", true, error)
+        turn_attempts,
+        ..unavailable_report(workspace, marker, binary, started, cause, retryable, error)
     }
 }
 
@@ -446,6 +500,7 @@ fn unavailable_with_observations(
     observed_item_types: Vec<String>,
     user_marker_observed: bool,
     agent_marker_observed: bool,
+    turn_attempts: u32,
     error: String,
 ) -> NativeRuntimeEvalReport {
     NativeRuntimeEvalReport {
@@ -456,7 +511,25 @@ fn unavailable_with_observations(
         observed_item_types,
         user_marker_observed,
         agent_marker_observed,
+        turn_attempts,
         ..unavailable_report(workspace, marker, binary, started, "runtime", true, error)
+    }
+}
+
+fn classify_runtime_error(error: &str) -> (&'static str, bool) {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("token limit")
+        || normalized.contains("context length")
+        || normalized.contains("cost limit")
+    {
+        ("limit", false)
+    } else if normalized.contains("502")
+        || normalized.contains("timeout")
+        || normalized.contains("temporarily unavailable")
+    {
+        ("provider", true)
+    } else {
+        ("runtime", true)
     }
 }
 
@@ -485,5 +558,22 @@ fn requested_connection_mode() -> &'static str {
         "stdio"
     } else {
         "daemon_socket"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_runtime_error;
+
+    #[test]
+    fn classifies_provider_and_limit_failures_for_retry_policy() {
+        assert_eq!(
+            classify_runtime_error("502 Bad Gateway"),
+            ("provider", true)
+        );
+        assert_eq!(
+            classify_runtime_error("token limit exceeded"),
+            ("limit", false)
+        );
     }
 }
