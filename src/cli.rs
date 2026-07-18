@@ -210,6 +210,21 @@ pub enum EvalCommand {
     AgentLoop(AgentLoopEvalArgs),
     /// Validate the default native Codex runtime through a real model turn.
     NativeRuntime(NativeRuntimeEvalArgs),
+    /// Prepare an isolated dispatch recovery scenario for an external fault harness.
+    RecoveryPrepare(RecoveryEvalPrepareArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RecoveryEvalPrepareArgs {
+    /// Recovery task identifier: E01, E02, or E03.
+    #[arg(long)]
+    pub scenario: String,
+    /// Isolated workspace referenced by the dispatch task package.
+    #[arg(long)]
+    pub workspace: PathBuf,
+    /// Runtime-randomized marker bound to issue, run, and transcript evidence.
+    #[arg(long)]
+    pub marker: String,
 }
 
 #[derive(Debug, Args)]
@@ -237,6 +252,9 @@ pub struct RecommendationEvalArgs {
     /// Run deterministic offline fixture evaluation.
     #[arg(long, conflicts_with = "live")]
     pub offline: bool,
+    /// Evaluate one externally supplied dataset instead of built-in regression fixtures.
+    #[arg(long, value_name = "PATH", requires = "offline")]
+    pub dataset: Option<PathBuf>,
     /// Run fixed six-profile live evaluation.
     #[arg(long, conflicts_with = "offline")]
     pub live: bool,

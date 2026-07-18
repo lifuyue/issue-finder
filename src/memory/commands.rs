@@ -4,7 +4,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::memory::activation::{MemoryActivationRequest, MemoryActivationResult};
-use crate::memory::controls::{MemoryControlPlane, MemoryDecisionHintRequest, MemoryRuntimeMode};
+use crate::memory::controls::{
+    MemoryControlPlane, MemoryDecisionHintRequest, MemoryHintScope, MemoryRuntimeMode,
+};
 use crate::memory::dreaming::MemoryDreamRequest;
 use crate::memory::model::{
     MemoryDream, MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryHint,
@@ -221,7 +223,13 @@ pub fn memory_recall(
         },
         MemoryRuntimeMode::Enabled,
     )?;
-    recall_output(&store, result, query_kind, &now)
+    recall_output(
+        &store,
+        result,
+        query_kind,
+        &now,
+        repo_scope_from_issue(issue),
+    )
 }
 
 pub fn memory_dreams_list(paths: &IssueFinderPaths) -> Result<MemoryDreamsOutput> {
@@ -481,6 +489,7 @@ fn recall_output(
     result: MemoryActivationResult,
     query_kind: MemoryQueryKind,
     now: &str,
+    decision_scope: Option<MemoryHintScope>,
 ) -> Result<MemoryRecallOutput> {
     let items = result
         .items
@@ -503,6 +512,7 @@ fn recall_output(
         store,
         &MemoryDecisionHintRequest {
             now: Some(now.to_string()),
+            scope: decision_scope,
             ..MemoryDecisionHintRequest::default()
         },
     )?
@@ -515,6 +525,17 @@ fn recall_output(
         query_kind: query_kind.as_str().to_string(),
         items,
         decision_eligible_hints,
+    })
+}
+
+fn repo_scope_from_issue(issue: &str) -> Option<MemoryHintScope> {
+    let (repo, number) = issue.rsplit_once('#')?;
+    if repo.split_once('/').is_none() || number.parse::<u64>().is_err() {
+        return None;
+    }
+    Some(MemoryHintScope {
+        scope_type: MemoryHintScopeType::Repo,
+        scope_ref: repo.to_string(),
     })
 }
 

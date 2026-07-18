@@ -57,7 +57,7 @@
       },
       "comments": [
         {
-          "body": "Closed by #5036 (glibc), could verify on musl by #12121, with --all-arches added in #9782.",
+          "body": "The fix shipped in #5036 (glibc); verify on musl before treating this as available work.",
           "authorAssociation": "CONTRIBUTOR",
           "createdAgeDays": 40
         }

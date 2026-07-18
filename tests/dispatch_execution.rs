@@ -86,6 +86,77 @@ fn execution_starts_new_native_session_after_approval() {
 }
 
 #[test]
+fn execution_recovers_after_process_crash_before_turn_start_without_duplicate_turn() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths).unwrap();
+    create_packaged_task(&runtime, 124);
+    let proposal = runtime
+        .propose_dispatch(DispatchProposalRequest {
+            issue: "owner/repo#124".to_string(),
+            agent_id: "codex".to_string(),
+            requested_by: "test".to_string(),
+            selected_thread_id: None,
+            new_session: true,
+        })
+        .unwrap();
+    runtime
+        .resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)
+        .unwrap();
+
+    let mut crashing_adapter = FakeNativeAdapter {
+        panic_start_turn: true,
+        ..FakeNativeAdapter::default()
+    };
+    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = execute_approved_dispatch(runtime.store(), &mut crashing_adapter, &proposal.run.id);
+    }));
+    assert!(crashed.is_err());
+    let interrupted = runtime.store().get_dispatch_run(&proposal.run.id).unwrap();
+    assert_eq!(interrupted.status, DispatchRunStatus::Starting);
+    assert_eq!(
+        interrupted.selected_thread_id.as_deref(),
+        Some("native_started_1")
+    );
+    assert_eq!(
+        runtime
+            .store()
+            .list_artifacts_for_run(&proposal.run.id)
+            .unwrap()
+            .into_iter()
+            .filter(|artifact| artifact.kind == "dispatch_prompt")
+            .count(),
+        1
+    );
+
+    let mut recovering_adapter = FakeNativeAdapter::default();
+    let recovered =
+        execute_approved_dispatch(runtime.store(), &mut recovering_adapter, &proposal.run.id)
+            .unwrap();
+
+    assert_eq!(recovered.run.status, DispatchRunStatus::Running);
+    assert_eq!(recovered.turn.native_turn_id, "turn_1");
+    assert_eq!(
+        recovering_adapter
+            .calls
+            .iter()
+            .filter(|call| call.starts_with("start_turn:"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        runtime
+            .store()
+            .list_artifacts_for_run(&proposal.run.id)
+            .unwrap()
+            .into_iter()
+            .filter(|artifact| artifact.kind == "dispatch_prompt")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn execution_resumes_selected_thread_after_approval() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -139,6 +210,7 @@ fn dispatch_proposal_accepts_native_session_id_selector() {
         })
         .unwrap();
 
+    assert_eq!(proposal.run.status, DispatchRunStatus::Proposed);
     assert_eq!(
         proposal.run.selected_thread_id.as_deref(),
         Some("native_existing_457")
@@ -179,6 +251,7 @@ fn dispatch_proposal_records_actual_new_session_mode_when_flag_is_omitted() {
         })
         .unwrap();
 
+    assert_eq!(proposal.run.status, DispatchRunStatus::Proposed);
     assert_eq!(
         proposal.approval_request.details_json["executionMode"],
         "start_thread"
@@ -363,6 +436,46 @@ fn execution_requires_approved_dispatch() {
             .status,
         DispatchRunStatus::Proposed
     );
+    assert!(adapter.calls.is_empty());
+}
+
+#[test]
+fn execution_rejects_package_with_missing_outcome_contract_before_agent_start() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let runtime = DispatchRuntime::open(paths).unwrap();
+    let task = create_packaged_task(&runtime, 788);
+    let artifact = runtime
+        .store()
+        .get_artifact(task.current_package_artifact_id.as_deref().unwrap())
+        .unwrap();
+    let mut package: IssueTaskPackage =
+        serde_json::from_slice(&runtime.store().read_artifact_bytes(&artifact.id).unwrap())
+            .unwrap();
+    package.outcome_contract.required_artifact.clear();
+    package.outcome_contract.required_fields.clear();
+    runtime
+        .store()
+        .write_task_package_artifact(&task.id, &package)
+        .unwrap();
+    let proposal = runtime
+        .propose_dispatch(DispatchProposalRequest {
+            issue: "owner/repo#788".to_string(),
+            agent_id: "codex".to_string(),
+            requested_by: "test".to_string(),
+            selected_thread_id: None,
+            new_session: true,
+        })
+        .unwrap();
+    runtime
+        .resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)
+        .unwrap();
+
+    let mut adapter = FakeNativeAdapter::default();
+    let error =
+        execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id).unwrap_err();
+
+    assert!(error.to_string().contains("not executable"));
     assert!(adapter.calls.is_empty());
 }
 
@@ -605,6 +718,7 @@ struct FakeNativeAdapter {
     calls: Vec<String>,
     turn_status: Option<String>,
     fail_start_turn: bool,
+    panic_start_turn: bool,
 }
 
 impl NativeExecutionAdapter for FakeNativeAdapter {
@@ -685,6 +799,10 @@ impl NativeExecutionAdapter for FakeNativeAdapter {
         assert!(prompt.contains("approved task package at"));
         assert!(!cwd.trim().is_empty());
         assert!(client_user_message_id.starts_with("issue-finder:"));
+        assert!(
+            !self.panic_start_turn,
+            "injected crash before native turn start"
+        );
         if self.fail_start_turn {
             anyhow::bail!("codex app-server adapter unavailable");
         }

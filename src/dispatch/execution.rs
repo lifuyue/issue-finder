@@ -35,7 +35,13 @@ where
     A: NativeExecutionAdapter,
 {
     let context = prepare_execution_context(store, run_id)?;
-    let starting_run = store.claim_dispatch_run_for_execution(&context.run.id)?;
+    let starting_run = match context.run.status {
+        DispatchRunStatus::Approved => store.claim_dispatch_run_for_execution(&context.run.id)?,
+        DispatchRunStatus::Starting => context.run.clone(),
+        status => anyhow::bail!(
+            "dispatch run {run_id} cannot be executed or recovered from status {status}"
+        ),
+    };
     match execute_started_dispatch(store, adapter, context, starting_run) {
         Ok(result) => Ok(result),
         Err(error) => {
@@ -105,6 +111,7 @@ impl NativeExecutionAdapter for NativeRuntimeExecutionAdapter {
     }
     fn adapter_resume_session(&mut self, id: &str) -> Result<AdapterSession> {
         self.runtime.block_on(self.manager.resume(id))?;
+        self.runtime.block_on(self.manager.reconcile(id))?;
         Ok(runtime_session(id))
     }
     fn adapter_fork_session(&mut self, _: &str) -> Result<AdapterSession> {
@@ -207,6 +214,9 @@ fn prepare_execution_context(store: &DispatchStore, run_id: &str) -> Result<Exec
     let package: IssueTaskPackage =
         serde_json::from_slice(&store.read_artifact_bytes(&package_artifact.id)?)
             .context("dispatch package artifact is not valid IssueTaskPackage v3")?;
+    package
+        .validate_for_execution()
+        .context("dispatch package artifact is not executable")?;
     let context_artifact_path = if package.source.handoff_artifact_id.trim().is_empty() {
         package_artifact.path.clone()
     } else {
@@ -307,20 +317,15 @@ where
         &context.package_artifact,
         &context.codex_md_path,
     );
-    let prompt_artifact = store.write_artifact(
-        NewArtifact {
-            issue_task_id: Some(context.issue_task.id.clone()),
-            run_id: Some(run.id.clone()),
-            kind: "dispatch_prompt".to_string(),
-            content_type: "text/plain".to_string(),
-            metadata_json: json!({
-                "templateVersion": 1,
-                "packageArtifactId": context.package_artifact.id
-            }),
-        },
-        prompt.as_bytes(),
+    let prompt_artifact = existing_or_write_prompt_artifact(
+        store,
+        &run,
+        &context.issue_task,
+        &context.package_artifact,
+        &prompt,
     )?;
     let client_user_message_id = format!("issue-finder:{}", run.id);
+    crate::eval_fault::crash_at("before_turn_start");
     let turn = adapter.adapter_start_turn(
         &native_session.native_session_id,
         &prompt,
@@ -351,6 +356,54 @@ where
         prompt_artifact,
         events,
     })
+}
+
+fn existing_or_write_prompt_artifact(
+    store: &DispatchStore,
+    run: &DispatchRun,
+    issue_task: &IssueTask,
+    package_artifact: &AgentArtifact,
+    prompt: &str,
+) -> Result<AgentArtifact> {
+    let existing = store
+        .list_artifacts_for_run(&run.id)?
+        .into_iter()
+        .filter(|artifact| artifact.kind == "dispatch_prompt")
+        .collect::<Vec<_>>();
+    if existing.len() > 1 {
+        anyhow::bail!(
+            "dispatch run {} has multiple prompt artifacts and cannot be recovered safely",
+            run.id
+        );
+    }
+    if let Some(artifact) = existing.into_iter().next() {
+        if store.read_artifact_bytes(&artifact.id)? != prompt.as_bytes()
+            || artifact
+                .metadata_json
+                .get("packageArtifactId")
+                .and_then(Value::as_str)
+                != Some(package_artifact.id.as_str())
+        {
+            anyhow::bail!(
+                "dispatch run {} prompt artifact does not match its current task package",
+                run.id
+            );
+        }
+        return Ok(artifact);
+    }
+    store.write_artifact(
+        NewArtifact {
+            issue_task_id: Some(issue_task.id.clone()),
+            run_id: Some(run.id.clone()),
+            kind: "dispatch_prompt".to_string(),
+            content_type: "text/plain".to_string(),
+            metadata_json: json!({
+                "templateVersion": 1,
+                "packageArtifactId": package_artifact.id
+            }),
+        },
+        prompt.as_bytes(),
+    )
 }
 
 fn dispatch_status_for_turn(turn: &AdapterTurn) -> DispatchRunStatus {

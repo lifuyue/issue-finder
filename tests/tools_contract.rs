@@ -1240,12 +1240,60 @@ fn daily_and_tool_prepare_gate_share_allowed_category_policy() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn assess_selected_issue_is_read_only_without_global_discovery() {
+    let _env_lock = ENV_LOCK.lock().await;
+    let _file_env_lock = env_lock::EnvLock::acquire();
+    let mock_github = start_mock_tool_github();
+    let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+
+    let assessed = runtime
+        .execute(invocation(
+            "issue-finder.assess",
+            r#"{"issue":"owner/niche#1"}"#,
+            "assess_only_call",
+        ))
+        .await;
+
+    assert!(assessed.success, "{assessed:?}");
+    assert_eq!(assessed.status, "ok");
+    assert_eq!(
+        assessed.structured_content["assessment"]["category"],
+        "niche_but_actionable"
+    );
+    assert_eq!(
+        assessed.structured_content["prepareGate"]["requiresBypass"],
+        true
+    );
+    assert!(load_index(&paths).unwrap().items.is_empty());
+    assert!(!paths.workspace_path_for("owner/niche").exists());
+    assert!(fs::read_dir(&paths.inbox_dir).unwrap().next().is_none());
+    let events = load_events(&paths).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == RecommendationEventType::Read)
+            .count(),
+        1
+    );
+    assert!(!events
+        .iter()
+        .any(|event| event.event_type == RecommendationEventType::Shown));
+
+    mock_github.stop();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
     let _env_lock = ENV_LOCK.lock().await;
     let _file_env_lock = env_lock::EnvLock::acquire();
-    if !git_available() {
-        return;
-    }
+    assert!(
+        git_available(),
+        "git is required for tool runtime integration tests"
+    );
 
     let mock_github = start_mock_tool_github();
     let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());

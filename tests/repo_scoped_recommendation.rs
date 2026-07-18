@@ -56,7 +56,23 @@ async fn repo_scoped_scout_returns_same_repo_results_without_global_repo_cap() {
 
     assert_eq!(result.diagnostics.scope, "repository");
     assert_eq!(result.diagnostics.repository.as_deref(), Some("owner/repo"));
-    assert_eq!(result.ranked.len(), 3);
+    assert_eq!(
+        result.ranked.len(),
+        3,
+        "ranked candidates: {:#?}; diagnostics: {:#?}; requests: {:#?}",
+        result
+            .ranked
+            .iter()
+            .map(|candidate| (
+                candidate.issue.number,
+                &candidate.issue.title,
+                candidate.recommendation.visibility,
+                &candidate.recommendation.reasons,
+            ))
+            .collect::<Vec<_>>(),
+        result.diagnostics,
+        requests,
+    );
     assert!(result
         .ranked
         .iter()
@@ -134,6 +150,10 @@ fn start_repo_scoped_mock_github() -> MockGithubServer {
         while !shutdown_for_thread.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
                     let base_url = base_url_for_thread.clone();
                     let requests = Arc::clone(&requests_for_thread);
                     thread::spawn(move || {

@@ -1,11 +1,12 @@
 use std::path::Path;
 
 use issue_finder::memory::{
-    DispatchMemoryOutcome, MemoryActivationItem, MemoryActivationRequest, MemoryActivationRun,
-    MemoryControlPlane, MemoryDecisionHintRequest, MemoryDreamRequest, MemoryDreamRun,
-    MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType, MemoryHintScope,
-    MemoryHintScopeType, MemoryHintStatus, MemoryHintType, MemoryIndexBuilder, MemoryIngestor,
-    MemoryModelStatus, MemoryQueryKind, MemoryRuntimeMode, MemorySourceChannel, MemoryStore,
+    DispatchMemoryOutcome, ManualMemoryEvent, MemoryActivationItem, MemoryActivationRequest,
+    MemoryActivationRun, MemoryControlPlane, MemoryDecisionHintRequest, MemoryDreamRequest,
+    MemoryDreamRun, MemoryDreamScope, MemoryDreamStatus, MemoryDreamTrigger, MemoryDreamType,
+    MemoryHintScope, MemoryHintScopeType, MemoryHintStatus, MemoryHintType, MemoryIndexBuilder,
+    MemoryIngestor, MemoryModelStatus, MemoryQueryKind, MemoryRawEventType, MemoryRole,
+    MemoryRuntimeMode, MemorySourceChannel, MemoryStore, MemorySubjectType, MemoryTrustLevel,
     NewMemoryDream, NewMemoryHint,
 };
 use issue_finder::paths::IssueFinderPaths;
@@ -14,6 +15,8 @@ use serde_json::json;
 use tempfile::tempdir;
 
 const NOW: &str = "2026-06-18T00:00:00Z";
+const OLD: &str = "2026-06-01T00:00:00Z";
+const NEW: &str = "2026-06-19T00:00:00Z";
 
 #[test]
 fn decision_query_only_returns_approved_pinned_and_deprioritized_hints() {
@@ -194,6 +197,111 @@ fn memory_off_returns_no_hints_and_no_write_mode_recalls_without_persistence_or_
     assert!(store.get_dream_run("no-write-dream").unwrap().is_none());
 }
 
+#[test]
+fn newer_user_explicit_fact_overrides_conflicting_hint_without_rewriting_history() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let store = MemoryStore::open(&paths).unwrap();
+    seed_dream(&store);
+    seed_dispatch_prediction_hint(&store, "old-success-hint", MemoryHintStatus::Approved, OLD);
+    let ingested = MemoryIngestor::new(&store)
+        .ingest_manual_event(&ManualMemoryEvent {
+            id: "new-user-failure".to_string(),
+            event_type: MemoryRawEventType::DispatchFailure,
+            role: MemoryRole::User,
+            trust_level: MemoryTrustLevel::UserExplicit,
+            subject_type: MemorySubjectType::Issue,
+            subject_ref: "owner/repo#42".to_string(),
+            payload_json: json!({
+                "issue": "owner/repo#42",
+                "agentId": "codex",
+                "taskType": "rust_cli_panic",
+                "outcomeKind": "failed",
+                "succeeded": false,
+            }),
+            occurred_at: NEW.to_string(),
+        })
+        .unwrap();
+
+    let hints = MemoryControlPlane::decision_eligible_hints(
+        &store,
+        &MemoryDecisionHintRequest {
+            hint_type: Some(MemoryHintType::Dispatch),
+            scope: Some(repo_scope("owner/repo")),
+            now: Some(NEW.to_string()),
+            ..MemoryDecisionHintRequest::default()
+        },
+    )
+    .unwrap();
+
+    assert!(hints.is_empty());
+    assert_eq!(
+        store.get_hint("old-success-hint").unwrap().unwrap().status,
+        MemoryHintStatus::Approved
+    );
+    assert!(store
+        .get_raw_event(&ingested.raw_event_ids[0])
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn lower_authority_or_non_conflicting_facts_do_not_silence_an_approved_hint() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    let store = MemoryStore::open(&paths).unwrap();
+    seed_dream(&store);
+    seed_dispatch_prediction_hint(&store, "approved-success", MemoryHintStatus::Approved, OLD);
+    MemoryIngestor::new(&store)
+        .ingest_manual_event(&ManualMemoryEvent {
+            id: "llm-failure".to_string(),
+            event_type: MemoryRawEventType::DispatchFailure,
+            role: MemoryRole::Llm,
+            trust_level: MemoryTrustLevel::LlmInferred,
+            subject_type: MemorySubjectType::Issue,
+            subject_ref: "owner/repo#42".to_string(),
+            payload_json: json!({
+                "issue": "owner/repo#42",
+                "agentId": "codex",
+                "taskType": "rust_cli_panic",
+                "outcomeKind": "failed",
+            }),
+            occurred_at: NEW.to_string(),
+        })
+        .unwrap();
+    MemoryIngestor::new(&store)
+        .ingest_manual_event(&ManualMemoryEvent {
+            id: "user-other-agent".to_string(),
+            event_type: MemoryRawEventType::DispatchFailure,
+            role: MemoryRole::User,
+            trust_level: MemoryTrustLevel::UserExplicit,
+            subject_type: MemorySubjectType::Issue,
+            subject_ref: "owner/repo#42".to_string(),
+            payload_json: json!({
+                "issue": "owner/repo#42",
+                "agentId": "other-agent",
+                "taskType": "rust_cli_panic",
+                "outcomeKind": "failed",
+            }),
+            occurred_at: NEW.to_string(),
+        })
+        .unwrap();
+
+    let hints = MemoryControlPlane::decision_eligible_hints(
+        &store,
+        &MemoryDecisionHintRequest {
+            hint_type: Some(MemoryHintType::Dispatch),
+            scope: Some(repo_scope("owner/repo")),
+            now: Some(NEW.to_string()),
+            ..MemoryDecisionHintRequest::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(hints.len(), 1);
+    assert_eq!(hints[0].hint.id, "approved-success");
+}
+
 fn seed_dream(store: &MemoryStore) {
     if store.get_dream_run("controls-dream-run").unwrap().is_some() {
         return;
@@ -265,6 +373,37 @@ fn seed_global_hint(store: &MemoryStore, id: &str, status: MemoryHintStatus) {
             status,
             created_at: NOW.to_string(),
             approved_at: status.is_active_decision_status().then(|| NOW.to_string()),
+            expires_at: None,
+        })
+        .unwrap();
+}
+
+fn seed_dispatch_prediction_hint(
+    store: &MemoryStore,
+    id: &str,
+    status: MemoryHintStatus,
+    created_at: &str,
+) {
+    store
+        .insert_hint(&NewMemoryHint {
+            id: id.to_string(),
+            dream_id: "controls-dream".to_string(),
+            hint_type: MemoryHintType::Dispatch,
+            scope_type: MemoryHintScopeType::Repo,
+            scope_ref: "owner/repo".to_string(),
+            summary: "Codex succeeds on Rust CLI panic tasks".to_string(),
+            policy_json: json!({
+                "kind": "agent_suitability_prior",
+                "agentId": "codex",
+                "taskType": "rust_cli_panic",
+                "prediction": "success",
+            }),
+            weight: 4.0,
+            status,
+            created_at: created_at.to_string(),
+            approved_at: status
+                .is_active_decision_status()
+                .then(|| created_at.to_string()),
             expires_at: None,
         })
         .unwrap();

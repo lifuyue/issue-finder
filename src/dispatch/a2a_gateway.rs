@@ -14,6 +14,33 @@ use super::model::{
 };
 use super::store::DispatchStore;
 
+pub fn validate_fix_result_import(
+    path: &Path,
+    kind: &str,
+    content_type: &str,
+) -> Result<super::model::DispatchValidationOutcome> {
+    if kind != "fix_result" || content_type != "application/json" {
+        anyhow::bail!("fix_ready A2A import requires a JSON fix_result artifact");
+    }
+    let contents =
+        std::fs::read(path).with_context(|| format!("unable to read {}", path.display()))?;
+    let value: Value =
+        serde_json::from_slice(&contents).context("A2A fix_result is not valid JSON")?;
+    let status = value.get("status").and_then(Value::as_str);
+    if !matches!(status, Some("fix_ready" | "fixed" | "completed")) {
+        anyhow::bail!("A2A fix_result has invalid completion status {status:?}");
+    }
+    let validation = value
+        .get("validationOutcome")
+        .or_else(|| value.pointer("/validation/outcome"))
+        .and_then(Value::as_str)
+        .and_then(super::model::DispatchValidationOutcome::parse_value);
+    if validation != Some(super::model::DispatchValidationOutcome::Passed) {
+        anyhow::bail!("A2A fix_result requires validationOutcome=passed");
+    }
+    Ok(super::model::DispatchValidationOutcome::Passed)
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct A2aExportResult {

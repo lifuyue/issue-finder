@@ -20,10 +20,10 @@ use crate::tool_context::{read_context_section, ReadContextError, ReadContextToo
 use crate::tool_outputs::{
     assess_structured_output, assessment_output, candidate_output, failure_output,
     gate_bypass_output, handoff_output, issue_output, prepare_blocked_structured_output,
-    prepare_failed_structured_output, prepare_gate_output, prepare_prepared_structured_output,
-    readiness_output, scout_structured_output, status_structured_output, to_value,
-    AssessmentOutput, GateBypassOutput, IssueOutput, PrepareGateOutput, StatusConfigOutput,
-    StatusGitHubAuthOutput, StatusGitHubOutput,
+    prepare_failed_structured_output, prepare_gate_output, prepare_needs_user_structured_output,
+    prepare_prepared_structured_output, readiness_output, scout_structured_output,
+    status_structured_output, to_value, AssessmentOutput, GateBypassOutput, IssueOutput,
+    PrepareGateOutput, StatusConfigOutput, StatusGitHubAuthOutput, StatusGitHubOutput,
 };
 use crate::tool_specs::{
     TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST,
@@ -693,6 +693,25 @@ fn prepare_outcome_output(
                 invocation,
                 "prepared",
                 format!("Prepared {}.", item.id),
+                structured,
+            )
+        }
+        PrepareOutcome::NeedsUser(item) => {
+            let structured = prepare_needs_user_structured_output(
+                TOOL_PREPARE,
+                output.issue,
+                output.assessment,
+                output.prepare_gate,
+                failure_output(&item),
+                gate_bypass,
+            );
+            IssueFinderToolOutput::success(
+                invocation,
+                "needs_user",
+                format!(
+                    "Preparation needs user input for {}: {}.",
+                    output.issue_label, item.reason
+                ),
                 structured,
             )
         }

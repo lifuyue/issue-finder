@@ -69,6 +69,8 @@ pub struct DispatchArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DispatchCommand {
+    /// Show the derived candidate board across recommendation, inbox, and dispatch state.
+    Board(DispatchBoardArgs),
     /// Import prepared handoffs into dispatch task packages.
     Package(DispatchPackageArgs),
     /// Review imported handoffs before creating task packages.
@@ -99,6 +101,13 @@ pub enum DispatchCommand {
     Trace(DispatchRunReadArgs),
     /// List persisted artifacts for a dispatch run.
     Artifacts(DispatchRunReadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DispatchBoardArgs {
+    /// Print the candidate board as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

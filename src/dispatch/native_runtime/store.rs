@@ -248,6 +248,25 @@ impl NativeThreadStore {
             .optional()
             .map_err(Into::into)
     }
+    pub fn pending_outbox_entries(&self, thread_id: &str) -> Result<Vec<NativeOutboxEntry>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id,thread_id,turn_id,status,payload_json
+             FROM native_outbox
+             WHERE thread_id=?1 AND status='pending'
+             ORDER BY created_at,id",
+        )?;
+        let rows = statement.query_map(params![thread_id], |row| {
+            Ok(NativeOutboxEntry {
+                id: row.get(0)?,
+                thread_id: row.get(1)?,
+                turn_id: row.get(2)?,
+                status: row.get(3)?,
+                payload: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or(Value::Null),
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
     pub fn mark_sent(&self, id: &str, turn_id: Option<&str>) -> Result<()> {
         self.conn.execute("UPDATE native_outbox SET status='sent',turn_id=?2,attempts=attempts+1,updated_at=?3 WHERE id=?1",params![id,turn_id,Utc::now().to_rfc3339()])?;
         Ok(())

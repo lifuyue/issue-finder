@@ -31,6 +31,7 @@ const ENRICHED_SCOUT_CANDIDATE_LIMIT: usize = 40;
 #[derive(Debug, Clone)]
 pub enum PrepareOutcome {
     Prepared(Box<PreparedReportItem>),
+    NeedsUser(FailedReportItem),
     Failed(FailedReportItem),
 }
 
@@ -245,6 +246,24 @@ pub async fn prepare_value_issue_with_options(
                     ],
                 );
             }
+            if workspace.info.dirty {
+                let reason =
+                    "Workspace has unrelated local changes; inspect them and choose an isolated workspace before preparing"
+                        .to_string();
+                if let Some(events) = &events {
+                    let _ = events.append(
+                        "prepare_needs_user",
+                        &[("reason", Value::String(reason.clone()))],
+                    );
+                }
+                return Ok(PrepareOutcome::NeedsUser(FailedReportItem {
+                    repo_full_name: issue.repo_full_name,
+                    issue_number: issue.number,
+                    title: issue.title,
+                    score: ranked.score,
+                    reason,
+                }));
+            }
             if options.explicit_prepare && ranked.value_assessment.execution_score < 40 {
                 workspace.warnings.push(format!(
                     "Explicit prepare bypassed low execution score {}",
@@ -405,6 +424,7 @@ pub async fn daily_from_ranked(
         .await
         {
             Ok(PrepareOutcome::Prepared(item)) => report.prepared.push(*item),
+            Ok(PrepareOutcome::NeedsUser(item)) => report.failed.push(item),
             Ok(PrepareOutcome::Failed(item)) => report.failed.push(item),
             Err(error) => {
                 let reason = error.to_string();
@@ -594,6 +614,10 @@ pub fn render_prepare_outcome(outcome: &PrepareOutcome) -> String {
             item.handoff_json_path,
             item.handoff_md_path,
             item.codex_md_path
+        ),
+        PrepareOutcome::NeedsUser(item) => format!(
+            "Preparation needs user input for {}#{}\nReason: {}",
+            item.repo_full_name, item.issue_number, item.reason
         ),
         PrepareOutcome::Failed(item) => format!(
             "Preparation failed for {}#{}\nReason: {}",

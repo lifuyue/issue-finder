@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -416,6 +417,52 @@ impl IssueTaskPackage {
             ),
             outcome_contract: default_outcome_contract(),
         }
+    }
+
+    pub fn validate_for_execution(&self) -> Result<()> {
+        if self.kind != PACKAGE_KIND || self.version != PACKAGE_VERSION {
+            bail!("unsupported task package kind or version");
+        }
+        if self.issue.repo_full_name.trim().is_empty()
+            || self.issue.number == 0
+            || self.issue.url.trim().is_empty()
+        {
+            bail!("task package issue identity is incomplete");
+        }
+        let required_fields = [
+            "status",
+            "summary",
+            "changedFiles",
+            "reproduction",
+            "successCriteria",
+            "validation",
+            "residualRisks",
+            "failureReason",
+            "suggestedGitHubReply",
+            "sessionContext",
+        ];
+        if self.outcome_contract.required_artifact != FIX_RESULT_ARTIFACT
+            || required_fields.iter().any(|required| {
+                !self
+                    .outcome_contract
+                    .required_fields
+                    .iter()
+                    .any(|field| field == required)
+            })
+            || self.session_context.resumability.required_result_artifact != FIX_RESULT_ARTIFACT
+            || !self
+                .callback_policy
+                .expected_artifacts
+                .iter()
+                .any(|artifact| artifact == FIX_RESULT_ARTIFACT)
+            || !self
+                .expected_outputs
+                .iter()
+                .any(|artifact| artifact == FIX_RESULT_ARTIFACT)
+        {
+            bail!("task package outcome contract is incomplete or inconsistent");
+        }
+        Ok(())
     }
 }
 

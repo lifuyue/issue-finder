@@ -57,60 +57,147 @@ The Rust product depends on neither framework. It exposes a runtime-neutral eval
 contract and stable evidence exports. The external `issue-finder-evals` package owns both
 runtime adapters.
 
-## Implementation Status (2026-07-12)
+## Implementation Status (2026-07-14)
 
-The canonical catalog and all 50 Harbor 0.18 task packages exist and pass framework schema
-validation. This is not the same as 50 executable benchmark tasks:
+The canonical catalog and all 50 Harbor task packages exist, but generated structure and an
+executable reference are deliberately separated from observed capability. The authoritative
+`issue-finder-evals coverage` result for the current source tree is:
 
 | Status | Count | Meaning |
 | --- | ---: | --- |
-| Release reference | 50 | Real product process or task-specific integration process, Evidence Bundle, ATIF, canonical hard gates, and an independent rerun oracle exist |
-| Mock-only reference | 0 | No catalog task depends solely on a fake adapter |
-| Missing implementation | 0 | Every catalog task has a task-specific reference and independent outcome grader |
+| Schema ready | 50 | Canonical specs and generated packages parse |
+| Reference ready | 49 | A deterministic implementation exists; this is not observed product or Agent success |
+| Independent reference ready | 48 | Verifier-owned process, state, protocol, hidden-business, or coding oracle exists |
+| Internal reference only | 1 | Candidate-owned Rust regression exists but cannot register conformance |
+| Conformance ready | 0 | No retained trial matches the current product/verifier fingerprint and external trust inputs |
+| Runtime qualification ready | 0 | Historical C01–C04 runs are diagnostic after the current verifier/product changes |
+| Trusted Agent ready | 0 | Current diagnostic runs were deliberately not registered as release evidence |
+| Release ready | 0 | No current-revision trial satisfies the complete external trust audit |
+| Efficiency ready | 0 | Efficiency is granted only to a trusted current-revision Agent result |
 
-The external package exposes `issue-finder-evals coverage` as the machine-readable source
-of truth. A generated task directory is never counted as complete. Capability tasks R06,
-R07, E06, and C01-C04 require authenticated native runtime evidence in addition to a
-reference pass.
+The earlier cohort of 40 conformance, four runtime-qualification, and five Agent results now fails
+closed after the product and verifier changed; it remains diagnostic history and is not described
+as current coverage. Recommendation samples use opaque identities independent of
+their hidden role; task index and counterfactual policy names are absent from IDs, repository
+names and issue text, and an ID-only predictor is a required negative control. Coding hidden tests
+use exhaustive finite domains where the task contract permits it: C01 covers every byte, C02 every
+`u16 × unit` pair, and C04 every value/threshold pair in the documented `0..=100` domain. Explicit
+range- and single-point mutants must fail.
 
-Verified runs in this implementation round:
+M05 now runs as a genuine isolated Harbor product-Agent task rather than a product-owned fixture.
+The harness seeds randomized old LLM-inferred and newer user-explicit facts plus approved,
+conflicting, control, and candidate hints. The Agent may call only the public `memory recall`
+driver. The Supervisor signs that driver's SHA-256 and executable mode before and after execution,
+and the verifier rejects transcript mutation tools. A separate verifier compares the complete SQLite projection before and after, requires one
+new activation trace, preserves all raw history, checks exact authority penalties and ordering,
+and proves only the unrelated approved control hint is decision eligible. A current real
+`gpt-5.4` trial earned capability reward 1.0 without registration. The real trial used
+28,331 input tokens, 516 output tokens, two tool calls, about 25 seconds, and USD 0.0252875; its
+efficiency dimension correctly remained zero under the current token budget.
 
-1. Inspect ran all 40 Inspect-eligible canonical reference/conformance tasks in Docker in
-   `runs/20260712T153045Z`: 40/40 passed every scorer and hard gate with four configured
-   sandboxes. A retained earlier failure exposed that integration oracles depended on an
-   unavailable Cargo workspace; the image now supplies release-built test executables to
-   the isolated harness instead of weakening the oracle. This proves harness/product
-   contract consistency; it is not reported as model or agent capability.
-2. Harbor ran F01, F02, F03, and D01 with separate no-network verifier containers and
-   scalar plus dimensional rewards of 1.0.
-3. Harbor's F01 no-op negative control completed without verifier exception and received
-   reward 0 for missing evidence.
-4. R07 passed with the configured real provider across two standalone app-server
-   processes while preserving the selected thread identity.
-5. The installed Codex daemon completed R06 with authenticated user and agent transcript
-   markers. E06 then exposed and verified fixes for native item identity across threads
-   and turns before passing a real disconnect, reconnect, and reconciliation trial.
-6. Harbor ran C01-C04 with the real Codex agent and the configured model endpoint in
-   isolated synthetic Rust repositories. C01, C02, C03, and C04 each received reward 1.0
-   from separate verifier containers; C03 correctly requested missing context without a
-   source change, and C04 honestly reported the injected validation failure.
-7. After runtime hardening, Harbor reran D07 with separate agent and verifier images and
-   no product source mounted. Outcome, policy, safety, artifact, recovery, and measured
-   efficiency rewards were all 1.0. Capability completion is additionally gated by a
-   versioned evidence registry rather than generated-directory presence.
+P06, X02, and M05 now share one product-Agent driver-integrity boundary. The Supervisor records
+each task's public driver before and after execution, the verifier compares it with a canonical
+SHA-256 owned by the eval package, and the raw transcript permits only the driver plus bounded
+read-only inspection. This rejects both patch-tool mutation and shell-based rewrite-before-run;
+preinstalling a different but stable driver also fails.
 
-The runtime hardening adds an atomic single-winner dispatch claim, idempotent native
-outbox behavior, connection-epoch-scoped approval requests, bounded async JSON-RPC calls,
-explicit reconciliation, and a product-owned outcome validator. `fix_ready` is accepted
-only when the result artifact belongs to the current run and issue and contains a passed
-`fix_result` validation outcome. A disconnect may honestly reconcile to `needs_user`;
-the benchmark forbids duplicate user messages and does not relabel interruption as
-recovery success.
+E01–E03 now inject faults inside the production dispatch/native-runtime owner paths and abort the
+real process. The external verifier ignores the producer's liveness flag and independently checks
+the complete database transition, event order, outbox state, public command output, randomized
+run/thread/marker identity, raw RPC transcript, and exactly-once turn or outcome. R06 uses the same
+raw-RPC discipline for its initialize/thread/start/turn/start/thread/read success claim.
 
-The verifier fails closed when an authoritative artifact root, complete observed-domain
-manifest, native events, non-empty ATIF trajectory, or digest-bound artifact is absent.
-Self-reporting the expected outcome without those independent files receives zero reward;
-an adversarial regression test locks this boundary.
+Conformance and runtime qualification now use two independent trust layers. The Supervisor signs
+the execution-time filesystem, network, process, state, transcript and resource observations.
+After the verifier and framework finish, the trusted runner signs the complete final evidence
+payload, including task/trial identity, model/provider, product revision and image, task manifest,
+run configuration, framework log, verifier result, scores and verdict. Registration resolves the
+key through an external pre-provisioned trust store and consumes a task/revision-bound challenge
+from an external ledger exactly once. Coverage rechecks the signature, final payload hash, ledger
+binding and retained artifacts. Therefore a real Supervisor observation cannot be replayed with a
+hand-written passing verifier result or a framework result from another trial.
+
+Inspect conformance registration and coverage independently reopen the retained `.eval` file and
+require exactly one matching task sample whose model, scorer values, explanations and verdict
+equal the signed result. Failed trials are rejected before challenge consumption. Agent evidence
+uses schema v9 without legacy fallback: the final attestation covers the canonical manifest and
+the retained run configuration, framework log and grader. Inspect Agent audit reopens the exact
+`.eval` sample; Harbor Agent audit validates the complete job statistics and unique task/trial,
+then parses the grader as the canonical `VerifierResult`. This closes the former invalid-test path
+where a signed Supervisor observation could be paired with arbitrary hashes or `{"errors": []}`.
+The retained D02/D07/F01/F03/F04 diagnostic cohort targeted an earlier product fingerprint. D07 receives the
+same assess tool descriptor a production Agent bridge would expose, derives arguments for a
+runtime-randomized issue, and is graded from command semantics, structured output, GitHub request
+scope and workspace immutability. Two earlier D07 attempts that guessed unsupported CLI syntax
+remain failed diagnostics and consumed no challenge. Deterministic conformance still cannot
+substitute for Agent evidence on the other tasks.
+
+These counts require the corresponding external trust store and consumed run ledger; without
+them the audit fails closed to zero. All evidence produced before this contract remains diagnostic
+only. Changing product, verifier,
+collector, task manifest or attestation code invalidates the affected current-revision count; old
+JSON is not migrated or accepted through a compatibility path. Compiler smoke tests, parser unit
+tests, product-owned Rust tests and registry booleans never increment conformance, qualification,
+Agent, release or efficiency coverage.
+
+R07 currently has an executable reference backed by an exact product-owned
+Rust test. It remains a useful regression diagnostic, but the candidate revision also supplies
+its test binary, so it is not an independent behavioral oracle. The eval package labels it
+`internal_regression`, rejects attempts to register it as conformance, and reports it only as
+reference-ready until the task gains a verifier-owned CLI/state/network oracle or a supervised
+Agent trial. E06 is not part of this gap: although it retains a product regression mapping, its
+canonical verifier grades the public fault-runtime report and raw app-server RPC transcript.
+
+The product fixes discovered by the earlier diagnostic runs remain covered by independent
+regressions: repository-scoped memory suppression no longer leaks across repositories, blocking
+GitHub HTTP calls no longer panic inside the Tokio CLI runtime, native item identity is scoped by
+thread and turn, and provider/limit/disconnect reports are checked against raw app-server RPC
+transcripts. Those regressions do not restore benchmark coverage until fresh trusted runs produce
+the new evidence contract.
+
+Capability and efficiency are separate machine-readable gates. Historical Coding diagnostics
+reported roughly USD 0.077–0.116 and 64k–124k tokens per successful outcome, but those trials
+predate Agent evidence v9 and are not release-valid. They remain useful for sizing Coding Agent
+budgets. The five historical Inspect Agent trials used 1,182–2,544 tokens, 13.8–22.3 seconds, one
+observed product call and USD 0.0048–0.0157 per verified success.
+
+The first schema-v6 Inspect run also exercised failure replay rather than hiding a post-run exporter
+failure. All four model samples completed successfully, but evidence export rejected an unstable
+canonical payload before consuming any challenge. The exporter now validates and signs a
+schema-normalized payload, Supervisor set serialization is deterministic, each concurrent task
+receives its own external challenge, and registration prevalidates the complete batch before
+consuming its challenges. A recovery command reopened the completed `.eval` instead of rerunning
+the model and registered D02/F01/F03/F04. They used 1,178–1,989 tokens, one observed tool call and
+12.1–17.5 seconds each. The trusted price table binds USD 0.0048–0.0108 per verified success,
+so all four passed their task resource and cost budgets for that previous product revision; they
+do not grant current-revision efficiency credit.
+
+The Harbor host collector records process tables and scopes egress-sidecar logs with
+`docker logs --since <agent-start>`, preventing connections from reused containers or earlier
+trials from contaminating causality. Successful connections must match the runner allowlist.
+The observation is finalized and re-signed at trial end so Harbor's trusted model cost joins
+tokens, CPU, memory, tool calls and wall time; host and verifier artifact copies remain
+byte-identical.
+
+Release evidence additionally binds the exact supervisor collector source, durable raw
+transcript, and ATIF trajectory. Inspect trajectories are re-derived from the signed message
+stream. Harbor release export reconstructs canonical tool results from the host-observed Codex
+JSONL. The Supervisor-signed rollout independently binds original call ids, exact order,
+functions, full exec arguments and full apply-patch input; the host transcript binds actual
+execution, results and lifecycle. This permits scheduler reordering of genuinely concurrent
+calls without allowing ATIF to rewrite the model's call sequence.
+Unobserved terminal prefixes, appended output, duplicate results and cross-group tool moves fail.
+This caught and fixed a collector defect that counted command executions but omitted
+file-change/apply-patch calls; the affected Coding trials were rerun rather than migrated by
+assertion.
+
+Coding verification also compares the supervisor-owned pre-execution workspace manifest to
+the hidden task fixture. Replacing the entire repository, replaying a C01 workspace as C02,
+or submitting only a valid final tree now fails even when task/trial signatures and tests are
+otherwise valid. A verifier upgrade may re-grade immutable signed trial evidence into a
+separate `reverification/` result; it never overwrites the original Harbor job result.
+F02 remains conformance-only because the product exposes no Agent-callable external-contract
+validation operation; inventing an answer-only task would recreate the invalid benchmark.
 
 The subsequent native-runtime recheck installed the official standalone Codex 0.144.1 and
 proved an authenticated daemon round trip. Failed repetitions exposed two independent
@@ -343,7 +430,7 @@ is `I` for Inspect, `H` for Harbor, and `BOTH` for cross-runtime conformance.
 | --- | --- | --- | --- | --- | --- | --- |
 | E01 | resilience | Crash before native turn start | recovered with at most one turn | G5 | B | BOTH |
 | E02 | resilience | Crash after turn start and before projection | reconciled without duplicate send | G5,G6 | B | BOTH |
-| E03 | resilience | Crash after event projection and before outcome | one terminal outcome | G5 | B | BOTH |
+| E03 | resilience | Crash after outcome insert and before run/event projection | one terminal outcome | G5 | B | BOTH |
 | E04 | resilience | Provider timeout or 502 | completed after retry or interrupted/provider | G1,G5,G7 | B | I |
 | E05 | regression | Cost, token, or time limit reached | interrupted/limit, not product failure | G0,G1,G7 | B | I |
 | E06 | capability | Native runtime disconnect or lag | recovered or needs_user with no silent loss | G1,G5,G6 | B | H |
@@ -364,10 +451,21 @@ The process-level catalog sits above current fast checks:
 ```text
 107 recommendation fixtures        -> ranking and feedback algorithms
 9 recommendation quality samples  -> product recommendation rubric
-8 memory samples                  -> memory algorithm semantics
+2 executable memory scenarios    -> candidate-hint isolation and tombstone cascade
 6 agent-loop samples              -> fast cross-module contracts
 50 process-level tasks            -> real processes, environments, agents, recovery, and verifier
 ```
+
+The memory eval deliberately contains only scenarios that execute product behavior and derive
+their verdict from observed database state. Historical declaration-only samples that always
+reported `passed=true` were removed; ordinary unit/integration coverage is not presented as an
+offline eval result.
+
+Recommendation offline eval also accepts `--dataset PATH`. This is the narrow product boundary
+used by external hidden-business graders: the product ranks supplied issue facts and emits raw
+rank/visibility observations, while authoritative labels and final verdict computation remain in
+the external verifier. Built-in datasets remain internal regression coverage and are not treated
+as independent business truth.
 
 ## Metrics and Operating Matrix
 

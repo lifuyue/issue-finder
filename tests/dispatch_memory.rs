@@ -116,6 +116,51 @@ fn issue_review_rejection_records_memory_and_blocks_dispatch() {
 }
 
 #[test]
+fn issue_review_approval_creates_exactly_one_package_v3() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let issue = github_issue("owner/repo", 457);
+    let handoff = Handoff::build(&issue, &prepared_workspace(dir.path()));
+    let written = write_handoff(&paths, &handoff, &issue).unwrap();
+    upsert_ready(&paths, &issue, 90, &written).unwrap();
+    let runtime = DispatchRuntime::open(paths).unwrap();
+
+    let imported = runtime.import_handoff_from_inbox(&written.id).unwrap();
+    assert_eq!(imported.approval_request.status, ApprovalStatus::Pending);
+    assert!(imported.package_artifact.is_none());
+
+    let approved = runtime
+        .approve_issue_review(&imported.approval_request.id)
+        .unwrap();
+
+    assert_eq!(approved.approval_request.status, ApprovalStatus::Approved);
+    assert_eq!(approved.issue_task.status, IssueTaskStatus::UserApproved);
+    assert_eq!(approved.package.as_ref().unwrap().version, 3);
+    let package_artifact = approved.package_artifact.as_ref().unwrap();
+    assert_eq!(package_artifact.kind, "issue_task_package");
+    assert_eq!(
+        runtime
+            .store()
+            .list_artifacts_for_issue_task(&approved.issue_task.id)
+            .unwrap()
+            .iter()
+            .filter(|artifact| artifact.kind == "issue_task_package")
+            .count(),
+        1
+    );
+    assert_eq!(
+        runtime
+            .store()
+            .get_issue_task(&approved.issue_task.id)
+            .unwrap()
+            .current_package_artifact_id
+            .as_deref(),
+        Some(package_artifact.id.as_str())
+    );
+}
+
+#[test]
 fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());

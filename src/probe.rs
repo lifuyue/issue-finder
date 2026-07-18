@@ -228,6 +228,10 @@ impl SafeProbeRunner {
 
     fn run_one(&self, workspace: &Path, probe: SafeProbeCommand) -> ProbeResult {
         let argv = probe.argv();
+        self.run_argv(workspace, probe.id(), argv, probe.risk())
+    }
+
+    fn run_argv(&self, workspace: &Path, id: &str, argv: Vec<String>, risk: &str) -> ProbeResult {
         let started = Instant::now();
         let mut warnings = Vec::new();
         let mut command = Command::new(&argv[0]);
@@ -241,14 +245,14 @@ impl SafeProbeRunner {
             Ok(child) => child,
             Err(error) => {
                 return ProbeResult {
-                    id: probe.id().to_string(),
+                    id: id.to_string(),
                     argv,
                     cwd: workspace.to_string_lossy().to_string(),
                     exit_code: None,
                     duration_ms: elapsed_ms(started.elapsed()),
                     stdout_excerpt: String::new(),
                     stderr_excerpt: String::new(),
-                    risk: probe.risk().to_string(),
+                    risk: risk.to_string(),
                     timed_out: false,
                     warnings: vec![format!("Unable to start probe command: {error}")],
                 };
@@ -327,14 +331,14 @@ impl SafeProbeRunner {
         }
 
         ProbeResult {
-            id: probe.id().to_string(),
+            id: id.to_string(),
             argv,
             cwd: workspace.to_string_lossy().to_string(),
             exit_code: status.and_then(|status| status.code()),
             duration_ms: elapsed_ms(started.elapsed()),
             stdout_excerpt,
             stderr_excerpt,
-            risk: probe.risk().to_string(),
+            risk: risk.to_string(),
             timed_out,
             warnings,
         }
@@ -531,7 +535,11 @@ fn elapsed_ms(duration: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{excerpt, SafeProbeCommand};
+    use std::time::Duration;
+
+    use tempfile::tempdir;
+
+    use super::{excerpt, SafeProbeCommand, SafeProbeRunner};
 
     #[test]
     fn probe_command_builders_produce_exact_argv_arrays() {
@@ -567,5 +575,33 @@ mod tests {
         let (excerpt, _, invalid_utf8) = excerpt(&[0xff, b'a'], 2);
         assert!(excerpt.contains('a'));
         assert!(invalid_utf8);
+    }
+
+    #[test]
+    fn timed_out_probe_is_recorded_as_warning_without_success() {
+        let workspace = tempdir().unwrap();
+        let runner = SafeProbeRunner {
+            timeout: Duration::from_millis(20),
+            max_output_bytes: 1024,
+            max_output_lines: 20,
+        };
+
+        let result = runner.run_argv(
+            workspace.path(),
+            "injected_timeout",
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "sleep 2".to_string(),
+            ],
+            "low",
+        );
+
+        assert!(result.timed_out);
+        assert_eq!(result.exit_code, None);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Probe timed out after 20 ms")));
     }
 }

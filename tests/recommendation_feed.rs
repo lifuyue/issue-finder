@@ -340,7 +340,7 @@ fn possibly_resolved_status_verification_issue_is_hidden_by_quality_policy() {
     );
     add_comment(
         &mut ranked,
-        "Closed by #5036 (glibc), could verify on musl by #12121, with --all-arches added in #9782.",
+        "The fix shipped in #5036 (glibc); verify on musl before treating this as available work.",
     );
 
     apply_recommendation_assessments(std::slice::from_mut(&mut ranked), &HashMap::new());

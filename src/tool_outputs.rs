@@ -458,6 +458,27 @@ pub fn prepare_failed_structured_output(
     })
 }
 
+pub fn prepare_needs_user_structured_output(
+    tool: &str,
+    issue: IssueOutput,
+    assessment: AssessmentOutput,
+    prepare_gate: PrepareGateOutput,
+    failure: FailureOutput,
+    gate_bypass: Option<GateBypassOutput>,
+) -> Value {
+    to_value(PrepareFailedStructuredOutput {
+        kind: OUTPUT_KIND.to_string(),
+        tool: tool.to_string(),
+        status: "needs_user".to_string(),
+        success: true,
+        issue,
+        assessment,
+        prepare_gate,
+        failure,
+        gate_bypass,
+    })
+}
+
 pub fn status_structured_output(
     tool: &str,
     status: String,

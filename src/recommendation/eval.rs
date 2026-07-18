@@ -428,6 +428,24 @@ pub fn run_offline_eval(output_dir: &Path) -> Result<EvaluationReport> {
     Ok(report)
 }
 
+pub fn run_external_dataset_eval(
+    dataset_path: &Path,
+    output_dir: &Path,
+) -> Result<EvaluationReport> {
+    let raw = fs::read_to_string(dataset_path)
+        .with_context(|| format!("unable to read eval dataset {}", dataset_path.display()))?;
+    let dataset = serde_json::from_str::<EvaluationDataset>(&raw)
+        .with_context(|| format!("invalid eval dataset {}", dataset_path.display()))?;
+    let dataset_report = evaluate_dataset(&dataset);
+    let overall = aggregate_metrics(std::iter::once(&dataset_report.metrics));
+    let report = EvaluationReport {
+        overall,
+        datasets: vec![dataset_report],
+    };
+    write_offline_report_snapshot(&report, output_dir)?;
+    Ok(report)
+}
+
 pub async fn run_live_eval(
     base_config: &Config,
     limit: usize,
