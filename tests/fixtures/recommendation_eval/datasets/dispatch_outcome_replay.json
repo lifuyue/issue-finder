@@ -29,7 +29,7 @@
         {
           "approved": true,
           "repoFullName": "clap-rs/clap",
-          "outcomeKind": "fix_ready",
+          "outcomeKind": "success",
           "taskClass": "rust_cli_panic"
         }
       ],
@@ -103,7 +103,7 @@
       "dispatchOutcomes": [
         {
           "approved": true,
-          "outcomeKind": "blocked",
+          "outcomeKind": "failed",
           "failureClass": "policy_blocked",
           "taskClass": "rust_cli_panic"
         }
@@ -141,7 +141,7 @@
       "dispatchOutcomes": [
         {
           "approved": false,
-          "outcomeKind": "fix_ready",
+          "outcomeKind": "success",
           "taskClass": "rust_cli_panic"
         }
       ],
@@ -178,7 +178,7 @@
       "dispatchOutcomes": [
         {
           "approved": true,
-          "outcomeKind": "fix_ready",
+          "outcomeKind": "success",
           "taskClass": "rust_cli_panic"
         }
       ],
@@ -328,7 +328,7 @@
       "dispatchOutcomes": [
         {
           "approved": true,
-          "outcomeKind": "fix_ready",
+          "outcomeKind": "success",
           "taskClass": "rust_cli_panic"
         },
         {

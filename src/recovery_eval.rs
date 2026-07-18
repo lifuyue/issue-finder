@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::dispatch::{
-    ApprovalStatus, DispatchProposalRequest, DispatchRunStatus, DispatchRuntime, IssueTaskPackage,
-    IssueTaskPackageIssue, IssueTaskStatus, NewIssueTask,
+    ApprovalStatus, DispatchProposalRequest, DispatchRunStatus, DispatchRuntime, IssueTaskStatus,
+    NewIssueTask, TaskIdentity, TaskPackage,
 };
 use crate::paths::IssueFinderPaths;
 
@@ -48,13 +48,16 @@ pub fn prepare_recovery_eval(
         priority: Some(100),
         category: Some("high_value_ready".to_string()),
     })?;
-    let mut package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let mut package = TaskPackage::new(TaskIdentity {
         repo_full_name: repo,
-        number,
+        issue_number: number,
         title,
         url,
     });
-    package.workspace_policy.workspace.path = workspace.to_string();
+    package.workspace.path = workspace.to_string();
+    package.context_snapshot.snapshot_id = "recovery-eval-snapshot".to_string();
+    package.context_snapshot.artifact_id = "recovery-eval-snapshot-artifact".to_string();
+    package.context_snapshot.entry_artifact_id = "recovery-eval-entry-artifact".to_string();
     runtime
         .store()
         .write_task_package_artifact(&task.id, &package)?;

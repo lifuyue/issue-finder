@@ -10,11 +10,11 @@ use std::time::Duration;
 use anyhow::Result;
 use issue_finder::config::Config;
 use issue_finder::dispatch::{
-    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
-    DispatchRuntime, DispatchValidationOutcome, GitHubCommentWriter, GitHubInteractionDecisionKind,
-    GitHubInteractionStatus, GitHubInteractionType, IssueTaskPackage, IssueTaskPackageIssue,
-    IssueTaskStatus, NewArtifact, NewDispatchRun, NewDispatchRunOutcome, NewIssueTask,
-    PostedGitHubComment, ReqwestGitHubCommentWriter,
+    ApprovalStatus, DispatchOutcomeKind, DispatchRunStatus, DispatchRuntime,
+    DispatchValidationOutcome, GitHubCommentWriter, GitHubInteractionDecisionKind,
+    GitHubInteractionStatus, GitHubInteractionType, IssueTaskStatus, NewArtifact, NewDispatchRun,
+    NewDispatchRunOutcome, NewIssueTask, PostedGitHubComment, ReqwestGitHubCommentWriter,
+    TaskIdentity, TaskPackage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -248,7 +248,7 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
         .create_dispatch_run(NewDispatchRun {
             issue_task_id: task.id.clone(),
             agent_id: "codex".to_string(),
-            status: DispatchRunStatus::Completed,
+            status: DispatchRunStatus::Succeeded,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
             selected_thread_id: None,
@@ -276,7 +276,7 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
         .record_dispatch_run_outcome(NewDispatchRunOutcome {
             run_id: run.id.clone(),
             idempotency_key: "final-success".to_string(),
-            outcome_kind: DispatchOutcomeKind::FixReady,
+            outcome_kind: DispatchOutcomeKind::Success,
             failure_class: None,
             failure_detail: None,
             task_class: None,
@@ -318,7 +318,7 @@ fn final_github_comment_is_derived_from_fix_result_artifact() {
     assert_eq!(posted.interaction.status, GitHubInteractionStatus::Posted);
     assert_eq!(
         runtime.store().get_issue_task(&task.id).unwrap().status,
-        IssueTaskStatus::GithubPosted
+        IssueTaskStatus::Succeeded
     );
 }
 
@@ -332,7 +332,7 @@ fn final_github_comment_requires_explicit_suggested_reply() {
         .create_dispatch_run(NewDispatchRun {
             issue_task_id: task.id.clone(),
             agent_id: "codex".to_string(),
-            status: DispatchRunStatus::Completed,
+            status: DispatchRunStatus::Succeeded,
             requested_by: "test".to_string(),
             approval_state: ApprovalStatus::Approved,
             selected_thread_id: None,
@@ -356,7 +356,7 @@ fn final_github_comment_requires_explicit_suggested_reply() {
         .record_dispatch_run_outcome(NewDispatchRunOutcome {
             run_id: run.id.clone(),
             idempotency_key: "final-missing-reply".to_string(),
-            outcome_kind: DispatchOutcomeKind::FixReady,
+            outcome_kind: DispatchOutcomeKind::Success,
             failure_class: None,
             failure_detail: None,
             task_class: None,
@@ -414,17 +414,7 @@ fn context_gap_with_suggested_reply_drafts_clarification_comment() {
         .unwrap();
     runtime
         .store()
-        .record_dispatch_run_outcome(NewDispatchRunOutcome {
-            run_id: run.id.clone(),
-            idempotency_key: "clarification-needed".to_string(),
-            outcome_kind: DispatchOutcomeKind::NeedsUser,
-            failure_class: Some(DispatchOutcomeFailureClass::ContextInsufficient),
-            failure_detail: Some("expected behavior is unclear".to_string()),
-            task_class: None,
-            validation_outcome: None,
-            result_artifact_id: Some(fix_result.id.clone()),
-            metadata_json: json!({ "source": "test" }),
-        })
+        .set_dispatch_run_result_artifact(&run.id, &fix_result.id)
         .unwrap();
 
     let result = runtime.draft_github_final_comment(&run.id, None).unwrap();
@@ -691,9 +681,9 @@ fn imported_issue_task(runtime: &DispatchRuntime) -> issue_finder::dispatch::Iss
             category: Some("high_value_ready".to_string()),
         })
         .unwrap();
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number: 123,
+        issue_number: 123,
         title: "Fix parser panic".to_string(),
         url: "https://github.com/owner/repo/issues/123".to_string(),
     });

@@ -5,18 +5,36 @@ use super::model::{DispatchOutcomeKind, DispatchRun, DispatchValidationOutcome, 
 use super::runtime::DispatchOutcomeRecordRequest;
 use super::store::DispatchStore;
 
-pub fn validate_outcome(
+const REQUIRED_RESULT_FIELDS: &[&str] = &[
+    "status",
+    "summary",
+    "changedFiles",
+    "reproduction",
+    "successCriteria",
+    "validation",
+    "residualRisks",
+    "failureReason",
+    "suggestedGitHubReply",
+    "sessionContext",
+];
+
+pub(crate) fn validate_outcome(
     store: &DispatchStore,
     run: &DispatchRun,
     issue_task: &IssueTask,
     request: &DispatchOutcomeRecordRequest,
 ) -> Result<()> {
+    let requires_result = matches!(
+        request.outcome_kind,
+        DispatchOutcomeKind::Success | DispatchOutcomeKind::Partial
+    );
     let Some(artifact_id) = request.result_artifact_id.as_deref() else {
-        if request.outcome_kind == DispatchOutcomeKind::FixReady {
-            anyhow::bail!("fix_ready requires a fix_result artifact");
+        if requires_result {
+            anyhow::bail!("{} requires a result artifact", request.outcome_kind);
         }
         return Ok(());
     };
+
     let artifact = store.get_artifact(artifact_id)?;
     if artifact.run_id.as_deref() != Some(run.id.as_str())
         || artifact.issue_task_id.as_deref() != Some(issue_task.id.as_str())
@@ -26,19 +44,38 @@ pub fn validate_outcome(
             run.id
         );
     }
-    if artifact.kind != "fix_result" || artifact.content_type != "application/json" {
-        anyhow::bail!("result artifact {artifact_id} is not a JSON fix_result");
+    if artifact.kind != "candidate_result" || artifact.content_type != "application/json" {
+        anyhow::bail!("result artifact {artifact_id} is not a JSON candidate_result");
     }
+
     let value: Value = serde_json::from_slice(&store.read_artifact_bytes(artifact_id)?)
-        .context("fix_result artifact is not valid JSON")?;
-    let status = value.get("status").and_then(Value::as_str);
-    if request.outcome_kind == DispatchOutcomeKind::FixReady {
-        if request.validation_outcome != Some(DispatchValidationOutcome::Passed) {
-            anyhow::bail!("fix_ready requires validationOutcome=passed");
+        .context("candidate_result artifact is not valid JSON")?;
+    let object = value
+        .as_object()
+        .context("candidate_result artifact must be a JSON object")?;
+    for field in REQUIRED_RESULT_FIELDS {
+        if !object.contains_key(*field) {
+            anyhow::bail!("candidate_result artifact is missing required field {field}");
         }
-        if !matches!(status, Some("fix_ready" | "fixed" | "completed")) {
-            anyhow::bail!("fix_ready conflicts with fix_result status {status:?}");
+    }
+
+    let status = object.get("status").and_then(Value::as_str);
+    let expected_status = match request.outcome_kind {
+        DispatchOutcomeKind::Success => "success",
+        DispatchOutcomeKind::Partial => "partial",
+        DispatchOutcomeKind::Failed => "failed",
+        DispatchOutcomeKind::Canceled => {
+            anyhow::bail!("canceled outcomes do not accept candidate result artifacts")
         }
+    };
+    if status != Some(expected_status) {
+        anyhow::bail!(
+            "{} outcome conflicts with result status {status:?}",
+            request.outcome_kind
+        );
+    }
+    if requires_result && request.validation_outcome != Some(DispatchValidationOutcome::Passed) {
+        anyhow::bail!("{} requires validationOutcome=passed", request.outcome_kind);
     }
     Ok(())
 }

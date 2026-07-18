@@ -1,36 +1,133 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use super::{AppServerClient, AppServerEvent, NativeThreadStore};
+use super::{AppServerClient, AppServerEvent, CodexRuntimeStore, PendingRequest, WorkerMcpConfig};
 
 pub struct SendTurnRequest {
     pub thread_id: String,
     pub prompt: String,
     pub cwd: String,
     pub client_user_message_id: String,
+    pub output_schema: Option<Value>,
 }
 pub struct StartedTurn {
     pub thread_id: String,
     pub turn_id: String,
     pub client_user_message_id: String,
 }
-pub struct NativeThreadManager {
+pub struct CodexRuntimeManager {
     client: AppServerClient,
-    store: NativeThreadStore,
+    store: CodexRuntimeStore,
     connection_epoch: String,
 }
 
-impl NativeThreadManager {
-    pub async fn connect(store: NativeThreadStore) -> Result<Self> {
-        store.orphan_pending_server_requests()?;
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDiscovery {
+    pub models: Value,
+    pub provider_capabilities: Value,
+    pub permission_profiles: Value,
+    pub skills: Value,
+    pub mcp_servers: Value,
+}
+
+impl CodexRuntimeManager {
+    pub async fn connect(store: CodexRuntimeStore) -> Result<Self> {
         Ok(Self {
             client: AppServerClient::connect().await?,
             store,
             connection_epoch: connection_epoch(),
         })
     }
+    pub async fn connect_worker(
+        store: CodexRuntimeStore,
+        config: &WorkerMcpConfig,
+    ) -> Result<Self> {
+        Ok(Self {
+            client: AppServerClient::connect_worker(config).await?,
+            store,
+            connection_epoch: connection_epoch(),
+        })
+    }
+
+    pub async fn discover_runtime(&self, required_mcp_server: &str) -> Result<RuntimeDiscovery> {
+        let discovery = RuntimeDiscovery {
+            models: self.client.request("model/list", json!({})).await?,
+            provider_capabilities: self
+                .client
+                .request("modelProvider/capabilities/read", json!({}))
+                .await?,
+            permission_profiles: self
+                .client
+                .request("permissionProfile/list", json!({}))
+                .await?,
+            skills: self.client.request("skills/list", json!({})).await?,
+            mcp_servers: self
+                .client
+                .request("mcpServerStatus/list", json!({}))
+                .await?,
+        };
+        let encoded = discovery.mcp_servers.to_string();
+        if !encoded.contains(required_mcp_server) {
+            anyhow::bail!("required MCP server {required_mcp_server} is not active");
+        }
+        Ok(discovery)
+    }
+
+    pub fn pending_requests(&self) -> Result<Vec<PendingRequest>> {
+        self.store.pending_server_requests()
+    }
+
+    pub async fn deliver_ready_responses(&self) -> Result<usize> {
+        let requests = self.store.ready_responses()?;
+        let mut delivered = 0;
+        for request in requests {
+            let response = request
+                .response
+                .clone()
+                .context("ready response has no payload")?;
+            if request.method == "issue-finder.submit_result/needs_user" {
+                let thread_id = request
+                    .thread_id
+                    .as_deref()
+                    .context("candidate user request has no thread")?;
+                let turn_id = request
+                    .turn_id
+                    .as_deref()
+                    .context("candidate user request has no turn")?;
+                self.client
+                    .request(
+                        "turn/steer",
+                        json!({
+                            "threadId":thread_id,
+                            "expectedTurnId":turn_id,
+                            "clientUserMessageId":format!("issue-finder:response:{}",request.id),
+                            "input":[{"type":"text","text":format!("User response: {}",response)}]
+                        }),
+                    )
+                    .await?;
+            } else {
+                self.client
+                    .respond(request.wire_id.clone(), Ok(response.clone()))
+                    .await?;
+            }
+            self.store.resolve_server_request(&request.id, &response)?;
+            delivered += 1;
+        }
+        Ok(delivered)
+    }
+
+    pub async fn deliver_control_outbox(&self, thread_id: &str) -> Result<usize> {
+        let entries = self.store.pending_control_entries(thread_id)?;
+        let mut delivered = 0;
+        for entry in entries {
+            self.client.request(&entry.method, entry.payload).await?;
+            self.store.mark_sent(&entry.id, entry.turn_id.as_deref())?;
+            delivered += 1;
+        }
+        Ok(delivered)
+    }
     pub async fn reconnect(&mut self, thread_ids: &[String]) -> Result<()> {
-        self.store.orphan_pending_server_requests()?;
         self.client = AppServerClient::connect().await?;
         self.connection_epoch = connection_epoch();
         for thread_id in thread_ids {
@@ -83,7 +180,10 @@ impl NativeThreadManager {
     }
     pub async fn send(&self, request: SendTurnRequest) -> Result<StartedTurn> {
         let outbox_id = format!("outbox:{}", request.client_user_message_id);
-        let payload = json!({"threadId":request.thread_id,"clientUserMessageId":request.client_user_message_id,"input":[{"type":"text","text":request.prompt}],"cwd":request.cwd,"runtimeWorkspaceRoots":[request.cwd],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[request.cwd],"networkAccess":false}});
+        let mut payload = json!({"threadId":request.thread_id,"clientUserMessageId":request.client_user_message_id,"input":[{"type":"text","text":request.prompt}],"cwd":request.cwd,"runtimeWorkspaceRoots":[request.cwd],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[request.cwd],"networkAccess":false}});
+        if let Some(output_schema) = request.output_schema {
+            payload["outputSchema"] = output_schema;
+        }
         let inserted = self.store.enqueue(
             &outbox_id,
             &request.thread_id,

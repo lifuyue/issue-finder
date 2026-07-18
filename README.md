@@ -54,6 +54,7 @@ issue-finder tools list
 ## Docs
 
 - [**Usage guide**](./docs/usage.md)
+- [**Agent loop architecture**](./docs/agent-loop-target-architecture.md)
 - [**Agent-safe preparation runtime**](./docs/agent-safe-preparation-runtime.md)
 - [**Safe probes**](./docs/safe-probes.md)
 - [**Historical design archive**](./docs/superpowers/README.md)

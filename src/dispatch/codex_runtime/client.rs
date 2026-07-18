@@ -12,9 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::dispatch::adapters::codex_app_server::{
-    codex_config_override_args, discover_codex_binary,
-};
+use super::{codex_config_override_args, discover_codex_binary};
 
 const QUEUE_CAPACITY: usize = 128;
 const DEFAULT_RPC_TIMEOUT_SECONDS: u64 = 30;
@@ -63,6 +61,15 @@ pub struct AppServerClient {
     pub mode: AppServerTransportMode,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorkerMcpConfig {
+    pub run_id: String,
+    pub issue_task_id: String,
+    pub package_id: String,
+    pub snapshot_id: String,
+    pub workspace: String,
+}
+
 impl AppServerClient {
     pub async fn connect() -> Result<Self> {
         let mode = match std::env::var("ISSUE_FINDER_CODEX_TRANSPORT")
@@ -77,8 +84,40 @@ impl AppServerClient {
         };
         match mode {
             AppServerTransportMode::DaemonSocket => Self::connect_daemon().await,
-            AppServerTransportMode::Stdio => Self::connect_stdio().await,
+            AppServerTransportMode::Stdio => Self::connect_stdio(&[]).await,
         }
+    }
+
+    pub async fn connect_worker(config: &WorkerMcpConfig) -> Result<Self> {
+        let executable = std::env::current_exe()?.to_string_lossy().to_string();
+        let arguments = vec![
+            "mcp".to_string(),
+            "--profile".to_string(),
+            "worker".to_string(),
+            "--run-id".to_string(),
+            config.run_id.clone(),
+            "--issue-task-id".to_string(),
+            config.issue_task_id.clone(),
+            "--package-id".to_string(),
+            config.package_id.clone(),
+            "--snapshot-id".to_string(),
+            config.snapshot_id.clone(),
+            "--workspace".to_string(),
+            config.workspace.clone(),
+        ];
+        let overrides = vec![
+            "-c".to_string(),
+            format!(
+                "mcp_servers.issue_finder.command={}",
+                serde_json::to_string(&executable)?
+            ),
+            "-c".to_string(),
+            format!(
+                "mcp_servers.issue_finder.args={}",
+                serde_json::to_string(&arguments)?
+            ),
+        ];
+        Self::connect_stdio(&overrides).await
     }
 
     async fn connect_daemon() -> Result<Self> {
@@ -166,11 +205,12 @@ impl AppServerClient {
         })
     }
 
-    async fn connect_stdio() -> Result<Self> {
+    async fn connect_stdio(extra_config_args: &[String]) -> Result<Self> {
         let binary = discover_codex_binary()?;
         let config_args = codex_config_override_args();
         let mut child = Command::new(binary)
             .args(&config_args)
+            .args(extra_config_args)
             .args(["app-server", "--stdio"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

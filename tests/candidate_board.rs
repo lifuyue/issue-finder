@@ -4,8 +4,8 @@ use issue_finder::candidate_board::{
 };
 use issue_finder::dispatch::{
     ApprovalStatus, ApprovalType, DispatchOutcomeKind, DispatchRunStatus, DispatchStore,
-    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, NewAgentProfile, NewApprovalRequest,
-    NewDispatchRun, NewDispatchRunOutcome, NewIssueTask,
+    IssueTaskStatus, NewAgentProfile, NewApprovalRequest, NewDispatchRun, NewDispatchRunOutcome,
+    NewIssueTask, TaskIdentity, TaskPackage,
 };
 use issue_finder::inbox::{save_index, InboxIndex, InboxItem, InboxStatus};
 use issue_finder::paths::IssueFinderPaths;
@@ -175,7 +175,7 @@ fn dispatch_terminal_outcome_wins_over_inbox_done_and_archive_display() {
         .record_dispatch_run_outcome(NewDispatchRunOutcome {
             run_id: run.id,
             idempotency_key: "done-positive-outcome".to_string(),
-            outcome_kind: DispatchOutcomeKind::FixReady,
+            outcome_kind: DispatchOutcomeKind::Success,
             failure_class: None,
             failure_detail: None,
             task_class: None,
@@ -190,7 +190,7 @@ fn dispatch_terminal_outcome_wins_over_inbox_done_and_archive_display() {
 
     assert_eq!(item.status, CandidateLifecycleStatus::OutcomePositive);
     assert_eq!(item.display, CandidateDisplayState::HiddenArchived);
-    assert_eq!(item.latest_outcome_kind.as_deref(), Some("fix_ready"));
+    assert_eq!(item.latest_outcome_kind.as_deref(), Some("success"));
 }
 
 #[test]
@@ -301,10 +301,10 @@ fn inbox_item(
     }
 }
 
-fn package(repo_full_name: &str, number: u64) -> IssueTaskPackage {
-    IssueTaskPackage::new(IssueTaskPackageIssue {
+fn package(repo_full_name: &str, number: u64) -> TaskPackage {
+    TaskPackage::new(TaskIdentity {
         repo_full_name: repo_full_name.to_string(),
-        number,
+        issue_number: number,
         title: "Task".to_string(),
         url: format!("https://github.com/{repo_full_name}/issues/{number}"),
     })

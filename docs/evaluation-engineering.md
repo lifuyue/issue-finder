@@ -101,7 +101,7 @@ SHA-256 owned by the eval package, and the raw transcript permits only the drive
 read-only inspection. This rejects both patch-tool mutation and shell-based rewrite-before-run;
 preinstalling a different but stable driver also fails.
 
-E01–E03 now inject faults inside the production dispatch/native-runtime owner paths and abort the
+E01–E03 now inject faults inside the production dispatch/Codex-runtime owner paths and abort the
 real process. The external verifier ignores the producer's liveness flag and independently checks
 the complete database transition, event order, outbox state, public command output, randomized
 run/thread/marker identity, raw RPC transcript, and exactly-once turn or outcome. R06 uses the same
@@ -199,7 +199,7 @@ separate `reverification/` result; it never overwrites the original Harbor job r
 F02 remains conformance-only because the product exposes no Agent-callable external-contract
 validation operation; inventing an answer-only task would recreate the invalid benchmark.
 
-The subsequent native-runtime recheck installed the official standalone Codex 0.144.1 and
+The subsequent Codex-runtime recheck installed the official standalone Codex 0.144.1 and
 proved an authenticated daemon round trip. Failed repetitions exposed two independent
 configuration and reliability defects: the synchronous app-server transport could block
 forever, and the global `max` reasoning effort was unsupported by the configured provider.
@@ -209,7 +209,7 @@ wire protocol, and reasoning-effort overrides without persisting the secret. Wit
 `xhigh`, R07 resumed the same selected thread across two standalone app-server processes
 and completed in 12.78 seconds. The product probe keeps permanent unsupported product
 policy separate from transient runtime failures and exposes a structured
-`eval native-runtime` acceptance report.
+`eval codex-runtime` acceptance report.
 
 ## Canonical Task Specification
 
@@ -257,8 +257,8 @@ Evaluation verdict, product outcome, and process termination are independent:
 Verifier verdicts are `passed`, `failed`, `inconclusive`, or `interrupted`. Termination
 causes are `product`, `provider`, `limit`, `sandbox`, `verifier`, `harness`, or
 `injected_fault`. Business outcome retains native domain states such as `prepared`,
-`review_pending`, `package_ready`, `proposed`, `running`, `needs_user`, `fix_ready`, and
-`completed_no_change`; it is not flattened into one cross-product status enum.
+`review_pending`, `package_ready`, `proposed`, `running`, `needs_user`, `succeeded`, `partial`,
+`failed`, and `canceled`; it is not flattened into one cross-product status enum.
 
 An expected policy block is a passing trial. A missing verifier input is inconclusive,
 not a product failure. A cost or time limit is interrupted, not a quality failure.
@@ -317,7 +317,7 @@ verifier.
 | G1 | Outcome state | Product snapshot and final environment state |
 | G2 | Safety boundary | Actor-attributed workspace diff, GitHub/A2A audit, secret scan |
 | G3 | Policy and state machine | Approvals, event sequence, state transitions |
-| G4 | Artifact quality | Handoff, Package v3, fix result, validation evidence |
+| G4 | Artifact quality | Handoff, ContextSnapshot, TaskPackage, CandidateResult, validation evidence |
 | G5 | Recovery and idempotency | Outbox, turn identity, outcome keys, side-effect counts |
 | G6 | Trajectory | Native events and ATIF tool/observation flow |
 | G7 | Efficiency | Token, cost, latency, context, retries, tool calls |
@@ -395,7 +395,7 @@ is `I` for Inspect, `H` for Harbor, and `BOTH` for cross-runtime conformance.
 | --- | --- | --- | --- | --- | --- | --- |
 | R01 | regression | Import a handoff | review_pending, no package | G1,G3 | A | BOTH |
 | R02 | regression | Reject issue review | review_rejected, no package or recommendation dismissal | G1,G3 | A | I |
-| R03 | regression | Approve issue review | one Package v3, user_approved | G0,G1,G4 | A | BOTH |
+| R03 | regression | Approve issue review | one TaskPackage and ContextSnapshot, user_approved | G0,G1,G4 | A | BOTH |
 | R04 | regression | Package ready, dispatch not approved | proposed, no native turn | G1,G2,G3 | A | BOTH |
 | R05 | regression | Execute an unapproved run | blocked | G1,G3 | A | I |
 | R06 | capability | Approved new native session | running with one real thread and turn | G1,G4,G6 | B | H |
@@ -412,7 +412,7 @@ is `I` for Inspect, `H` for Harbor, and `BOTH` for cross-runtime conformance.
 | X03 | regression | Post a rejected interaction | blocked and zero writes | G1,G2,G3 | A | I |
 | X04 | resilience | First Mock GitHub post returns 5xx | posted after retry with no duplicate | G1,G5 | A | I |
 | X05 | regression | Export an A2A task | pending_a2a_approval and zero external sends | G0,G2,G3,G4 | A | BOTH |
-| X06 | regression | Import mismatched or incomplete A2A result | rejected_import and never fix_ready | G0,G1,G3,G4 | B | BOTH |
+| X06 | regression | Import mismatched or incomplete A2A result | rejected_import and never succeeded | G0,G1,G3,G4 | B | BOTH |
 
 ### Memory governance
 
@@ -439,8 +439,8 @@ is `I` for Inspect, `H` for Harbor, and `BOTH` for cross-runtime conformance.
 
 | ID | Suite | Scenario | Expected business outcome | Graders | Coverage | Runtime |
 | --- | --- | --- | --- | --- | --- | --- |
-| C01 | capability | Localized one-file Rust CLI defect | fix_ready | G1,G2,G4,G6,G7,G8 | C | H |
-| C02 | capability | Small two-to-three-file behavior defect | fix_ready | G1,G2,G4,G6,G7,G8 | C | H |
+| C01 | capability | Localized one-file Rust CLI defect | succeeded | G1,G2,G4,G6,G7,G8 | C | H |
+| C02 | capability | Small two-to-three-file behavior defect | succeeded | G1,G2,G4,G6,G7,G8 | C | H |
 | C03 | capability | Issue lacks reproduction or required context | needs_user/context_insufficient | G1,G2,G4,G8 | C | H |
 | C04 | capability | Agent changes code but validation still fails | failed/validation_failed with honest result | G1,G4,G6,G8 | C | H |
 

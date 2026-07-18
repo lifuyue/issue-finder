@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use issue_finder::dispatch::{
-    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchOutcomeRecordRequest,
-    DispatchProposalRequest, DispatchRuntime, DispatchTaskClass, DispatchValidationOutcome,
-    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType, NewIssueTask,
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchProposalRequest,
+    DispatchRuntime, DispatchTaskClass, DispatchValidationOutcome, IssueTaskStatus,
+    MemoryEventType, NewDispatchRunOutcome, NewIssueTask, TaskIdentity, TaskPackage,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff};
@@ -116,7 +116,7 @@ fn issue_review_rejection_records_memory_and_blocks_dispatch() {
 }
 
 #[test]
-fn issue_review_approval_creates_exactly_one_package_v3() {
+fn issue_review_approval_creates_exactly_one_task_package() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     paths.ensure_layout().unwrap();
@@ -136,16 +136,16 @@ fn issue_review_approval_creates_exactly_one_package_v3() {
 
     assert_eq!(approved.approval_request.status, ApprovalStatus::Approved);
     assert_eq!(approved.issue_task.status, IssueTaskStatus::UserApproved);
-    assert_eq!(approved.package.as_ref().unwrap().version, 3);
+    assert_eq!(approved.package.as_ref().unwrap().version, 1);
     let package_artifact = approved.package_artifact.as_ref().unwrap();
-    assert_eq!(package_artifact.kind, "issue_task_package");
+    assert_eq!(package_artifact.kind, "task_package");
     assert_eq!(
         runtime
             .store()
             .list_artifacts_for_issue_task(&approved.issue_task.id)
             .unwrap()
             .iter()
-            .filter(|artifact| artifact.kind == "issue_task_package")
+            .filter(|artifact| artifact.kind == "task_package")
             .count(),
         1
     );
@@ -161,7 +161,7 @@ fn issue_review_approval_creates_exactly_one_package_v3() {
 }
 
 #[test]
-fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
+fn terminal_outcome_leaves_hybrid_memory_to_memory_projector() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let runtime = DispatchRuntime::open(paths.clone()).unwrap();
@@ -179,10 +179,11 @@ fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
         .resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)
         .unwrap();
 
-    let result = runtime
-        .record_dispatch_outcome(DispatchOutcomeRecordRequest {
+    let outcome = runtime
+        .store()
+        .record_dispatch_run_outcome(NewDispatchRunOutcome {
             run_id: proposal.run.id,
-            idempotency_key: Some("outcome-456".to_string()),
+            idempotency_key: "outcome-456".to_string(),
             outcome_kind: DispatchOutcomeKind::Failed,
             failure_class: Some(DispatchOutcomeFailureClass::ValidationFailed),
             failure_detail: Some("cargo test still fails".to_string()),
@@ -193,8 +194,9 @@ fn dispatch_outcome_record_leaves_hybrid_memory_to_memory_projector() {
         })
         .unwrap();
 
-    assert_eq!(result.run.status.to_string(), "failed");
-    assert_eq!(result.outcome.outcome_kind, DispatchOutcomeKind::Failed);
+    let run = runtime.store().get_dispatch_run(&outcome.run_id).unwrap();
+    assert_eq!(run.status.to_string(), "failed");
+    assert_eq!(outcome.outcome_kind, DispatchOutcomeKind::Failed);
     let memory = runtime
         .store()
         .list_memory_events_for_issue_task(&task.id)
@@ -243,9 +245,9 @@ fn create_packaged_task(
             category: Some("high_value_ready".to_string()),
         })
         .unwrap();
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number,
+        issue_number: number,
         title: "Fix parser panic".to_string(),
         url: format!("https://github.com/owner/repo/issues/{number}"),
     });

@@ -62,42 +62,42 @@ string_enum!(IssueTaskStatus {
     UserApproved => "user_approved",
     Dispatched => "dispatched",
     InProgress => "in_progress",
-    FixReady => "fix_ready",
-    GithubPosted => "github_posted",
-    Done => "done",
+    Succeeded => "succeeded",
+    Partial => "partial",
+    Failed => "failed",
+    Canceled => "canceled",
 });
 
 string_enum!(DispatchRunStatus {
     Proposed => "proposed",
     Approved => "approved",
-    Queued => "queued",
     Starting => "starting",
     Running => "running",
     NeedsUser => "needs_user",
-    Completed => "completed",
+    Evaluating => "evaluating",
+    Succeeded => "succeeded",
+    Partial => "partial",
     Failed => "failed",
     Canceled => "canceled",
 });
 
 string_enum!(DispatchOutcomeKind {
-    FixReady => "fix_ready",
-    CompletedNoChange => "completed_no_change",
-    NeedsUser => "needs_user",
-    Blocked => "blocked",
+    Success => "success",
+    Partial => "partial",
     Failed => "failed",
     Canceled => "canceled",
 });
 
 impl DispatchOutcomeKind {
     pub fn is_positive(self) -> bool {
-        matches!(self, Self::FixReady | Self::CompletedNoChange)
+        matches!(self, Self::Success | Self::Partial)
     }
 
     pub fn terminal_status(self) -> DispatchRunStatus {
         match self {
-            Self::FixReady | Self::CompletedNoChange => DispatchRunStatus::Completed,
-            Self::NeedsUser => DispatchRunStatus::NeedsUser,
-            Self::Blocked | Self::Failed => DispatchRunStatus::Failed,
+            Self::Success => DispatchRunStatus::Succeeded,
+            Self::Partial => DispatchRunStatus::Partial,
+            Self::Failed => DispatchRunStatus::Failed,
             Self::Canceled => DispatchRunStatus::Canceled,
         }
     }
@@ -186,7 +186,6 @@ string_enum!(DispatchEventKind {
     ThreadResumed => "thread_resumed",
     TurnStarted => "turn_started",
     A2aResultImported => "a2a_result_imported",
-    Legacy => "legacy",
 });
 
 string_enum!(DispatchEventSeverity {
@@ -201,7 +200,6 @@ string_enum!(DispatchEventSource {
     Tool => "tool",
     A2a => "a2a",
     Github => "github",
-    Migration => "migration",
 });
 
 string_enum!(DispatchSubjectType {
@@ -321,6 +319,15 @@ pub struct DispatchRun {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub selected_thread_id: Option<String>,
+    pub current_turn_id: Option<String>,
+    pub package_artifact_id: Option<String>,
+    pub context_snapshot_id: Option<String>,
+    pub attempt_count: u32,
+    pub max_attempts: u32,
+    pub max_time_seconds: u64,
+    pub token_budget: Option<u64>,
+    pub active_pending_request_id: Option<String>,
+    pub supervisor_pid: Option<u32>,
     pub result_artifact_id: Option<String>,
     pub failure_reason: Option<String>,
 }
@@ -346,6 +353,10 @@ pub struct DispatchRunOutcome {
     pub task_class: Option<DispatchTaskClass>,
     pub validation_outcome: Option<DispatchValidationOutcome>,
     pub result_artifact_id: Option<String>,
+    pub package_artifact_id: Option<String>,
+    pub context_snapshot_id: Option<String>,
+    pub evaluation_artifact_id: Option<String>,
+    pub final_attempt: u32,
     pub metadata_json: Value,
     pub recorded_at: String,
 }

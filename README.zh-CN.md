@@ -54,6 +54,7 @@ issue-finder tools list
 ## 文档
 
 - [**使用指南**](./docs/usage.md)
+- [**Agent Loop 架构**](./docs/agent-loop-target-architecture.md)
 - [**代理安全的准备运行时**](./docs/agent-safe-preparation-runtime.md)
 - [**安全探测**](./docs/safe-probes.md)
 - [**历史设计档案**](./docs/superpowers/README.md)

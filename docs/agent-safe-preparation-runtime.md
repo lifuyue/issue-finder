@@ -31,7 +31,12 @@ inbox/<id>/
         refs.json
 ```
 
-`handoff.json` remains canonical for prepared inbox items. The dispatch control plane imports a ready handoff as an issue review candidate; approval writes an `IssueTaskPackage` v3 artifact alongside dispatch runs, session links, approvals, events, and result artifacts. Package v3 wraps the handoff with typed execution-agent contracts for reproduction, success criteria, change budget, environment, interaction policy, session resumability, and outcome reporting. The preparation runtime fields remain additive:
+`handoff.json` remains canonical for prepared inbox items. The dispatch control plane imports every
+referenced handoff file into a content-addressed, immutable `ContextSnapshot`. Issue-review approval
+writes a `TaskPackage` that references that snapshot and defines the goal, constraints, success
+criteria, validation commands, result schema, interaction policy, and retry budget. Dispatch runs,
+Codex state, approvals, pending requests, evaluator reports, and outcomes share one durable store.
+The preparation runtime fields remain additive:
 
 - `agent_policy`: same content as `agent-policy.json`
 - `probe_pack`: same content as `probe.json`

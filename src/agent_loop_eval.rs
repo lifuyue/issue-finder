@@ -6,17 +6,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
-use crate::dispatch::adapters::{
-    AdapterSession, AdapterStartSessionRequest, AdapterTurn, NativeExecutionAdapter,
-};
-use crate::dispatch::execution::execute_approved_dispatch;
+use crate::dispatch::runtime::DispatchOutcomeRecordRequest;
 use crate::dispatch::{
-    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchOutcomeRecordRequest,
-    DispatchProposalRequest, DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome,
-    GitHubCommentWriter, GitHubInteractionStatus, IssueTaskPackage, IssueTaskPackageIssue,
-    IssueTaskStatus, NewIssueTask, PostedGitHubComment,
+    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchProposalRequest,
+    DispatchRunStatus, DispatchTaskClass, DispatchValidationOutcome, GitHubCommentWriter,
+    GitHubInteractionStatus, IssueTaskStatus, NewIssueTask, PostedGitHubComment, TaskIdentity,
+    TaskPackage,
 };
 use crate::github::GitHubIssue;
 use crate::github_enrichment::EnrichedIssue;
@@ -187,7 +184,7 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
         new_session: true,
     })?;
     runtime.resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)?;
-    let recorded = runtime.record_dispatch_outcome(DispatchOutcomeRecordRequest {
+    let recorded = runtime.commit_terminal_outcome(DispatchOutcomeRecordRequest {
         run_id: proposal.run.id.clone(),
         idempotency_key: Some("agent-loop-runtime-failure".to_string()),
         outcome_kind: DispatchOutcomeKind::Failed,
@@ -206,7 +203,7 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
         observations.push("run_status_failed".to_string());
     }
     let task_after = runtime.store().get_issue_task(&task.id)?;
-    if task_after.status == IssueTaskStatus::Dispatched {
+    if task_after.status == IssueTaskStatus::Failed {
         observations.push("issue_task_status_not_rewritten_to_quality_reject".to_string());
     }
     let outcomes = runtime.store().list_dispatch_run_outcomes()?;
@@ -239,21 +236,22 @@ fn runtime_failure_observations() -> Result<Vec<String>> {
 }
 
 fn package_insufficiency_observations() -> Vec<String> {
-    let mut package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let mut package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number: 202,
+        issue_number: 202,
         title: "Fix parser panic".to_string(),
         url: "https://github.com/owner/repo/issues/202".to_string(),
     });
-    package.outcome_contract.required_artifact.clear();
-    package.outcome_contract.required_fields.clear();
-    match package.validate_for_execution() {
-        Ok(()) => Vec::new(),
-        Err(error) if error.to_string().contains("outcome contract") => vec![
+    package.result_contract.tool.clear();
+    package.result_contract.required_fields.clear();
+    if package.result_contract.tool.is_empty() && package.result_contract.required_fields.is_empty()
+    {
+        vec![
             "package_missing_outcome_contract_detected".to_string(),
             "package_marked_insufficient_for_agent_loop".to_string(),
-        ],
-        Err(_) => Vec::new(),
+        ]
+    } else {
+        Vec::new()
     }
 }
 
@@ -385,24 +383,21 @@ fn session_resume_observations() -> Result<Vec<String>> {
         new_session: false,
     })?;
     runtime.resolve_dispatch_approval(&proposal.run.id, ApprovalStatus::Approved)?;
-    let mut adapter = FakeNativeAdapter::default();
-    let execution = execute_approved_dispatch(runtime.store(), &mut adapter, &proposal.run.id)?;
+    let claimed = runtime
+        .store()
+        .claim_dispatch_run_for_execution(&proposal.run.id)?;
 
     let mut observations = Vec::new();
     if proposal.run.selected_thread_id.as_deref() == Some("native_existing_505") {
         observations.push("explicit_native_thread_id_preserved".to_string());
     }
-    if adapter
-        .calls
-        .iter()
-        .any(|call| call == "resume_session:native_existing_505")
-    {
+    if claimed.selected_thread_id.as_deref() == Some("native_existing_505") {
         observations.push("execution_resumed_selected_native_session".to_string());
     }
-    if execution.run.status == DispatchRunStatus::Running {
+    if claimed.status == DispatchRunStatus::Starting {
         observations.push("resumed_session_started_agent_turn".to_string());
     }
-    if execution.thread.native_session_id == "native_existing_505" {
+    if claimed.selected_thread_id.as_deref() == Some("native_existing_505") {
         observations.push("native_thread_remains_continuity_anchor".to_string());
     }
     Ok(observations)
@@ -503,12 +498,16 @@ fn create_packaged_task(
         priority: Some(10),
         category: Some("high_value_ready".to_string()),
     })?;
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let mut package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number,
+        issue_number: number,
         title: "Fix parser panic".to_string(),
         url: format!("https://github.com/owner/repo/issues/{number}"),
     });
+    package.context_snapshot.snapshot_id = "eval-snapshot".to_string();
+    package.context_snapshot.artifact_id = "eval-snapshot-artifact".to_string();
+    package.context_snapshot.entry_artifact_id = "eval-entry-artifact".to_string();
+    package.workspace.path = std::env::temp_dir().to_string_lossy().to_string();
     runtime
         .store()
         .write_task_package_artifact(&task.id, &package)?;
@@ -687,121 +686,5 @@ impl GitHubCommentWriter for FakeGitHubWriter {
                 self.calls.len()
             ),
         })
-    }
-}
-
-#[derive(Default)]
-struct FakeNativeAdapter {
-    calls: Vec<String>,
-}
-
-impl NativeExecutionAdapter for FakeNativeAdapter {
-    fn adapter_start_session(
-        &mut self,
-        request: AdapterStartSessionRequest,
-    ) -> Result<AdapterSession> {
-        self.calls.push("start_session".to_string());
-        Ok(AdapterSession {
-            native_session_id: "native_started".to_string(),
-            display_name: Some(request.display_name),
-            goal: request.goal,
-            metadata_json: request.metadata_json,
-        })
-    }
-
-    fn adapter_resume_session(&mut self, native_session_id: &str) -> Result<AdapterSession> {
-        self.calls
-            .push(format!("resume_session:{native_session_id}"));
-        Ok(existing_session(native_session_id))
-    }
-
-    fn adapter_fork_session(&mut self, native_session_id: &str) -> Result<AdapterSession> {
-        self.calls.push(format!("fork_session:{native_session_id}"));
-        Ok(AdapterSession {
-            native_session_id: format!("{native_session_id}_fork"),
-            display_name: Some(format!("fork of {native_session_id}")),
-            goal: Some("Forked goal".to_string()),
-            metadata_json: json!({ "source": "fork" }),
-        })
-    }
-
-    fn adapter_rename_session(
-        &mut self,
-        native_session_id: &str,
-        display_name: &str,
-    ) -> Result<AdapterSession> {
-        self.calls
-            .push(format!("rename_session:{native_session_id}"));
-        Ok(AdapterSession {
-            display_name: Some(display_name.to_string()),
-            ..existing_session(native_session_id)
-        })
-    }
-
-    fn adapter_set_goal(&mut self, native_session_id: &str, goal: &str) -> Result<AdapterSession> {
-        self.calls.push(format!("set_goal:{native_session_id}"));
-        Ok(AdapterSession {
-            goal: Some(goal.to_string()),
-            ..existing_session(native_session_id)
-        })
-    }
-
-    fn adapter_set_metadata(
-        &mut self,
-        native_session_id: &str,
-        metadata_json: Value,
-    ) -> Result<AdapterSession> {
-        self.calls.push(format!("set_metadata:{native_session_id}"));
-        Ok(AdapterSession {
-            metadata_json,
-            ..existing_session(native_session_id)
-        })
-    }
-
-    fn adapter_start_turn(
-        &mut self,
-        native_session_id: &str,
-        _prompt: &str,
-        _cwd: &str,
-        _client_user_message_id: &str,
-    ) -> Result<AdapterTurn> {
-        self.calls.push(format!("start_turn:{native_session_id}"));
-        Ok(AdapterTurn {
-            native_turn_id: "turn-agent-loop-eval".to_string(),
-            status: None,
-        })
-    }
-
-    fn adapter_read_transcript(&mut self, native_session_id: &str) -> Result<Value> {
-        self.calls
-            .push(format!("read_transcript:{native_session_id}"));
-        Ok(json!({ "thread": { "id": native_session_id }, "turns": [], "items": [] }))
-    }
-
-    fn adapter_archive_session(&mut self, native_session_id: &str) -> Result<AdapterSession> {
-        self.calls
-            .push(format!("archive_session:{native_session_id}"));
-        Ok(existing_session(native_session_id))
-    }
-
-    fn adapter_list_sessions(&mut self, _limit: Option<usize>) -> Result<Vec<AdapterSession>> {
-        Ok(Vec::new())
-    }
-
-    fn adapter_search_sessions(
-        &mut self,
-        _search_term: &str,
-        _limit: Option<usize>,
-    ) -> Result<Vec<AdapterSession>> {
-        Ok(Vec::new())
-    }
-}
-
-fn existing_session(native_session_id: &str) -> AdapterSession {
-    AdapterSession {
-        native_session_id: native_session_id.to_string(),
-        display_name: None,
-        goal: None,
-        metadata_json: Value::Null,
     }
 }

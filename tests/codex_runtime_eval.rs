@@ -7,7 +7,7 @@ mod unix {
     use tempfile::tempdir;
 
     #[test]
-    fn native_runtime_eval_requires_marker_bearing_model_response() {
+    fn codex_runtime_eval_requires_marker_bearing_model_response() {
         let dir = tempdir().unwrap();
         let script = dir.path().join("fake-codex");
         fs::write(
@@ -39,7 +39,7 @@ exit 64
         let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
             .args([
                 "eval",
-                "native-runtime",
+                "codex-runtime",
                 "--workspace",
                 workspace.to_str().unwrap(),
                 "--timeout-seconds",
@@ -57,7 +57,19 @@ exit 64
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            !output.stdout.is_empty(),
+            "eval produced no JSON; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+                panic!(
+                    "invalid eval JSON ({error}); stdout={:?}; stderr={:?}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            });
         assert_eq!(report["businessOutcome"]["state"], "completed");
         assert_eq!(report["protocolHandshake"], true);
         assert_eq!(report["authenticatedModelTurn"], true);

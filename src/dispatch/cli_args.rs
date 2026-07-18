@@ -75,20 +75,16 @@ pub enum DispatchCommand {
     Package(DispatchPackageArgs),
     /// Review imported handoffs before creating task packages.
     Review(DispatchReviewArgs),
-    /// Create an approval-gated dispatch proposal without starting an agent.
-    Propose(DispatchProposeArgs),
     /// Approve a pending dispatch proposal.
     Approve(DispatchApprovalArgs),
     /// Reject a pending dispatch proposal.
     Reject(DispatchApprovalArgs),
-    /// Execute an approved dispatch through the run's native adapter.
+    /// Start the persistent Codex supervisor for an approved dispatch.
     Execute(DispatchExecuteArgs),
     /// Reconcile one non-terminal dispatch with its native Codex thread.
     Sync(DispatchStatusArgs),
     /// Map task packages and results to local A2A artifacts.
     A2a(DispatchA2aArgs),
-    /// Record a normalized dispatch outcome.
-    Outcome(DispatchOutcomeArgs),
     /// Draft, approve, and post GitHub issue comments from dispatch state.
     Github(DispatchGithubArgs),
     /// Show one dispatch run summary.
@@ -196,24 +192,6 @@ pub struct DispatchReviewRejectArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct DispatchProposeArgs {
-    /// Issue reference in owner/repo#123 form.
-    pub issue: String,
-    /// Agent id, for example codex.
-    #[arg(long, default_value = "codex")]
-    pub agent: String,
-    /// Use a new native session after approval.
-    #[arg(long, conflicts_with = "session")]
-    pub new_session: bool,
-    /// Existing local session link id or native session id to continue after approval.
-    #[arg(long, conflicts_with = "new_session")]
-    pub session: Option<String>,
-    /// Print proposal as JSON.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Debug, Args)]
 pub struct DispatchApprovalArgs {
     /// Dispatch run id.
     pub run_id: String,
@@ -239,7 +217,7 @@ pub struct DispatchA2aArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DispatchA2aCommand {
-    /// Export an imported IssueTaskPackage v3 as a local A2A task artifact.
+    /// Export an approved TaskPackage as a local A2A task artifact.
     Export(DispatchA2aExportArgs),
     /// Approve an outbound A2A task artifact for external use.
     Approve(DispatchA2aApprovalArgs),
@@ -274,76 +252,7 @@ pub struct DispatchA2aImportResultArgs {
     /// Local result file path.
     #[arg(long)]
     pub path: PathBuf,
-    /// Artifact kind, for example fix_result.
-    #[arg(long, default_value = "fix_result")]
-    pub kind: String,
-    /// Artifact content type.
-    #[arg(long, default_value = "application/json")]
-    pub content_type: String,
-    /// Optional dispatch run status to set after import.
-    #[arg(long)]
-    pub status: Option<String>,
-    /// Optional normalized outcome kind to record.
-    #[arg(long)]
-    pub outcome: Option<String>,
-    /// Optional normalized failure class.
-    #[arg(long)]
-    pub failure_class: Option<String>,
-    /// Optional human-readable failure detail.
-    #[arg(long)]
-    pub failure_reason: Option<String>,
-    /// Optional normalized task class.
-    #[arg(long)]
-    pub task_class: Option<String>,
-    /// Optional normalized validation outcome.
-    #[arg(long)]
-    pub validation_outcome: Option<String>,
-    /// Optional idempotency key for outcome recording.
-    #[arg(long)]
-    pub idempotency_key: Option<String>,
     /// Print import result as JSON.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct DispatchOutcomeArgs {
-    #[command(subcommand)]
-    pub command: DispatchOutcomeCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DispatchOutcomeCommand {
-    /// Record a normalized terminal or blocked dispatch outcome.
-    Record(DispatchOutcomeRecordArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct DispatchOutcomeRecordArgs {
-    /// Dispatch run id.
-    pub run_id: String,
-    /// Normalized outcome kind.
-    #[arg(long)]
-    pub outcome: String,
-    /// Optional normalized failure class.
-    #[arg(long)]
-    pub failure_class: Option<String>,
-    /// Optional human-readable failure detail.
-    #[arg(long)]
-    pub failure_reason: Option<String>,
-    /// Optional normalized task class.
-    #[arg(long)]
-    pub task_class: Option<String>,
-    /// Optional normalized validation outcome.
-    #[arg(long)]
-    pub validation_outcome: Option<String>,
-    /// Optional dispatch artifact id associated with this outcome.
-    #[arg(long)]
-    pub result_artifact_id: Option<String>,
-    /// Optional idempotency key.
-    #[arg(long)]
-    pub idempotency_key: Option<String>,
-    /// Print result as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -386,7 +295,7 @@ pub struct DispatchGithubDraftTrackingArgs {
 
 #[derive(Debug, Args)]
 pub struct DispatchGithubDraftFinalArgs {
-    /// Dispatch run id with an imported fix result artifact.
+    /// Dispatch run id with an evaluated candidate result artifact.
     pub run_id: String,
     /// Override the generated final comment body.
     #[arg(long)]

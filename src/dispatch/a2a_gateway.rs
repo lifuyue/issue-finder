@@ -1,45 +1,15 @@
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::github::IssueRef;
 
-use super::events::dispatch_run_event;
 use super::model::{
     A2aArtifactRef, A2aCallbackPolicy, A2aTask, A2aTaskExport, AgentArtifact, ApprovalRequest,
-    ApprovalStatus, ApprovalType, DispatchEventKind, DispatchEventSeverity, DispatchEventSource,
-    DispatchRun, DispatchRunOutcome, DispatchRunStatus, IssueTask, NewApprovalRequest, NewArtifact,
+    ApprovalStatus, ApprovalType, DispatchRun, DispatchRunOutcome, IssueTask, NewApprovalRequest,
+    NewArtifact,
 };
 use super::store::DispatchStore;
-
-pub fn validate_fix_result_import(
-    path: &Path,
-    kind: &str,
-    content_type: &str,
-) -> Result<super::model::DispatchValidationOutcome> {
-    if kind != "fix_result" || content_type != "application/json" {
-        anyhow::bail!("fix_ready A2A import requires a JSON fix_result artifact");
-    }
-    let contents =
-        std::fs::read(path).with_context(|| format!("unable to read {}", path.display()))?;
-    let value: Value =
-        serde_json::from_slice(&contents).context("A2A fix_result is not valid JSON")?;
-    let status = value.get("status").and_then(Value::as_str);
-    if !matches!(status, Some("fix_ready" | "fixed" | "completed")) {
-        anyhow::bail!("A2A fix_result has invalid completion status {status:?}");
-    }
-    let validation = value
-        .get("validationOutcome")
-        .or_else(|| value.pointer("/validation/outcome"))
-        .and_then(Value::as_str)
-        .and_then(super::model::DispatchValidationOutcome::parse_value);
-    if validation != Some(super::model::DispatchValidationOutcome::Passed) {
-        anyhow::bail!("A2A fix_result requires validationOutcome=passed");
-    }
-    Ok(super::model::DispatchValidationOutcome::Passed)
-}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -91,21 +61,21 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             title: issue_task.title.clone(),
         },
         input_artifacts: vec![A2aArtifactRef {
-            role: "issue_task_package".to_string(),
-            name: "issue_task_package_v3.json".to_string(),
+            role: "task_package".to_string(),
+            name: "task-package.json".to_string(),
             artifact_id: package_artifact.id.clone(),
             path: package_artifact.path.clone(),
             content_type: package_artifact.content_type.clone(),
         }],
         expected_artifacts: vec![
-            "fix_result.json".to_string(),
+            "candidate-result.json".to_string(),
             "patch".to_string(),
             "pr_link".to_string(),
             "thread_id".to_string(),
             "validation_log".to_string(),
         ],
         callback: A2aCallbackPolicy {
-            expected_result_artifact: "fix_result.json".to_string(),
+            expected_result_artifact: "candidate-result.json".to_string(),
             import_mode: "local_artifact_only".to_string(),
         },
     };
@@ -118,7 +88,7 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             metadata_json: json!({
                 "issueKey": issue_task.issue_key,
                 "packageArtifactId": package_artifact.id,
-                "packageContractVersion": 3
+                "packageContract": "TaskPackage"
             }),
         },
         serde_json::to_vec_pretty(&task)?,
@@ -137,7 +107,7 @@ pub fn export_task(store: &DispatchStore, issue: &str) -> Result<A2aExportResult
             "packageArtifactId": package_artifact.id,
             "a2aTaskArtifactId": export_artifact.id,
             "importMode": task.callback.import_mode,
-            "packageContractVersion": 3,
+            "packageContract": "TaskPackage",
             "expectedResultArtifact": task.callback.expected_result_artifact
         }),
     })?;
@@ -158,55 +128,6 @@ pub fn approve_send(store: &DispatchStore, approval_request_id: &str) -> Result<
 
 pub fn reject_send(store: &DispatchStore, approval_request_id: &str) -> Result<A2aApprovalResult> {
     resolve_send(store, approval_request_id, ApprovalStatus::Rejected)
-}
-
-pub fn import_result(
-    store: &DispatchStore,
-    run_id: &str,
-    path: &Path,
-    kind: &str,
-    content_type: &str,
-    status: Option<DispatchRunStatus>,
-) -> Result<A2aResultImport> {
-    let run = store.get_dispatch_run(run_id)?;
-    let contents =
-        std::fs::read(path).with_context(|| format!("unable to read {}", path.display()))?;
-    let artifact = store.write_artifact(
-        NewArtifact {
-            issue_task_id: Some(run.issue_task_id.clone()),
-            run_id: Some(run.id.clone()),
-            kind: kind.to_string(),
-            content_type: content_type.to_string(),
-            metadata_json: json!({
-                "source": "a2a_local_import",
-                "sourcePath": path.to_string_lossy()
-            }),
-        },
-        contents,
-    )?;
-    store.append_dispatch_event(dispatch_run_event(
-        &run,
-        DispatchEventKind::A2aResultImported,
-        DispatchEventSource::A2a,
-        DispatchEventSeverity::Info,
-        json!({
-            "artifactId": artifact.id,
-            "kind": kind,
-            "sourcePath": path.to_string_lossy()
-        }),
-    ))?;
-
-    if kind == "fix_result" {
-        store.set_dispatch_run_result_artifact(&run.id, &artifact.id)?;
-    }
-    let _ = status;
-    let run = store.get_dispatch_run(&run.id)?;
-
-    Ok(A2aResultImport {
-        run,
-        artifact,
-        outcome: None,
-    })
 }
 
 fn resolve_send(

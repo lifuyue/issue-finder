@@ -10,12 +10,12 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use issue_finder::config::Config;
+use issue_finder::context_snapshot::StoredContextSnapshot;
 use issue_finder::dispatch::{
     AgentCapabilityName, ApprovalStatus, CapabilityStatus, DispatchEventKind,
     DispatchEventSeverity, DispatchEventSource, DispatchRunStatus, DispatchRuntime,
-    DispatchSubjectType, IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus,
-    NewAgentCapability, NewAgentProfile, NewArtifact, NewDispatchEvent, NewDispatchRun,
-    NewIssueTask,
+    DispatchSubjectType, IssueTaskStatus, NewAgentCapability, NewAgentProfile, NewArtifact,
+    NewDispatchEvent, NewDispatchRun, NewIssueTask, TaskIdentity, TaskPackage,
 };
 use issue_finder::github::GitHubIssue;
 use issue_finder::handoff::{write_handoff, Handoff, WrittenHandoff};
@@ -139,7 +139,11 @@ fn tools_list_outputs_stable_issue_finder_specs() {
             "issue-finder.dispatch_approve",
             "issue-finder.dispatch_reject",
             "issue-finder.dispatch_execute",
-            "issue-finder.dispatch_record_outcome",
+            "issue-finder.dispatch_pending_requests",
+            "issue-finder.dispatch_respond",
+            "issue-finder.dispatch_steer",
+            "issue-finder.dispatch_interrupt",
+            "issue-finder.dispatch_sync",
             "issue-finder.a2a_export_task",
             "issue-finder.a2a_approve_send",
             "issue-finder.a2a_reject_send",
@@ -262,7 +266,7 @@ async fn dispatch_read_tools_use_local_state_only() {
             run_id: Some(run.id.clone()),
             thread_id: Some(thread_id),
             issue_task_id: Some(task.id.clone()),
-            event_kind: DispatchEventKind::Legacy,
+            event_kind: DispatchEventKind::TurnStarted,
             subject_type: DispatchSubjectType::Thread,
             subject_id: run.selected_thread_id.clone(),
             source: DispatchEventSource::Runtime,
@@ -313,61 +317,25 @@ async fn dispatch_read_tools_use_local_state_only() {
         .iter()
         .find(|item| item["capability"] == "start_session")
         .expect("start_session capability");
-    assert!(start_session["details_json"]["binary"]["name"]
-        .as_str()
-        .is_some_and(|name| name.ends_with("codex")));
-    assert!(start_session["details_json"]["binary"]["available"].is_boolean());
-    let startup = &start_session["details_json"]["startup"];
-    assert!(startup["supportedMethods"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|method| method == "thread/start"));
-    match startup["probe"]["status"].as_str() {
-        Some("not_run") => {
-            assert!(startup["probe"]["method"].is_null());
-            assert_eq!(startup["connectionModes"][1]["mode"], "stdio");
-        }
-        Some("handshake_succeeded") => {
-            assert_eq!(startup["probe"]["method"], "thread/list");
-            assert_eq!(startup["connectionModes"][1]["mode"], "stdio");
-        }
-        Some("binary_unavailable") => {
-            assert_eq!(startup["connectionModes"], serde_json::json!([]));
-        }
-        Some("handshake_failed") => assert!(startup["probe"]["error"].is_string()),
-        other => panic!("unexpected Codex startup probe status: {other:?}"),
-    }
-    for unsupported_capability in [
-        "fork_session",
-        "list_sessions",
-        "search_sessions",
+    assert_eq!(
+        start_session["details_json"]["runtimeOwner"],
+        "dispatch/codex_runtime"
+    );
+    assert_eq!(start_session["details_json"]["liveDiscoveryRequired"], true);
+    assert_eq!(start_session["details_json"]["method"], "thread/start");
+    for supported_capability in [
+        "start_session",
+        "resume_session",
         "read_transcript",
-        "set_metadata",
-        "archive_session",
         "interrupt_run",
         "review_mode",
         "stream_events",
     ] {
         assert!(
             capability_items.iter().any(|item| {
-                item["capability"] == unsupported_capability && item["status"] == "unsupported"
+                item["capability"] == supported_capability && item["status"] == "supported"
             }),
-            "{unsupported_capability} should not be advertised as usable before it is wired into the dispatch runtime"
-        );
-    }
-    for experimental_capability in [
-        "start_session",
-        "resume_session",
-        "rename_session",
-        "set_goal",
-    ] {
-        assert!(
-            capability_items.iter().any(|item| {
-                item["capability"] == experimental_capability
-                    && item["status"] == "experimental"
-            }),
-            "{experimental_capability} should stay visible as a wired Codex app-server runtime capability"
+            "{supported_capability} should be owned by the single Codex runtime"
         );
     }
 
@@ -465,7 +433,7 @@ async fn dispatch_read_tools_use_local_state_only() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
+async fn dispatch_package_a2a_and_dispatch_tools_use_local_artifacts_only() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
     let issue = issue("owner/repo", 321);
@@ -495,6 +463,7 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
     upsert_ready(&paths, &issue, 88, &written).unwrap();
 
     let runtime = IssueFinderToolRuntime::new(paths.clone(), Config::default());
+    let dispatch = DispatchRuntime::open(paths.clone()).unwrap();
 
     let import_args = serde_json::json!({ "inboxId": written.id }).to_string();
     let imported = runtime
@@ -570,43 +539,51 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
     );
     assert_eq!(
         review_approve.structured_content["issueReviewApproval"]["package"]["version"],
-        3
+        1
     );
     let package = &review_approve.structured_content["issueReviewApproval"]["package"];
-    assert_eq!(package["source"]["packageVersion"], 3);
-    assert_eq!(package["reproduction_contract"]["issueBodyAvailable"], true);
-    assert!(package["reproduction_contract"]["obligations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value
-            .as_str()
-            .unwrap()
-            .contains("State whether reproduction was attempted")));
+    assert!(package["contextSnapshot"]["snapshotId"].as_str().is_some());
+    let snapshot_artifact_id = package["contextSnapshot"]["artifactId"].as_str().unwrap();
+    let stored_snapshot: StoredContextSnapshot = serde_json::from_slice(
+        &dispatch
+            .store()
+            .read_artifact_bytes(snapshot_artifact_id)
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
-        package["change_budget"]["preferredFiles"][0]["path"],
-        "src/main.rs"
+        stored_snapshot.files.len(),
+        stored_snapshot.snapshot.files.len()
     );
+    for required in ["handoff.json", "codex.md", "context/entry.md"] {
+        let file = stored_snapshot
+            .files
+            .iter()
+            .find(|file| file.relative_path == required)
+            .unwrap();
+        assert!(!dispatch
+            .store()
+            .read_artifact_bytes(&file.artifact_id)
+            .unwrap()
+            .is_empty());
+    }
+    assert_eq!(package["constraints"]["preferredFiles"][0], "src/main.rs");
     assert_eq!(
-        package["environment_contract"]["workspace"]["branch"],
+        package["workspace"]["branch"],
         "issue-finder/321-fix-rust-cli-parser-regression"
     );
     assert_eq!(
-        package["session_context"]["resumability"]["requiredResultArtifact"],
-        "fix_result.json"
+        package["resultContract"]["tool"],
+        "issue-finder.submit_result"
     );
-    assert!(package["outcome_contract"]["requiredFields"]
+    assert!(package["resultContract"]["requiredFields"]
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("reproduction")));
-    assert!(package["outcome_contract"]["requiredFields"]
+    assert!(package["resultContract"]["requiredFields"]
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("successCriteria")));
-    assert_eq!(
-        package["user_profile_snapshot"]["snapshot"]["profile"]["techStack"],
-        serde_json::json!(["Rust", "TypeScript"])
-    );
     assert_eq!(
         review_approve.structured_content["issueReviewApproval"]["issueTask"]["status"],
         "user_approved"
@@ -698,51 +675,7 @@ async fn dispatch_package_a2a_and_proposal_tools_use_local_artifacts_only() {
         "approved"
     );
 
-    let result_path = dir.path().join("fix_result.json");
-    fs::write(
-        &result_path,
-        r#"{"status":"fix_ready","summary":"fixed in local artifact","validationOutcome":"passed"}"#,
-    )
-    .unwrap();
-    let import_result_args = serde_json::json!({
-        "runId": run_id,
-        "path": result_path,
-        "kind": "fix_result",
-        "contentType": "application/json",
-        "status": "completed"
-    })
-    .to_string();
-    let imported_result = runtime
-        .execute(invocation(
-            "issue-finder.a2a_import_result",
-            &import_result_args,
-            "a2a_import_result",
-        ))
-        .await;
-    assert!(imported_result.success, "{imported_result:?}");
-    assert_eq!(
-        imported_result.structured_content["a2aResultImport"]["run"]["status"],
-        "completed"
-    );
-    assert_eq!(
-        imported_result.structured_content["a2aResultImport"]["artifact"]["kind"],
-        "fix_result"
-    );
-    assert_eq!(
-        imported_result.structured_content["a2aResultImport"]["outcome"]["outcome_kind"],
-        "fix_ready"
-    );
-    let invalid_outcome = runtime
-        .execute(invocation(
-            "issue-finder.dispatch_record_outcome",
-            r#"{"runId":"dispatch-run-missing","outcome":"not_real"}"#,
-            "dispatch_record_outcome",
-        ))
-        .await;
-    assert!(!invalid_outcome.success);
-    assert!(serde_json::to_string(&invalid_outcome.content_items)
-        .unwrap()
-        .contains("invalid dispatch outcome kind not_real"));
+    assert!(!run_id.is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -939,9 +872,9 @@ async fn dispatch_tool_reports_missing_capability_as_structured_block() {
             category: Some("high_value_ready".to_string()),
         })
         .unwrap();
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number: 777,
+        issue_number: 777,
         title: "Fix parser panic".to_string(),
         url: "https://github.com/owner/repo/issues/777".to_string(),
     });
@@ -1501,6 +1434,10 @@ async fn tool_read_context_allows_fixed_sections_and_rejects_escape() {
             probe_json_path: handoff_dir.join("probe.json").to_string_lossy().to_string(),
             prepare_events_path: handoff_dir
                 .join("prepare-events.jsonl")
+                .to_string_lossy()
+                .to_string(),
+            context_snapshot_path: handoff_dir
+                .join("context-snapshot.json")
                 .to_string_lossy()
                 .to_string(),
         },

@@ -6,11 +6,11 @@ use issue_finder::dispatch::{
     DispatchEventKind, DispatchEventSeverity, DispatchEventSource, DispatchFailureClass,
     DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus, DispatchStore,
     DispatchSubjectType, DispatchTaskClass, DispatchValidationOutcome,
-    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTaskPackage, IssueTaskPackageIssue, IssueTaskStatus, MemoryEventType,
-    NewAdapterProbeResult, NewAgentCapability, NewAgentProfile, NewApprovalRequest, NewArtifact,
-    NewDispatchEvent, NewDispatchFailure, NewDispatchRun, NewDispatchRunOutcome,
-    NewGitHubInteraction, NewGitHubInteractionDecision, NewIssueTask, NewMemoryEvent,
+    GitHubInteractionDecisionKind, GitHubInteractionStatus, GitHubInteractionType, IssueTaskStatus,
+    MemoryEventType, NewAdapterProbeResult, NewAgentCapability, NewAgentProfile,
+    NewApprovalRequest, NewArtifact, NewDispatchEvent, NewDispatchFailure, NewDispatchRun,
+    NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision, NewIssueTask,
+    NewMemoryEvent, TaskIdentity, TaskPackage,
 };
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
@@ -100,6 +100,13 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         .unwrap();
     assert_eq!(run.approval_state, ApprovalStatus::Pending);
 
+    store
+        .update_dispatch_run_approval_state(&run.id, ApprovalStatus::Approved)
+        .unwrap();
+    store
+        .update_dispatch_run_status(&run.id, DispatchRunStatus::Approved, None)
+        .unwrap();
+    store.claim_dispatch_run_for_execution(&run.id).unwrap();
     let run = store
         .update_dispatch_run_status(&run.id, DispatchRunStatus::Running, None)
         .unwrap();
@@ -154,22 +161,22 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         1
     );
 
-    let package = IssueTaskPackage::new(IssueTaskPackageIssue {
+    let package = TaskPackage::new(TaskIdentity {
         repo_full_name: "owner/repo".to_string(),
-        number: 123,
+        issue_number: 123,
         title: "Fix parser panic".to_string(),
         url: "https://github.com/owner/repo/issues/123".to_string(),
     });
     let package_artifact = store
         .write_task_package_artifact(&task.id, &package)
         .unwrap();
-    assert_eq!(package.version, 3);
+    assert_eq!(package.version, 1);
     let packaged_task = store.get_issue_task(&task.id).unwrap();
     assert_eq!(
         packaged_task.current_package_artifact_id,
         Some(package_artifact.id.clone())
     );
-    assert_eq!(package_artifact.kind, "issue_task_package");
+    assert_eq!(package_artifact.kind, "task_package");
     let snapshot = json!({
         "source": "test",
         "profile": {
@@ -198,10 +205,13 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
         .set_dispatch_run_result_artifact(&run.id, &package_artifact.id)
         .unwrap();
     assert_eq!(run.result_artifact_id, Some(package_artifact.id.clone()));
-    let run = store
-        .update_dispatch_run_status(&run.id, DispatchRunStatus::Completed, None)
+    store
+        .update_dispatch_run_status(&run.id, DispatchRunStatus::Evaluating, None)
         .unwrap();
-    assert_eq!(run.status, DispatchRunStatus::Completed);
+    let run = store
+        .update_dispatch_run_status(&run.id, DispatchRunStatus::Succeeded, None)
+        .unwrap();
+    assert_eq!(run.status, DispatchRunStatus::Succeeded);
     assert!(run.completed_at.is_some());
 
     let approval = store
@@ -342,103 +352,9 @@ fn dispatch_store_creates_schema_and_persists_core_state() {
     );
 
     let done_task = store
-        .update_issue_task_status(&task.id, IssueTaskStatus::Done)
+        .update_issue_task_status(&task.id, IssueTaskStatus::Succeeded)
         .unwrap();
-    assert_eq!(done_task.status, IssueTaskStatus::Done);
-}
-
-#[test]
-fn dispatch_store_migrates_v1_agent_events_to_typed_dispatch_events() {
-    let dir = tempdir().unwrap();
-    let paths = test_paths(dir.path());
-    std::fs::create_dir_all(paths.dispatch_db_path().parent().unwrap()).unwrap();
-    let conn = rusqlite::Connection::open(paths.dispatch_db_path()).unwrap();
-    conn.execute_batch(
-        r#"
-        PRAGMA foreign_keys = ON;
-        CREATE TABLE agent_profiles (
-            id TEXT PRIMARY KEY,
-            kind TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            adapter TEXT NOT NULL,
-            config_json TEXT NOT NULL,
-            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
-        );
-        CREATE TABLE issue_tasks (
-            id TEXT PRIMARY KEY,
-            issue_key TEXT NOT NULL UNIQUE,
-            repo_full_name TEXT NOT NULL,
-            issue_number INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            url TEXT NOT NULL,
-            status TEXT NOT NULL,
-            priority INTEGER,
-            category TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            current_package_artifact_id TEXT,
-            profile_snapshot_artifact_id TEXT
-        );
-        CREATE TABLE dispatch_runs (
-            id TEXT PRIMARY KEY,
-            issue_task_id TEXT NOT NULL,
-            agent_id TEXT NOT NULL,
-            status TEXT NOT NULL,
-            requested_by TEXT NOT NULL,
-            approval_state TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            started_at TEXT,
-            completed_at TEXT,
-            selected_session_link_id TEXT,
-            result_artifact_id TEXT,
-            failure_reason TEXT
-        );
-        CREATE TABLE agent_session_links (
-            id TEXT PRIMARY KEY,
-            agent_id TEXT NOT NULL,
-            native_session_id TEXT NOT NULL,
-            issue_task_id TEXT,
-            display_name TEXT NOT NULL,
-            goal TEXT,
-            status TEXT NOT NULL,
-            metadata_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL,
-            archived_at TEXT
-        );
-        CREATE TABLE agent_events (
-            id TEXT PRIMARY KEY,
-            run_id TEXT,
-            session_link_id TEXT,
-            event_type TEXT NOT NULL,
-            native_event_id TEXT,
-            payload_json TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        INSERT INTO agent_profiles VALUES ('codex','codex','Codex','codex_app_server','{}',1);
-        INSERT INTO issue_tasks VALUES ('task-1','owner/repo#1','owner/repo',1,'Fix bug','https://github.com/owner/repo/issues/1','discovered',NULL,NULL,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL,NULL);
-        INSERT INTO dispatch_runs VALUES ('run-1','task-1','codex','running','test','approved','2026-01-01T00:00:00Z',NULL,NULL,NULL,NULL,NULL);
-        INSERT INTO agent_events VALUES ('event-1','run-1',NULL,'dispatch_starting',NULL,'{"status":"ok"}','2026-01-01T00:00:01Z');
-        PRAGMA user_version = 1;
-        "#,
-    )
-    .unwrap();
-    drop(conn);
-
-    let store = DispatchStore::open(paths.clone()).unwrap();
-    let events = store.list_dispatch_events_for_run("run-1").unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_kind, DispatchEventKind::DispatchStarting);
-    assert_eq!(events[0].source, DispatchEventSource::Migration);
-    let conn = rusqlite::Connection::open(paths.dispatch_db_path()).unwrap();
-    let legacy_table: Option<i64> = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_events'",
-            [],
-            |row| row.get(0),
-        )
-        .ok();
-    assert_eq!(legacy_table, None);
+    assert_eq!(done_task.status, IssueTaskStatus::Succeeded);
 }
 
 #[test]
@@ -555,7 +471,7 @@ fn dispatch_store_persists_outcomes_idempotently_and_rejects_conflicts() {
         .record_dispatch_run_outcome(NewDispatchRunOutcome {
             run_id: run.id,
             idempotency_key: "outcome-key-1".to_string(),
-            outcome_kind: DispatchOutcomeKind::FixReady,
+            outcome_kind: DispatchOutcomeKind::Success,
             failure_class: None,
             failure_detail: None,
             task_class: Some(DispatchTaskClass::RustCliPanic),

@@ -57,7 +57,7 @@ fn contribution_outcomes_project_quality_and_friction_separately() {
         -36
     );
 
-    let success = outcome("success", true, "fix_ready", None, Some("codex"));
+    let success = outcome("success", true, "success", None, Some("codex"));
     let validation = outcome(
         "validation",
         true,
@@ -73,7 +73,7 @@ fn contribution_outcomes_project_quality_and_friction_separately() {
 
 #[test]
 fn candidate_outcome_projections_are_inert_for_eval_adjustment() {
-    let candidate = outcome("candidate", false, "fix_ready", None, Some("codex"));
+    let candidate = outcome("candidate", false, "success", None, Some("codex"));
     assert!(project_outcome(&candidate)
         .iter()
         .any(|projection| projection.prior_kind == OutcomePriorKind::IssueQuality));

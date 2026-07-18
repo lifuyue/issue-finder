@@ -245,7 +245,7 @@ pub fn outcome_feedback_input_from_raw_event(
     let issue_key = parse_issue_key(&issue_label)?;
     let outcome_kind = json_string(&event.payload_json, "outcomeKind").unwrap_or_else(|| {
         if succeeded {
-            "fix_ready".to_string()
+            "success".to_string()
         } else {
             "failed".to_string()
         }
@@ -267,8 +267,8 @@ pub fn outcome_feedback_input_from_raw_event(
 
 fn issue_quality_weight(input: &OutcomeFeedbackInput) -> Option<f64> {
     match input.outcome_kind.as_str() {
-        "fix_ready" => Some(0.35),
-        "completed_no_change" => Some(0.20),
+        "success" => Some(0.35),
+        "partial" => Some(0.20),
         "failed" | "blocked" => match input.failure_class.as_deref() {
             Some("reproduction_failed") => Some(-0.35),
             Some("context_insufficient") => Some(-0.25),
@@ -289,8 +289,8 @@ fn execution_friction_weight(input: &OutcomeFeedbackInput) -> Option<f64> {
 
 fn agent_suitability_weight(input: &OutcomeFeedbackInput) -> Option<f64> {
     match input.outcome_kind.as_str() {
-        "fix_ready" => Some(0.25),
-        "completed_no_change" => Some(0.10),
+        "success" => Some(0.25),
+        "partial" => Some(0.10),
         "failed" | "blocked" => match input.failure_class.as_deref() {
             Some("validation_failed") => Some(-0.25),
             Some("agent_runtime_error") => Some(-0.35),

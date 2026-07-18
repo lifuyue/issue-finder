@@ -553,7 +553,7 @@ fn apply_issue_task(facts: &mut CandidateFacts, issue_task: &IssueTask) {
     if facts.has_package {
         facts
             .reasons
-            .push("IssueTaskPackage artifact is ready".to_string());
+            .push("TaskPackage artifact is ready".to_string());
     }
 }
 
@@ -629,7 +629,9 @@ fn outcome_status(outcome: DispatchOutcomeKind) -> CandidateLifecycleStatus {
 
 fn terminal_status_for_run(status: DispatchRunStatus) -> Option<CandidateLifecycleStatus> {
     match status {
-        DispatchRunStatus::Completed => Some(CandidateLifecycleStatus::OutcomePositive),
+        DispatchRunStatus::Succeeded | DispatchRunStatus::Partial => {
+            Some(CandidateLifecycleStatus::OutcomePositive)
+        }
         DispatchRunStatus::Failed | DispatchRunStatus::Canceled => {
             Some(CandidateLifecycleStatus::OutcomeNegative)
         }
@@ -641,10 +643,10 @@ fn dispatch_run_is_active(run: &DispatchRun) -> bool {
     matches!(
         run.status,
         DispatchRunStatus::Approved
-            | DispatchRunStatus::Queued
             | DispatchRunStatus::Starting
             | DispatchRunStatus::Running
             | DispatchRunStatus::NeedsUser
+            | DispatchRunStatus::Evaluating
     )
 }
 

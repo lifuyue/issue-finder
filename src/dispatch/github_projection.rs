@@ -11,8 +11,7 @@ use super::github_interaction_policy::{
 use super::model::{
     AgentArtifact, ApprovalRequest, ApprovalStatus, ApprovalType, DispatchRun, DispatchRunOutcome,
     GitHubInteraction, GitHubInteractionDecision, GitHubInteractionStatus, GitHubInteractionType,
-    IssueTask, IssueTaskStatus, NewApprovalRequest, NewArtifact, NewGitHubInteraction,
-    NewGitHubInteractionDecision,
+    IssueTask, NewApprovalRequest, NewArtifact, NewGitHubInteraction, NewGitHubInteractionDecision,
 };
 use super::store::DispatchStore;
 
@@ -259,9 +258,6 @@ where
         Ok(posted_comment) => {
             let interaction =
                 store.mark_github_interaction_posted(&interaction.id, &posted_comment.id)?;
-            if interaction.interaction_type == GitHubInteractionType::FinalComment {
-                store.update_issue_task_status(&issue_task.id, IssueTaskStatus::GithubPosted)?;
-            }
             Ok(GitHubPostResult {
                 interaction,
                 posted_comment,
@@ -395,10 +391,9 @@ fn final_comment_facts(
     let value = match result_artifact_id.as_deref() {
         Some(artifact_id) => {
             let bytes = store.read_artifact_bytes(artifact_id)?;
-            Some(
-                serde_json::from_slice::<Value>(&bytes)
-                    .context("fix result artifact must be JSON to derive GitHub comment policy")?,
-            )
+            Some(serde_json::from_slice::<Value>(&bytes).context(
+                "candidate result artifact must be JSON to derive GitHub comment policy",
+            )?)
         }
         None => None,
     };

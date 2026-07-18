@@ -54,7 +54,7 @@ pub(super) fn dispatch_outcome_for_conflict(
 ) -> Option<(String, String, bool)> {
     let input = outcome_feedback_input_from_raw_event(event)?;
     let succeeded = match input.outcome_kind.as_str() {
-        "fix_ready" | "completed_no_change" => true,
+        "success" | "partial" => true,
         "failed" | "blocked" => false,
         _ => return None,
     };

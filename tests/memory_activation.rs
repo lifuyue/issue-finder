@@ -139,7 +139,7 @@ fn activation_settlement_penalizes_hubs_and_low_resource_nodes() {
             id: "dispatch-hub".to_string(),
             issue_key: IssueKey::new("owner/repo", 8),
             agent_id: "codex".to_string(),
-            outcome_kind: Some("fix_ready".to_string()),
+            outcome_kind: Some("success".to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded: true,
             failure_class: None,

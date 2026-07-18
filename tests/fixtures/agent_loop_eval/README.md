@@ -1,6 +1,6 @@
 # Agent Loop Evaluation Fixtures
 
-This directory contains deterministic offline fixtures for the next-stage agent loop. The fixtures exercise lifecycle contracts across recommendation, dispatch, package creation, GitHub projection, session continuity, and memory governance without contacting GitHub, LLM services, native agent servers, user workspaces, or generated user state.
+This directory contains deterministic offline fixtures for the agent loop. The fixtures exercise lifecycle contracts across recommendation, dispatch, package creation, GitHub projection, session continuity, and memory governance without contacting GitHub, LLM services, Codex app-server, user workspaces, or generated user state.
 
 ## Layout
 

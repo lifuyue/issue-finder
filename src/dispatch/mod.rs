@@ -1,30 +1,34 @@
 pub mod a2a_gateway;
-pub mod adapters;
 pub mod capability_probe;
 pub mod cli;
 pub mod cli_args;
+pub mod codex_runtime;
+pub mod evaluator;
 pub mod events;
-pub mod execution;
 pub mod failure;
 pub mod github_interaction_policy;
 pub mod github_projection;
 pub mod memory;
 pub mod model;
-pub mod native_runtime;
 pub mod outcome_validator;
 mod output;
 pub mod packaging;
 pub mod policy;
+pub mod projectors;
 pub mod runtime;
 pub mod store;
-pub mod task_package;
+pub mod supervisor;
+pub mod task_contract;
 pub mod timeline;
 pub mod tool_specs;
 pub mod tools;
 
 pub use a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 pub use capability_probe::AgentProbeReport;
-pub use execution::DispatchExecutionResult;
+pub use evaluator::{
+    CandidateResult, CandidateResultStatus, CriterionEvidence, EvaluatedCandidate,
+    EvaluationDisposition, EvaluationReport, ValidationEvidence,
+};
 pub use github_projection::{
     GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubCommentWriter,
     GitHubPostResult, PostedGitHubComment, ReqwestGitHubCommentWriter,
@@ -46,12 +50,13 @@ pub use model::{
 pub use packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 pub use policy::PolicyDecision;
 pub use runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordRequest,
-    DispatchOutcomeRecordResult, DispatchProposal, DispatchProposalRequest, DispatchRuntime,
-    DispatchStatusSnapshot,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordResult,
+    DispatchProposal, DispatchProposalRequest, DispatchRuntime, DispatchStatusSnapshot,
+    SubmitResultOutcome,
 };
 pub use store::DispatchStore;
-pub use task_package::{IssueTaskPackage, IssueTaskPackageIssue};
+pub use supervisor::{DispatchExecutionResult, RunSupervisor, SupervisedRunResult};
+pub use task_contract::{TaskIdentity, TaskPackage};
 pub use timeline::{ApprovalLatency, DispatchTimeline, DispatchTrace, TimelineItem};
 
 pub use cli::{handle_agents_cli, handle_dispatch_cli};

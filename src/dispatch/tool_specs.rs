@@ -16,11 +16,14 @@ pub const TOOL_DISPATCH_REVIEW_SHOW: &str = "issue-finder.dispatch_review_show";
 pub const TOOL_DISPATCH_REVIEW_APPROVE: &str = "issue-finder.dispatch_review_approve";
 pub const TOOL_DISPATCH_REVIEW_REJECT: &str = "issue-finder.dispatch_review_reject";
 pub const TOOL_DISPATCH: &str = "issue-finder.dispatch";
-pub const TOOL_DISPATCH_PROPOSE: &str = "issue-finder.dispatch_propose";
 pub const TOOL_DISPATCH_APPROVE: &str = "issue-finder.dispatch_approve";
 pub const TOOL_DISPATCH_REJECT: &str = "issue-finder.dispatch_reject";
 pub const TOOL_DISPATCH_EXECUTE: &str = "issue-finder.dispatch_execute";
-pub const TOOL_DISPATCH_RECORD_OUTCOME: &str = "issue-finder.dispatch_record_outcome";
+pub const TOOL_DISPATCH_PENDING_REQUESTS: &str = "issue-finder.dispatch_pending_requests";
+pub const TOOL_DISPATCH_RESPOND: &str = "issue-finder.dispatch_respond";
+pub const TOOL_DISPATCH_STEER: &str = "issue-finder.dispatch_steer";
+pub const TOOL_DISPATCH_INTERRUPT: &str = "issue-finder.dispatch_interrupt";
+pub const TOOL_DISPATCH_SYNC: &str = "issue-finder.dispatch_sync";
 pub const TOOL_A2A_EXPORT_TASK: &str = "issue-finder.a2a_export_task";
 pub const TOOL_A2A_APPROVE_SEND: &str = "issue-finder.a2a_approve_send";
 pub const TOOL_A2A_REJECT_SEND: &str = "issue-finder.a2a_reject_send";
@@ -103,7 +106,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "dispatch_review_approve",
-            "Approve an issue review and create an IssueTaskPackage v3 artifact.",
+            "Approve an issue review and create the immutable TaskPackage artifact.",
             issue_review_approval_schema(),
             false,
         ),
@@ -116,7 +119,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         dispatch_tool_spec(
             "dispatch",
             "Create a pending dispatch approval without starting a native agent session; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
-            dispatch_propose_schema(),
+            dispatch_request_schema(),
             false,
         ),
         dispatch_tool_spec(
@@ -137,15 +140,14 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
             dispatch_run_read_schema(),
             false,
         ),
-        dispatch_tool_spec(
-            "dispatch_record_outcome",
-            "Record a normalized dispatch outcome for one dispatch run.",
-            dispatch_record_outcome_schema(),
-            false,
-        ),
+        dispatch_tool_spec("dispatch_pending_requests", "List durable app-server requests awaiting user action.", dispatch_run_read_schema(), false),
+        dispatch_tool_spec("dispatch_respond", "Queue an idempotent response to a durable pending request.", dispatch_respond_schema(), false),
+        dispatch_tool_spec("dispatch_steer", "Queue in-flight guidance for the active Codex turn.", dispatch_steer_schema(), false),
+        dispatch_tool_spec("dispatch_interrupt", "Queue interruption of the active Codex turn.", dispatch_run_read_schema(), false),
+        dispatch_tool_spec("dispatch_sync", "Read supervisor-projected durable run state without opening a second app-server connection.", dispatch_run_read_schema(), false),
         dispatch_tool_spec(
             "a2a_export_task",
-            "Create a local A2A task artifact from the approved IssueTaskPackage v3 and a pending approval before external use; imports a matching ready handoff when needed and returns pending_issue_review until human review approves the package.",
+            "Create a local A2A gateway artifact from the approved TaskPackage and require approval before external use.",
             a2a_export_task_schema(),
             false,
         ),
@@ -163,7 +165,7 @@ pub(crate) fn dispatch_tool_specs() -> Vec<IssueFinderToolSpec> {
         ),
         dispatch_tool_spec(
             "a2a_import_result",
-            "Import a local A2A result file that satisfies the IssueTaskPackage v3 outcome contract.",
+            "Import a local A2A candidate result through the same evaluator used by submit_result.",
             a2a_import_result_schema(),
             false,
         ),
@@ -303,7 +305,7 @@ fn issue_review_reject_schema() -> Value {
     })
 }
 
-fn dispatch_propose_schema() -> Value {
+fn dispatch_request_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
@@ -344,99 +346,31 @@ fn a2a_import_result_schema() -> Value {
         "type": "object",
         "properties": {
             "runId": { "type": "string" },
-            "path": { "type": "string" },
-            "kind": { "type": ["string", "null"], "default": "fix_result" },
-            "contentType": { "type": ["string", "null"], "default": "application/json" },
-            "status": {
-                "type": ["string", "null"],
-                "enum": [
-                    null,
-                    "proposed",
-                    "approved",
-                    "queued",
-                    "starting",
-                    "running",
-                    "needs_user",
-                    "completed",
-                    "failed",
-                    "canceled"
-                ],
-                "default": null
-            },
-            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
-            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
-            "failureReason": { "type": ["string", "null"], "default": null },
-            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
-            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
-            "idempotencyKey": { "type": ["string", "null"], "default": null }
+            "path": { "type": "string" }
         },
         "required": ["runId", "path"],
-        "additionalProperties": false,
-        "$defs": dispatch_outcome_defs()
+        "additionalProperties": false
     })
 }
 
-fn dispatch_record_outcome_schema() -> Value {
+fn dispatch_respond_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "runId": { "type": "string" },
-            "outcome": { "$ref": "#/$defs/dispatchOutcomeKind" },
-            "failureClass": { "$ref": "#/$defs/dispatchFailureClass" },
-            "failureReason": { "type": ["string", "null"], "default": null },
-            "taskClass": { "$ref": "#/$defs/dispatchTaskClass" },
-            "validationOutcome": { "$ref": "#/$defs/dispatchValidationOutcome" },
-            "resultArtifactId": { "type": ["string", "null"], "default": null },
-            "idempotencyKey": { "type": ["string", "null"], "default": null }
+            "requestId": { "type": "string" },
+            "response": {}
         },
-        "required": ["runId", "outcome"],
-        "additionalProperties": false,
-        "$defs": dispatch_outcome_defs()
+        "required": ["requestId", "response"],
+        "additionalProperties": false
     })
 }
 
-fn dispatch_outcome_defs() -> Value {
+fn dispatch_steer_schema() -> Value {
     json!({
-        "dispatchOutcomeKind": {
-            "type": ["string", "null"],
-            "enum": [null, "fix_ready", "completed_no_change", "needs_user", "blocked", "failed", "canceled"],
-            "default": null
-        },
-        "dispatchFailureClass": {
-            "type": ["string", "null"],
-            "enum": [
-                null,
-                "validation_failed",
-                "reproduction_failed",
-                "dependency_unavailable",
-                "workspace_unavailable",
-                "context_insufficient",
-                "agent_runtime_error",
-                "external_service_error",
-                "policy_blocked",
-                "user_canceled",
-                "unknown"
-            ],
-            "default": null
-        },
-        "dispatchTaskClass": {
-            "type": ["string", "null"],
-            "enum": [
-                null,
-                "rust_cli_panic",
-                "frontend_ui_bug",
-                "docs_update",
-                "test_coverage",
-                "dependency_upgrade",
-                "unknown_task"
-            ],
-            "default": null
-        },
-        "dispatchValidationOutcome": {
-            "type": ["string", "null"],
-            "enum": [null, "not_run", "passed", "failed", "unknown"],
-            "default": null
-        }
+        "type":"object",
+        "properties":{"runId":{"type":"string"},"message":{"type":"string"}},
+        "required":["runId","message"],
+        "additionalProperties":false
     })
 }
 

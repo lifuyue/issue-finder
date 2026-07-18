@@ -2,6 +2,10 @@
 
 Issue Finder is a local-first task preparation tool for developers who use coding agents. The root README stays short; this guide keeps the operational details for installing, configuring, and running the CLI.
 
+This guide describes the current implementation. The complete Codex workflow, supervisor, worker
+tool surface, evaluator loop, and module ownership are defined in
+[Agent Loop Architecture](./agent-loop-target-architecture.md).
+
 ## Workflow
 
 ```text
@@ -12,8 +16,12 @@ Discover good first issues
   -> Generate handoff, policy, probe, event, and context artifacts
   -> Store the task in the local inbox
   -> Import handoff for issue review when dispatch or projection is requested
-  -> Create IssueTaskPackage v3 only after review approval
-  -> Track native Codex threads, turns, items, approvals, and result artifacts
+  -> Freeze an immutable ContextSnapshot
+  -> Create TaskPackage only after review approval
+  -> Launch one persistent supervisor for the approved run
+  -> Track Codex threads, turns, items, approvals, pending requests, and candidate results
+  -> Deterministically evaluate results and retry within budget
+  -> Commit one terminal outcome and project downstream state
   -> Project local candidate/task board state for queries
   -> Generate a daily report
 ```
@@ -133,7 +141,7 @@ issue-finder dispatch sync <run-id>
 issue-finder dispatch a2a export owner/repo#123
 issue-finder dispatch a2a approve <approval-request-id>
 issue-finder dispatch a2a reject <approval-request-id>
-issue-finder dispatch a2a import-result <run-id> --path ./fix_result.json --status completed
+issue-finder dispatch a2a import-result <run-id> --path ./candidate_result.json
 issue-finder dispatch github draft-tracking owner/repo#123
 issue-finder dispatch github draft-final <run-id>
 issue-finder dispatch github approve <interaction-id>
@@ -150,9 +158,16 @@ issue-finder dispatch artifacts <run-id>
 
 `dispatch package import-handoff` creates an `issue_review` approval request and stores the handoff/profile snapshot as artifacts. It does not create an `IssueTaskPackage` until `dispatch review approve <approval-request-id>` resolves the review. Direct dispatch, A2A, and GitHub projection commands may auto-import a matching ready inbox handoff, but they return `pending_issue_review` until that approval creates the package.
 
-Direct dispatch creates a new native session proposal when `--session` is omitted. `--new-session` is the explicit form of that same start-session request and cannot be combined with `--session`; dispatch state records both the actual execution mode and whether the caller explicitly requested a new session.
+Direct dispatch creates a new Codex session proposal when `--session` is omitted. `--new-session`
+is the explicit form of that same start-session request and cannot be combined with `--session`.
+`dispatch execute` starts a detached supervisor; `dispatch sync` only reads the supervisor's
+durable projection and never opens a competing app-server connection.
 
-For JSON tool callers, prefer the public `issue-finder.dispatch` tool. The runtime still accepts `issue-finder.dispatch_propose` as a compatibility alias, but `tools list` does not advertise it.
+JSON and MCP control callers use `issue-finder.dispatch`, `issue-finder.dispatch_sync`,
+`issue-finder.dispatch_pending_requests`, `issue-finder.dispatch_respond`,
+`issue-finder.dispatch_steer`, and `issue-finder.dispatch_interrupt`. The supervisor exposes a
+separate run-scoped worker MCP profile containing only `issue-finder.read_context` and
+`issue-finder.submit_result`.
 
 Manage local inbox items:
 
@@ -206,10 +221,10 @@ Run deterministic evaluation workflows:
 ```bash
 issue-finder eval recommendation --offline --output <dir>
 issue-finder eval agent-loop --offline --output <dir>
-issue-finder eval native-runtime --workspace <absolute-path> --timeout-seconds 120
+issue-finder eval codex-runtime --workspace <absolute-path> --timeout-seconds 120
 ```
 
-`eval native-runtime` is a real process-level acceptance probe, not a mock. Success
+`eval codex-runtime` is a real process-level acceptance probe, not a mock. Success
 requires an app-server handshake plus a completed authenticated model response containing
 the per-run marker in the persisted transcript. Runtime absence, failed/interrupted turns,
 and timeouts are emitted as structured `capability_unavailable` outcomes so an external
@@ -247,20 +262,19 @@ outcome semantics, hard gates, and canonical 50-task catalog are defined in
 | `issue-finder dispatch package import-handoff <id>` | Import an existing inbox handoff as an `issue_review` candidate and create an approval request |
 | `issue-finder dispatch review list` | List pending and resolved issue review requests |
 | `issue-finder dispatch review show <approval-request-id>` | Show one issue review request, including imported handoff/package evidence |
-| `issue-finder dispatch review approve <approval-request-id>` | Approve one issue review and create the `IssueTaskPackage` v3 artifact |
+| `issue-finder dispatch review approve <approval-request-id>` | Approve one issue review and create the immutable `TaskPackage` and `ContextSnapshot` artifacts |
 | `issue-finder dispatch review reject <approval-request-id>` | Reject one issue review without dismissing the recommendation |
 | `issue-finder dispatch owner/repo#123 --agent codex` | Create a pending dispatch approval for a new native session by default; returns `pending_issue_review` first if the package has not been review-approved |
 | `issue-finder dispatch owner/repo#123 --agent codex --new-session` | Explicit form of the default new-session dispatch proposal; returns `pending_issue_review` first if the package has not been review-approved |
 | `issue-finder dispatch owner/repo#123 --agent codex --session <codex-thread-id>` | Create a pending approval to continue one explicitly selected native Codex thread; returns `pending_issue_review` first if needed |
-| `issue-finder dispatch propose owner/repo#123 --agent codex --new-session` | Explicit subcommand form for the same approval-gated dispatch proposal |
 | `issue-finder dispatch approve <run-id>` | Resolve a pending dispatch approval and move the run to `approved` |
 | `issue-finder dispatch reject <run-id>` | Reject a pending dispatch approval and cancel the run |
-| `issue-finder dispatch execute <run-id>` | Connect to the run's native adapter and start the first turn after local approval |
-| `issue-finder dispatch outcome record <run-id> --outcome <kind>` | Record a normalized terminal or blocked dispatch outcome |
-| `issue-finder dispatch a2a export owner/repo#123` | Create a local A2A task artifact from the approved package v3 contract and an `a2a_send` approval request without network I/O; returns `pending_issue_review` first if needed |
+| `issue-finder dispatch execute <run-id>` | Start the run's persistent Codex supervisor after local approval |
+| `issue-finder dispatch sync <run-id>` | Read the durable run projection without opening another Codex connection |
+| `issue-finder dispatch a2a export owner/repo#123` | Create a local A2A task artifact from the approved `TaskPackage` and an `a2a_send` approval request without network I/O; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch a2a approve <approval-request-id>` | Approve an outbound A2A task artifact for external use |
 | `issue-finder dispatch a2a reject <approval-request-id>` | Reject an outbound A2A task artifact |
-| `issue-finder dispatch a2a import-result <run-id> --path <file>` | Import a local A2A result file that satisfies the package outcome contract |
+| `issue-finder dispatch a2a import-result <run-id> --path <file>` | Submit a local `CandidateResult` through the same deterministic evaluator used by the Codex worker |
 | `issue-finder dispatch github draft-tracking owner/repo#123` | Evaluate tracking-comment policy; default is `no_comment`, and allowed drafts create a local GitHub post approval; returns `pending_issue_review` first if needed |
 | `issue-finder dispatch github draft-final <run-id>` | Evaluate final/clarification policy from the run's outcome and result artifact; only explicit suggested replies create a local GitHub post approval |
 | `issue-finder dispatch github approve <interaction-id>` | Approve a drafted GitHub comment for posting |
@@ -418,9 +432,20 @@ By default it does not read complete conversation bodies, system prompts, tool o
 
 `probe.json` records fixed preparation probes and static repository facts, including workspace dirty state, current branch, origin URL, package managers, detected package scripts, agent instruction files, validation candidates, probe warnings, and truncation or timeout details.
 
-When dispatch state is used, `handoff.json` is imported as an issue review candidate first. Review approval writes a broader `IssueTaskPackage` v3 artifact. Package v3 is the execution-agent contract: it includes typed reproduction obligations, success criteria, change budget, environment contract, maintainer and interaction policy, thread/resume context, and an expanded `fix_result.json` outcome contract. Issue-based dispatch and projection commands can import the matching ready inbox handoff automatically when local dispatch state does not exist yet, but they return `pending_issue_review` until `dispatch review approve <approval-request-id>` creates the package. The dispatch store records the package artifact path, user profile snapshot artifact, selected native Codex thread ID, approval requests, typed `dispatch_events`, result artifacts, GitHub comment interactions, and GitHub interaction policy decisions including explicit `no_comment` and `no_reply` outcomes.
+When dispatch state is used, `handoff.json` is imported as an issue-review candidate first. Review
+approval freezes all referenced context into a content-addressed `ContextSnapshot` and writes a
+`TaskPackage`. The package is the execution contract: goal, constraints, success criteria,
+validation commands, interaction policy, runtime budget, exact snapshot, and `CandidateResult`
+schema. Commands can auto-import a ready inbox handoff, but they return `pending_issue_review`
+until the review is approved.
 
-Native Codex communication uses a bidirectional app-server worker. Without provider overrides the default transport connects to the installer-managed daemon. Provider overrides default to a dedicated stdio app-server so an already-running daemon cannot silently retain stale model configuration; set `ISSUE_FINDER_CODEX_TRANSPORT=daemon` to opt into the shared daemon explicitly. The worker owns pending request routing, notifications, server requests, bounded queues, request deadlines, graceful shutdown, and disconnect events. `dispatch/dispatch.sqlite3` projects the same stream into native threads, turns, items, events, idempotent outbox messages, and connection-scoped pending server requests. After local review and dispatch approvals, `dispatch execute` atomically claims a run and starts or resumes the selected thread. `dispatch sync` reconciles an interrupted local process from `thread/read`; it never turns an unvalidated remote completion into product success. Issue Finder never guesses the focused desktop thread. A2A remains an explicitly invoked artifact mapping gateway onto this dispatch state, not an alternate agent loop or store.
+Codex communication uses one bidirectional stdio app-server connection owned by the detached run
+supervisor. The supervisor owns discovery, thread/turn lifecycle, pending request routing, event
+persistence, control/result outboxes, retries, and restart recovery. `dispatch/dispatch.sqlite3`
+stores the same stream as durable threads, turns, items, events, pending requests, artifacts,
+evaluator reports, and outcomes. `dispatch sync` reads that projection; it never creates another
+connection or treats `turn/completed` as success. A2A is an explicit gateway into the same package
+and candidate-result evaluator, not another agent loop or store.
 
 An external OpenAI-compatible provider can be selected without writing its secret into Issue Finder state. Set `ISSUE_FINDER_CODEX_MODEL`, `ISSUE_FINDER_CODEX_MODEL_PROVIDER`, `ISSUE_FINDER_CODEX_PROVIDER_NAME`, `ISSUE_FINDER_CODEX_BASE_URL`, `ISSUE_FINDER_CODEX_WIRE_API`, and `ISSUE_FINDER_CODEX_REASONING_EFFORT`; set `ISSUE_FINDER_CODEX_API_KEY_ENV` to the *name* of the inherited environment variable containing the credential. Provider and reasoning overrides are passed to every daemon or stdio app-server process, so a resumed thread uses the same runtime configuration.
 

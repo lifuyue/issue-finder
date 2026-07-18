@@ -3,6 +3,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::config::Config;
+use crate::context_snapshot::{
+    ContextSnapshot, StoredContextSnapshot, StoredContextSnapshotFile, CONTEXT_SNAPSHOT_FILE,
+};
 use crate::github::IssueRef;
 use crate::handoff::Handoff;
 use crate::inbox;
@@ -14,7 +17,7 @@ use super::model::{
     MemoryEvent, NewApprovalRequest, NewArtifact, NewIssueTask,
 };
 use super::store::DispatchStore;
-use super::task_package::IssueTaskPackage;
+use super::task_contract::TaskPackage;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -23,11 +26,12 @@ pub struct PackageImportResult {
     pub issue_task: IssueTask,
     pub handoff_artifact: AgentArtifact,
     pub profile_snapshot_artifact: AgentArtifact,
+    pub context_snapshot_artifact: AgentArtifact,
     pub approval_request: ApprovalRequest,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_artifact: Option<AgentArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub package: Option<IssueTaskPackage>,
+    pub package: Option<TaskPackage>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -40,9 +44,11 @@ pub struct IssueReviewDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_snapshot_artifact: Option<AgentArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_snapshot_artifact: Option<AgentArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub package_artifact: Option<AgentArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub package: Option<IssueTaskPackage>,
+    pub package: Option<TaskPackage>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -53,7 +59,7 @@ pub struct IssueReviewResolution {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_artifact: Option<AgentArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub package: Option<IssueTaskPackage>,
+    pub package: Option<TaskPackage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_event: Option<MemoryEvent>,
 }
@@ -144,20 +150,17 @@ pub fn approve_issue_review(
             .context("review handoff artifact is not valid handoff JSON")?;
     let profile_snapshot_artifact =
         artifact_from_review(store, &pending, "profileSnapshotArtifactId")?;
-    let profile_snapshot =
-        serde_json::from_slice::<Value>(&store.read_artifact_bytes(&profile_snapshot_artifact.id)?)
-            .context("profile snapshot artifact is not valid JSON")?;
-
     let approval_request = store.resolve_approval_request(&pending.id, ApprovalStatus::Approved)?;
-    let package = IssueTaskPackage::from_reviewed_handoff(
+    let context_snapshot_artifact =
+        artifact_from_review(store, &pending, "contextSnapshotArtifactId")?;
+    let package = TaskPackage::from_reviewed_handoff(
+        store,
         &handoff,
-        &handoff_artifact.id,
-        json!({
-            "artifactId": profile_snapshot_artifact.id,
-            "snapshot": profile_snapshot
-        }),
+        &handoff_artifact,
+        &context_snapshot_artifact,
+        &profile_snapshot_artifact,
         &approval_request,
-    );
+    )?;
     let package_artifact = store.write_task_package_artifact(&issue_task.id, &package)?;
     let issue_task =
         store.update_issue_task_status(&issue_task.id, IssueTaskStatus::UserApproved)?;
@@ -273,6 +276,7 @@ fn import_handoff_item(
         },
         raw,
     )?;
+    let context_snapshot_artifact = import_context_snapshot(store, &issue_task, item, &handoff)?;
     let profile_snapshot = user_profile_snapshot(&store.paths());
     let profile_snapshot_artifact =
         store.write_profile_snapshot_artifact(&issue_task.id, &profile_snapshot)?;
@@ -281,6 +285,7 @@ fn import_handoff_item(
         &issue_task,
         &handoff_artifact,
         &profile_snapshot_artifact,
+        &context_snapshot_artifact,
         item,
         &handoff,
     )?;
@@ -290,10 +295,79 @@ fn import_handoff_item(
         issue_task: store.get_issue_task(&issue_task.id)?,
         handoff_artifact,
         profile_snapshot_artifact,
+        context_snapshot_artifact,
         approval_request,
         package_artifact: None,
         package: None,
     })
+}
+
+fn import_context_snapshot(
+    store: &DispatchStore,
+    issue_task: &IssueTask,
+    item: &inbox::InboxItem,
+    handoff: &Handoff,
+) -> Result<AgentArtifact> {
+    let handoff_path = std::path::Path::new(&item.handoff_json_path);
+    let source_root = handoff_path
+        .parent()
+        .context("handoff path has no parent directory")?;
+    let snapshot_path = source_root.join(CONTEXT_SNAPSHOT_FILE);
+    let snapshot = ContextSnapshot::load_and_verify(&snapshot_path)?;
+    if snapshot.handoff_id != handoff.id {
+        anyhow::bail!(
+            "context snapshot {} belongs to handoff {}, not {}",
+            snapshot.id,
+            snapshot.handoff_id,
+            handoff.id
+        );
+    }
+
+    let mut stored_files = Vec::with_capacity(snapshot.files.len());
+    for file in &snapshot.files {
+        let bytes = std::fs::read(source_root.join(&file.relative_path))?;
+        let artifact = store.write_artifact(
+            NewArtifact {
+                issue_task_id: Some(issue_task.id.clone()),
+                run_id: None,
+                kind: "context_snapshot_file".to_string(),
+                content_type: file.media_type.clone(),
+                metadata_json: json!({
+                    "snapshotId": snapshot.id,
+                    "fileId": file.id,
+                    "relativePath": file.relative_path,
+                    "sourceSha256": file.sha256,
+                    "inboxId": item.id
+                }),
+            },
+            bytes,
+        )?;
+        stored_files.push(StoredContextSnapshotFile {
+            id: file.id.clone(),
+            relative_path: file.relative_path.clone(),
+            sha256: file.sha256.clone(),
+            media_type: file.media_type.clone(),
+            artifact_id: artifact.id,
+        });
+    }
+    let stored = StoredContextSnapshot {
+        snapshot: snapshot.clone(),
+        files: stored_files,
+    };
+    store.write_artifact(
+        NewArtifact {
+            issue_task_id: Some(issue_task.id.clone()),
+            run_id: None,
+            kind: "context_snapshot".to_string(),
+            content_type: "application/json".to_string(),
+            metadata_json: json!({
+                "snapshotId": snapshot.id,
+                "handoffId": snapshot.handoff_id,
+                "inboxId": item.id
+            }),
+        },
+        serde_json::to_vec_pretty(&stored)?,
+    )
 }
 
 fn existing_import_result(
@@ -328,6 +402,24 @@ fn existing_import_result(
                 issue_task.issue_key
             )
         })?;
+    let context_snapshot_artifact = artifacts
+        .iter()
+        .rev()
+        .find(|artifact| {
+            artifact.kind == "context_snapshot"
+                && artifact
+                    .metadata_json
+                    .get("inboxId")
+                    .and_then(Value::as_str)
+                    == Some(inbox_id)
+        })
+        .cloned()
+        .with_context(|| {
+            format!(
+                "issue task {} has a prior handoff import but no context snapshot artifact",
+                issue_task.issue_key
+            )
+        })?;
     let approval_request =
         issue_review_for_inbox(store, &issue_task.id, inbox_id)?.with_context(|| {
             format!(
@@ -342,6 +434,7 @@ fn existing_import_result(
         issue_task: store.get_issue_task(&issue_task.id)?,
         handoff_artifact,
         profile_snapshot_artifact,
+        context_snapshot_artifact,
         approval_request,
         package_artifact,
         package,
@@ -353,6 +446,7 @@ fn create_issue_review_approval(
     issue_task: &IssueTask,
     handoff_artifact: &AgentArtifact,
     profile_snapshot_artifact: &AgentArtifact,
+    context_snapshot_artifact: &AgentArtifact,
     item: &inbox::InboxItem,
     handoff: &Handoff,
 ) -> Result<ApprovalRequest> {
@@ -361,7 +455,7 @@ fn create_issue_review_approval(
         approval_type: ApprovalType::IssueReview,
         status: ApprovalStatus::Pending,
         prompt: format!(
-            "Approve {} as an IssueTaskPackage v3 candidate?",
+            "Approve {} as a TaskPackage candidate?",
             issue_task.issue_key
         ),
         details_json: json!({
@@ -370,11 +464,11 @@ fn create_issue_review_approval(
             "inboxId": item.id,
             "handoffArtifactId": handoff_artifact.id,
             "profileSnapshotArtifactId": profile_snapshot_artifact.id,
-            "packageVersion": 3,
+            "contextSnapshotArtifactId": context_snapshot_artifact.id,
             "priority": item.score,
             "category": handoff.value_assessment.recommendation_category,
             "llmConfirmation": handoff.llm_confirmation,
-            "reviewKind": "issue_task_package_v3"
+            "reviewKind": "task_package"
         }),
     })
 }
@@ -388,12 +482,15 @@ fn issue_review_detail(
         optional_artifact_from_review(store, &approval_request, "handoffArtifactId")?;
     let profile_snapshot_artifact =
         optional_artifact_from_review(store, &approval_request, "profileSnapshotArtifactId")?;
+    let context_snapshot_artifact =
+        optional_artifact_from_review(store, &approval_request, "contextSnapshotArtifactId")?;
     let (package_artifact, package) = read_current_package(store, &issue_task)?;
     Ok(IssueReviewDetail {
         issue_task,
         approval_request,
         handoff_artifact,
         profile_snapshot_artifact,
+        context_snapshot_artifact,
         package_artifact,
         package,
     })
@@ -402,15 +499,14 @@ fn issue_review_detail(
 fn read_current_package(
     store: &DispatchStore,
     issue_task: &IssueTask,
-) -> Result<(Option<AgentArtifact>, Option<IssueTaskPackage>)> {
+) -> Result<(Option<AgentArtifact>, Option<TaskPackage>)> {
     let Some(package_artifact_id) = issue_task.current_package_artifact_id.as_deref() else {
         return Ok((None, None));
     };
     let package_artifact = store.get_artifact(package_artifact_id)?;
-    let package = serde_json::from_slice::<IssueTaskPackage>(
-        &store.read_artifact_bytes(&package_artifact.id)?,
-    )
-    .context("existing IssueTaskPackage artifact is not valid v3 JSON")?;
+    let package =
+        serde_json::from_slice::<TaskPackage>(&store.read_artifact_bytes(&package_artifact.id)?)
+            .context("existing TaskPackage artifact is invalid")?;
     Ok((Some(package_artifact), Some(package)))
 }
 
@@ -515,9 +611,10 @@ fn review_candidate_status(existing: Option<&IssueTask>, handoff: &Handoff) -> I
             IssueTaskStatus::UserApproved
                 | IssueTaskStatus::Dispatched
                 | IssueTaskStatus::InProgress
-                | IssueTaskStatus::FixReady
-                | IssueTaskStatus::GithubPosted
-                | IssueTaskStatus::Done
+                | IssueTaskStatus::Succeeded
+                | IssueTaskStatus::Partial
+                | IssueTaskStatus::Failed
+                | IssueTaskStatus::Canceled
         ) {
             return existing.status;
         }

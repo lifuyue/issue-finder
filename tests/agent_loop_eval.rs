@@ -4,7 +4,7 @@ use issue_finder::agent_loop_eval::{evaluate_builtin, run_offline_eval};
 use tempfile::tempdir;
 
 #[test]
-fn agent_loop_eval_fixtures_cover_next_stage_loop_contracts() {
+fn agent_loop_eval_fixtures_cover_agent_loop_contracts() {
     let report = evaluate_builtin().unwrap();
 
     assert_eq!(report.kind, "agent_loop_eval_report");

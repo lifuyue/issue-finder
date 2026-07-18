@@ -5,7 +5,10 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config::{Config, GitHubTokenSource};
+use crate::context_snapshot::StoredContextSnapshot;
 use crate::dispatch::tools::{execute_dispatch_tool, is_dispatch_tool, DispatchToolError};
+use crate::dispatch::TaskPackage;
+use crate::dispatch::{CandidateResult, DispatchRuntime};
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::memory::{
     memory_dream_show, memory_dreams_list, memory_hint_update, memory_hints_list, memory_recall,
@@ -26,9 +29,10 @@ use crate::tool_outputs::{
     PrepareGateOutput, StatusConfigOutput, StatusGitHubAuthOutput, StatusGitHubOutput,
 };
 use crate::tool_specs::{
-    TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW, TOOL_MEMORY_HINTS_LIST,
-    TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS, TOOL_MEMORY_TOMBSTONE,
-    TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+    ToolProfile, TOOL_ASSESS, TOOL_MEMORY_DREAMS_LIST, TOOL_MEMORY_DREAM_SHOW,
+    TOOL_MEMORY_HINTS_LIST, TOOL_MEMORY_HINT_UPDATE, TOOL_MEMORY_RECALL, TOOL_MEMORY_STATUS,
+    TOOL_MEMORY_TOMBSTONE, TOOL_PREPARE, TOOL_READ_CONTEXT, TOOL_SCOUT, TOOL_STATUS,
+    TOOL_SUBMIT_RESULT,
 };
 use crate::value_scoring::RankedValueIssue;
 use crate::workflow::{self, IssueSelector, PrepareOptions, PrepareOutcome};
@@ -63,6 +67,17 @@ pub struct IssueFinderToolRuntime {
     paths: IssueFinderPaths,
     config: Config,
     config_load_error: Option<String>,
+    profile: ToolProfile,
+    worker_capability: Option<WorkerCapability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerCapability {
+    pub run_id: String,
+    pub issue_task_id: String,
+    pub package_id: String,
+    pub snapshot_id: String,
+    pub workspace: String,
 }
 
 #[derive(Debug)]
@@ -72,6 +87,22 @@ enum RuntimeFailure {
 }
 
 type RuntimeResult<T> = std::result::Result<T, RuntimeFailure>;
+
+fn worker_context_path(section: &str) -> Option<&'static str> {
+    match section {
+        "entry" => Some("context/entry.md"),
+        "safety" => Some("context/safety.md"),
+        "probe" => Some("context/probe.md"),
+        "value" => Some("context/value.md"),
+        "issue" => Some("context/issue.md"),
+        "repo" => Some("context/repo.md"),
+        "validation" => Some("context/validation.md"),
+        "handoff_json" => Some("handoff.json"),
+        "agent_policy" => Some("agent-policy.json"),
+        "probe_json" => Some("probe.json"),
+        _ => None,
+    }
+}
 
 impl From<anyhow::Error> for RuntimeFailure {
     fn from(error: anyhow::Error) -> Self {
@@ -200,6 +231,18 @@ impl IssueFinderToolRuntime {
             paths,
             config,
             config_load_error: None,
+            profile: ToolProfile::Control,
+            worker_capability: None,
+        }
+    }
+
+    pub fn worker(paths: IssueFinderPaths, config: Config, capability: WorkerCapability) -> Self {
+        Self {
+            paths,
+            config,
+            config_load_error: None,
+            profile: ToolProfile::Worker,
+            worker_capability: Some(capability),
         }
     }
 
@@ -212,6 +255,8 @@ impl IssueFinderToolRuntime {
             paths,
             config,
             config_load_error,
+            profile: ToolProfile::Control,
+            worker_capability: None,
         }
     }
 
@@ -226,12 +271,23 @@ impl IssueFinderToolRuntime {
             );
         }
 
+        if !self.tool_allowed(&invocation.tool_name) {
+            return IssueFinderToolOutput::failure(
+                invocation.call_id,
+                invocation.turn_id,
+                invocation.tool_name,
+                "forbidden_tool",
+                "tool is not available to this caller profile",
+            );
+        }
+
         let result = match invocation.tool_name.as_str() {
             TOOL_STATUS => self.call_status(&invocation).await,
             TOOL_SCOUT => self.call_scout(&invocation).await,
             TOOL_ASSESS => self.call_assess(&invocation).await,
             TOOL_PREPARE => self.call_prepare(&invocation).await,
             TOOL_READ_CONTEXT => self.call_read_context(&invocation),
+            TOOL_SUBMIT_RESULT => self.call_submit_result(&invocation),
             TOOL_MEMORY_STATUS => self.call_memory_status(&invocation),
             TOOL_MEMORY_RECALL => self.call_memory_recall(&invocation),
             TOOL_MEMORY_DREAMS_LIST => self.call_memory_dreams_list(&invocation),
@@ -263,6 +319,51 @@ impl IssueFinderToolRuntime {
                 error.to_string(),
             ),
         }
+    }
+
+    fn tool_allowed(&self, tool_name: &str) -> bool {
+        match self.profile {
+            ToolProfile::Control => tool_name != TOOL_SUBMIT_RESULT,
+            ToolProfile::Worker => matches!(tool_name, TOOL_READ_CONTEXT | TOOL_SUBMIT_RESULT),
+        }
+    }
+
+    fn call_submit_result(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let capability = self.worker_capability.as_ref().ok_or_else(|| {
+            RuntimeFailure::InvalidArguments(
+                "submit_result requires a worker capability".to_string(),
+            )
+        })?;
+        let result: CandidateResult = parse_arguments(&invocation.arguments)?;
+        if result.run_id != capability.run_id
+            || result.issue_task_id != capability.issue_task_id
+            || result.package_id != capability.package_id
+        {
+            return Err(RuntimeFailure::InvalidArguments(
+                "submit_result identity is outside the active worker capability".to_string(),
+            ));
+        }
+        let runtime = DispatchRuntime::open(self.paths.clone())?;
+        let outcome = runtime.submit_result(result)?;
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            match outcome.evaluation.report.disposition {
+                crate::dispatch::EvaluationDisposition::Retry => "retry",
+                crate::dispatch::EvaluationDisposition::NeedsUser => "needs_user",
+                crate::dispatch::EvaluationDisposition::AcceptedSuccess
+                | crate::dispatch::EvaluationDisposition::AcceptedPartial => "accepted",
+                crate::dispatch::EvaluationDisposition::Failed => "failed",
+            },
+            if outcome.evaluation.report.feedback.is_empty() {
+                "Candidate result accepted for the run.".to_string()
+            } else {
+                outcome.evaluation.report.feedback.join("\n")
+            },
+            to_value(&outcome),
+        ))
     }
 
     async fn call_status(
@@ -493,12 +594,78 @@ impl IssueFinderToolRuntime {
         invocation: &IssueFinderToolInvocation,
     ) -> RuntimeResult<IssueFinderToolOutput> {
         let args: ReadContextToolArgs = parse_arguments(&invocation.arguments)?;
+        if let Some(capability) = self.worker_capability.as_ref() {
+            return self.call_worker_read_context(invocation, args, capability);
+        }
         let structured = read_context_section(&self.paths, TOOL_READ_CONTEXT, args)?;
         Ok(IssueFinderToolOutput::success(
             invocation,
             "ok",
             "Read context section.",
             to_value(structured),
+        ))
+    }
+
+    fn call_worker_read_context(
+        &self,
+        invocation: &IssueFinderToolInvocation,
+        args: ReadContextToolArgs,
+        capability: &WorkerCapability,
+    ) -> RuntimeResult<IssueFinderToolOutput> {
+        let store = crate::dispatch::DispatchStore::open(self.paths.clone())?;
+        let package: TaskPackage =
+            serde_json::from_slice(&store.read_artifact_bytes(&capability.package_id)?)
+                .map_err(|error| RuntimeFailure::System(error.into()))?;
+        if package.context_snapshot.snapshot_id != capability.snapshot_id
+            || package.workspace.path != capability.workspace
+            || package.provenance.handoff_id != args.handoff_id
+        {
+            return Err(RuntimeFailure::InvalidArguments(
+                "requested context is outside the active immutable snapshot".to_string(),
+            ));
+        }
+        let relative_path = worker_context_path(&args.section).ok_or_else(|| {
+            RuntimeFailure::InvalidArguments(format!(
+                "unsupported context section {}",
+                args.section
+            ))
+        })?;
+        let stored: StoredContextSnapshot = serde_json::from_slice(
+            &store.read_artifact_bytes(&package.context_snapshot.artifact_id)?,
+        )
+        .map_err(|error| RuntimeFailure::System(error.into()))?;
+        let file = stored
+            .files
+            .iter()
+            .find(|file| file.relative_path == relative_path)
+            .ok_or_else(|| {
+                RuntimeFailure::InvalidArguments(format!(
+                    "section {} is not present in the active snapshot",
+                    args.section
+                ))
+            })?;
+        let artifact = store.get_artifact(&file.artifact_id)?;
+        let bytes = store.read_artifact_bytes(&artifact.id)?;
+        let limit = args.max_bytes.unwrap_or(12_000).min(50_000);
+        let truncated = bytes.len() > limit;
+        let content = String::from_utf8_lossy(&bytes[..bytes.len().min(limit)]).to_string();
+        Ok(IssueFinderToolOutput::success(
+            invocation,
+            "ok",
+            "Read immutable context section.",
+            json!({
+                "kind": "issue_finder_tool_output",
+                "tool": TOOL_READ_CONTEXT,
+                "status": "ok",
+                "success": true,
+                "handoffId": args.handoff_id,
+                "snapshotId": capability.snapshot_id,
+                "section": args.section,
+                "artifactId": artifact.id,
+                "sha256": artifact.sha256,
+                "truncated": truncated,
+                "content": content,
+            }),
         ))
     }
 

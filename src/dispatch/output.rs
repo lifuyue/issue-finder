@@ -2,16 +2,15 @@ use anyhow::Result;
 
 use super::a2a_gateway::{A2aApprovalResult, A2aExportResult, A2aResultImport};
 use super::capability_probe::AgentProbeReport;
-use super::execution::DispatchExecutionResult;
 use super::github_projection::{
     GitHubApprovalResult, GitHubCommentDraftResult, GitHubCommentPolicyResult, GitHubPostResult,
 };
 use super::model::{AgentArtifact, AgentProfile, DispatchEvent, GitHubInteraction};
 use super::packaging::{IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::runtime::{
-    AgentCapabilitiesView, DispatchApprovalResolution, DispatchOutcomeRecordResult,
-    DispatchProposal, DispatchStatusSnapshot,
+    AgentCapabilitiesView, DispatchApprovalResolution, DispatchProposal, DispatchStatusSnapshot,
 };
+use super::supervisor::DispatchExecutionResult;
 use super::timeline::{DispatchTimeline, DispatchTrace};
 
 pub(crate) fn render_cli_output<T: serde::Serialize>(
@@ -247,36 +246,16 @@ pub(crate) fn render_dispatch_approval(result: &DispatchApprovalResolution) -> S
     )
 }
 
-pub(crate) fn render_dispatch_outcome_record(result: &DispatchOutcomeRecordResult) -> String {
-    let mut lines = vec![format!(
-        "Recorded dispatch outcome {} for run {}: {}",
-        result.outcome.id, result.run.id, result.outcome.outcome_kind
-    )];
-    if let Some(task_class) = result.outcome.task_class {
-        lines.push(format!("Task class: {task_class}"));
-    }
-    if let Some(failure_class) = result.outcome.failure_class {
-        lines.push(format!("Failure class: {failure_class}"));
-    }
-    if let Some(validation_outcome) = result.outcome.validation_outcome {
-        lines.push(format!("Validation: {validation_outcome}"));
-    }
-    lines.join("\n")
-}
-
 pub(crate) fn render_dispatch_execution(result: &DispatchExecutionResult) -> String {
     format!(
-        "Dispatch run {} started native turn {}.\nThread: {}\nPrompt artifact: {}",
-        result.run.id,
-        result.turn.native_turn_id,
-        result.thread.native_session_id,
-        result.prompt_artifact.path
+        "Dispatch run {} supervisor started.\nSupervisor PID: {}",
+        result.run.id, result.supervisor_pid
     )
 }
 
 pub(crate) fn render_a2a_export(result: &A2aExportResult) -> String {
     format!(
-        "Created local A2A task artifact from IssueTaskPackage v3 for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
+        "Created local A2A gateway artifact from TaskPackage for {} and queued outbound approval.\nTask: {}\nPath: {}\nApproval request: {}",
         result.task.task.issue_key,
         result.task.task.task_type,
         result.export_artifact.path,

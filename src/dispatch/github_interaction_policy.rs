@@ -148,7 +148,7 @@ pub fn decide_final_comment(
     }
 
     match facts.outcome_kind {
-        Some(DispatchOutcomeKind::FixReady) | Some(DispatchOutcomeKind::CompletedNoChange) => {
+        Some(DispatchOutcomeKind::Success) | Some(DispatchOutcomeKind::Partial) => {
             match normalized_body(facts.suggested_reply) {
                 Some(body) => draft(
                     GitHubInteractionDecisionKind::Final,
@@ -165,16 +165,10 @@ pub fn decide_final_comment(
                 ),
             }
         }
-        Some(DispatchOutcomeKind::Blocked)
-        | Some(DispatchOutcomeKind::Failed)
+        Some(DispatchOutcomeKind::Failed)
         | Some(DispatchOutcomeKind::Canceled) => no_reply(
             "terminal_outcome_not_commentable",
             vec!["The dispatch outcome is terminal but not publicly useful as a GitHub comment."],
-            inputs_json,
-        ),
-        Some(DispatchOutcomeKind::NeedsUser) => no_reply(
-            "needs_user_without_context_gap_reply",
-            vec!["The dispatch outcome needs user input but did not produce a clarification draft."],
             inputs_json,
         ),
         None => no_reply(
@@ -191,7 +185,6 @@ fn has_context_gap(
     facts: &FinalCommentFacts,
 ) -> bool {
     run.status == DispatchRunStatus::NeedsUser
-        || facts.outcome_kind == Some(DispatchOutcomeKind::NeedsUser)
         || facts.failure_class == Some(DispatchOutcomeFailureClass::ContextInsufficient)
         || outcome
             .and_then(|value| value.failure_class)

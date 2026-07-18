@@ -40,7 +40,7 @@ fn eval_contract_exposes_versioned_runtime_and_oracle_boundaries() {
     assert!(contract["supportedEvidenceExports"]
         .as_array()
         .unwrap()
-        .contains(&serde_json::json!("native_runtime_eval")));
+        .contains(&serde_json::json!("codex_runtime_eval")));
 }
 
 #[test]

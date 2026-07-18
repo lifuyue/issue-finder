@@ -245,6 +245,7 @@ mod tests {
             agent_policy_path: "/tmp/agent-policy.json".to_string(),
             probe_json_path: "/tmp/probe.json".to_string(),
             prepare_events_path: "/tmp/prepare-events.jsonl".to_string(),
+            context_snapshot_path: "/tmp/context-snapshot.json".to_string(),
         };
 
         upsert_ready(&paths, &issue, 80, &written).unwrap();

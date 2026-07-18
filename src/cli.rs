@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::dispatch::cli_args::{AgentsArgs, DispatchArgs};
 
@@ -45,8 +45,40 @@ pub enum Command {
     Memory(MemoryArgs),
     /// List and call Issue Finder's JSON tool contract.
     Tools(ToolsArgs),
+    /// Serve the canonical Issue Finder tool registry over stdio MCP.
+    Mcp(McpArgs),
+    #[command(hide = true)]
+    Supervise(SuperviseArgs),
     /// Check local readiness.
     Doctor,
+}
+
+#[derive(Debug, Args)]
+pub struct SuperviseArgs {
+    #[arg(long)]
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum McpProfile {
+    Control,
+    Worker,
+}
+
+#[derive(Debug, Args)]
+pub struct McpArgs {
+    #[arg(long, value_enum)]
+    pub profile: McpProfile,
+    #[arg(long, requires = "issue_task_id")]
+    pub run_id: Option<String>,
+    #[arg(long, requires = "package_id")]
+    pub issue_task_id: Option<String>,
+    #[arg(long, requires = "snapshot_id")]
+    pub package_id: Option<String>,
+    #[arg(long, requires = "workspace")]
+    pub snapshot_id: Option<String>,
+    #[arg(long)]
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -209,7 +241,7 @@ pub enum EvalCommand {
     /// Generate offline agent loop evaluation reports.
     AgentLoop(AgentLoopEvalArgs),
     /// Validate the default native Codex runtime through a real model turn.
-    NativeRuntime(NativeRuntimeEvalArgs),
+    CodexRuntime(CodexRuntimeEvalArgs),
     /// Prepare an isolated dispatch recovery scenario for an external fault harness.
     RecoveryPrepare(RecoveryEvalPrepareArgs),
 }
@@ -228,9 +260,9 @@ pub struct RecoveryEvalPrepareArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct NativeRuntimeEvalArgs {
+pub struct CodexRuntimeEvalArgs {
     /// Isolated workspace bound to the native thread and turn.
-    #[arg(long, default_value = "/tmp/issue-finder-native-runtime-eval")]
+    #[arg(long, default_value = "/tmp/issue-finder-codex-runtime-eval")]
     pub workspace: PathBuf,
     /// Maximum wait for the marker-bearing model response.
     #[arg(long, default_value_t = 120)]
@@ -447,33 +479,6 @@ mod tests {
         assert!(args.new_session);
         assert!(args.session.is_none());
         assert!(args.json);
-    }
-
-    #[test]
-    fn dispatch_propose_subcommand_remains_supported() {
-        let cli = Cli::try_parse_from([
-            "issue-finder",
-            "dispatch",
-            "propose",
-            "owner/repo#123",
-            "--agent",
-            "codex",
-            "--session",
-            "thread-1",
-        ])
-        .unwrap();
-
-        let Command::Dispatch(args) = cli.command else {
-            panic!("expected dispatch command");
-        };
-        let args = *args;
-        assert!(args.issue.is_none());
-        let Some(DispatchCommand::Propose(propose)) = args.command else {
-            panic!("expected dispatch propose subcommand");
-        };
-        assert_eq!(propose.issue, "owner/repo#123");
-        assert_eq!(propose.agent, "codex");
-        assert_eq!(propose.session.as_deref(), Some("thread-1"));
     }
 
     #[test]

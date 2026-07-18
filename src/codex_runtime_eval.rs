@@ -4,16 +4,16 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::dispatch::adapters::codex_app_server::discover_codex_binary;
-use crate::dispatch::native_runtime::AppServerClient;
+use crate::dispatch::codex_runtime::discover_codex_binary;
+use crate::dispatch::codex_runtime::AppServerClient;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct NativeRuntimeEvalReport {
+pub struct CodexRuntimeEvalReport {
     pub kind: &'static str,
     pub version: u32,
-    pub business_outcome: NativeRuntimeBusinessOutcome,
-    pub termination: NativeRuntimeTermination,
+    pub business_outcome: CodexRuntimeBusinessOutcome,
+    pub termination: CodexRuntimeTermination,
     pub protocol_handshake: bool,
     pub authenticated_model_turn: bool,
     pub binary: Option<String>,
@@ -33,24 +33,24 @@ pub struct NativeRuntimeEvalReport {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct NativeRuntimeBusinessOutcome {
+pub struct CodexRuntimeBusinessOutcome {
     pub domain: &'static str,
     pub state: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct NativeRuntimeTermination {
+pub struct CodexRuntimeTermination {
     pub kind: &'static str,
     pub cause: &'static str,
     pub retryable: bool,
 }
 
-pub async fn run_native_runtime_eval(
+pub async fn run_codex_runtime_eval(
     workspace: &str,
     timeout_seconds: u64,
     marker: String,
-) -> NativeRuntimeEvalReport {
+) -> CodexRuntimeEvalReport {
     let started = Instant::now();
     let binary = discover_codex_binary().ok();
     if let Err(error) = fs::create_dir_all(workspace) {
@@ -90,7 +90,7 @@ pub async fn run_native_runtime_eval(
                 started,
                 "runtime",
                 true,
-                "timed out connecting to native runtime".to_string(),
+                "timed out connecting to Codex runtime".to_string(),
             );
         }
     };
@@ -135,7 +135,7 @@ pub async fn run_native_runtime_eval(
         );
     };
     let prompt = format!(
-        "Issue Finder native runtime acceptance. Reply with exactly `{marker} ACK`. Do not use tools, edit files, or perform external actions."
+        "Issue Finder Codex runtime acceptance. Reply with exactly `{marker} ACK`. Do not use tools, edit files, or perform external actions."
     );
     let turn_params = json!({
         "threadId": thread_id,
@@ -250,14 +250,14 @@ pub async fn run_native_runtime_eval(
                     .map(|(item_type, _)| item_type.clone())
                     .collect::<Vec<_>>();
                 if user_marker_observed && agent_marker_observed {
-                    return NativeRuntimeEvalReport {
-                        kind: "issue_finder_native_runtime_eval",
+                    return CodexRuntimeEvalReport {
+                        kind: "issue_finder_codex_runtime_eval",
                         version: 1,
-                        business_outcome: NativeRuntimeBusinessOutcome {
-                            domain: "native_runtime",
+                        business_outcome: CodexRuntimeBusinessOutcome {
+                            domain: "codex_runtime",
                             state: "completed",
                         },
-                        termination: NativeRuntimeTermination {
+                        termination: CodexRuntimeTermination {
                             kind: "normal",
                             cause: "product",
                             retryable: false,
@@ -430,20 +430,20 @@ fn unavailable_report(
     cause: &'static str,
     retryable: bool,
     error: String,
-) -> NativeRuntimeEvalReport {
+) -> CodexRuntimeEvalReport {
     let termination_kind = match cause {
         "provider" => "provider",
         "limit" => "limit",
         _ => "normal",
     };
-    NativeRuntimeEvalReport {
-        kind: "issue_finder_native_runtime_eval",
+    CodexRuntimeEvalReport {
+        kind: "issue_finder_codex_runtime_eval",
         version: 1,
-        business_outcome: NativeRuntimeBusinessOutcome {
-            domain: "native_runtime",
+        business_outcome: CodexRuntimeBusinessOutcome {
+            domain: "codex_runtime",
             state: "capability_unavailable",
         },
-        termination: NativeRuntimeTermination {
+        termination: CodexRuntimeTermination {
             kind: termination_kind,
             cause,
             retryable,
@@ -478,8 +478,8 @@ fn unavailable_after_handshake(
     cause: &'static str,
     retryable: bool,
     error: String,
-) -> NativeRuntimeEvalReport {
-    NativeRuntimeEvalReport {
+) -> CodexRuntimeEvalReport {
+    CodexRuntimeEvalReport {
         protocol_handshake: true,
         thread_id,
         turn_id,
@@ -502,8 +502,8 @@ fn unavailable_with_observations(
     agent_marker_observed: bool,
     turn_attempts: u32,
     error: String,
-) -> NativeRuntimeEvalReport {
-    NativeRuntimeEvalReport {
+) -> CodexRuntimeEvalReport {
+    CodexRuntimeEvalReport {
         protocol_handshake: true,
         thread_id: Some(thread_id),
         turn_id: Some(turn_id),
@@ -533,9 +533,9 @@ fn classify_runtime_error(error: &str) -> (&'static str, bool) {
     }
 }
 
-pub fn native_runtime_eval_contract() -> Value {
+pub fn codex_runtime_eval_contract() -> Value {
     json!({
-        "kind": "issue_finder_native_runtime_eval_contract",
+        "kind": "issue_finder_codex_runtime_eval_contract",
         "version": 1,
         "connectionMode": "daemon_socket",
         "successRequires": [

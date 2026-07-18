@@ -2,17 +2,14 @@ use anyhow::Result;
 
 use super::cli_args::{
     AgentsArgs, AgentsCommand, DispatchA2aCommand, DispatchArgs, DispatchCommand,
-    DispatchGithubCommand, DispatchOutcomeCommand, DispatchPackageCommand, DispatchReviewCommand,
+    DispatchGithubCommand, DispatchPackageCommand, DispatchReviewCommand,
 };
 use crate::config::Config;
 use crate::paths::IssueFinderPaths;
 
-use super::model::{
-    ApprovalStatus, DispatchOutcomeFailureClass, DispatchOutcomeKind, DispatchRunStatus,
-    DispatchTaskClass, DispatchValidationOutcome,
-};
+use super::model::ApprovalStatus;
 use super::output::*;
-use super::runtime::{DispatchOutcomeRecordRequest, DispatchProposalRequest, DispatchRuntime};
+use super::runtime::{DispatchProposalRequest, DispatchRuntime};
 
 pub fn handle_agents_cli(paths: &IssueFinderPaths, args: AgentsArgs) -> Result<String> {
     let runtime = DispatchRuntime::open(paths.clone())?;
@@ -88,14 +85,6 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
                 })
             }
         },
-        Some(DispatchCommand::Propose(args)) => propose_dispatch_cli(
-            &runtime,
-            args.issue,
-            args.agent,
-            args.new_session,
-            args.session,
-            args.json,
-        ),
         Some(DispatchCommand::Approve(args)) => {
             let result =
                 runtime.resolve_dispatch_approval(&args.run_id, ApprovalStatus::Approved)?;
@@ -133,60 +122,8 @@ pub fn handle_dispatch_cli(paths: &IssueFinderPaths, args: DispatchArgs) -> Resu
             }
             DispatchA2aCommand::ImportResult(args) => {
                 let args = *args;
-                let status = args
-                    .status
-                    .as_deref()
-                    .map(parse_dispatch_run_status)
-                    .transpose()?;
-                let outcome = optional_outcome_record_request(OptionalOutcomeRecordInput {
-                    outcome: args.outcome.as_deref(),
-                    failure_class: args.failure_class.as_deref(),
-                    failure_reason: args.failure_reason.clone(),
-                    task_class: args.task_class.as_deref(),
-                    validation_outcome: args.validation_outcome.as_deref(),
-                    idempotency_key: args.idempotency_key.clone(),
-                    run_id: args.run_id.clone(),
-                    result_artifact_id: None,
-                })?;
-                let result = runtime.import_a2a_result(
-                    &args.run_id,
-                    &args.path,
-                    &args.kind,
-                    &args.content_type,
-                    status,
-                    outcome,
-                )?;
+                let result = runtime.import_a2a_result(&args.run_id, &args.path)?;
                 render_cli_output(args.json, &result, || render_a2a_result_import(&result))
-            }
-        },
-        Some(DispatchCommand::Outcome(args)) => match args.command {
-            DispatchOutcomeCommand::Record(args) => {
-                let result = runtime.record_dispatch_outcome(DispatchOutcomeRecordRequest {
-                    run_id: args.run_id,
-                    idempotency_key: args.idempotency_key,
-                    outcome_kind: parse_dispatch_outcome_kind(&args.outcome)?,
-                    failure_class: args
-                        .failure_class
-                        .as_deref()
-                        .map(parse_dispatch_failure_class)
-                        .transpose()?,
-                    failure_detail: args.failure_reason,
-                    task_class: args
-                        .task_class
-                        .as_deref()
-                        .map(parse_dispatch_task_class)
-                        .transpose()?,
-                    validation_outcome: args
-                        .validation_outcome
-                        .as_deref()
-                        .map(parse_dispatch_validation_outcome)
-                        .transpose()?,
-                    result_artifact_id: args.result_artifact_id,
-                    metadata_json: serde_json::json!({ "source": "cli_dispatch_outcome_record" }),
-                })?;
-                render_cli_output(args.json, &result, || {
-                    render_dispatch_outcome_record(&result)
-                })
             }
         },
         Some(DispatchCommand::Github(args)) => match args.command {
@@ -268,68 +205,4 @@ fn propose_dispatch_cli(
         new_session,
     })?;
     render_cli_output(json, &proposal, || render_dispatch_proposal(&proposal))
-}
-
-fn parse_dispatch_run_status(value: &str) -> Result<DispatchRunStatus> {
-    DispatchRunStatus::parse_value(value)
-        .ok_or_else(|| anyhow::anyhow!("invalid dispatch status {value}"))
-}
-
-struct OptionalOutcomeRecordInput<'a> {
-    outcome: Option<&'a str>,
-    failure_class: Option<&'a str>,
-    failure_reason: Option<String>,
-    task_class: Option<&'a str>,
-    validation_outcome: Option<&'a str>,
-    idempotency_key: Option<String>,
-    run_id: String,
-    result_artifact_id: Option<String>,
-}
-
-fn optional_outcome_record_request(
-    input: OptionalOutcomeRecordInput<'_>,
-) -> Result<Option<DispatchOutcomeRecordRequest>> {
-    let Some(outcome) = input.outcome else {
-        return Ok(None);
-    };
-    Ok(Some(DispatchOutcomeRecordRequest {
-        run_id: input.run_id,
-        idempotency_key: input.idempotency_key,
-        outcome_kind: parse_dispatch_outcome_kind(outcome)?,
-        failure_class: input
-            .failure_class
-            .map(parse_dispatch_failure_class)
-            .transpose()?,
-        failure_detail: input.failure_reason,
-        task_class: input
-            .task_class
-            .map(parse_dispatch_task_class)
-            .transpose()?,
-        validation_outcome: input
-            .validation_outcome
-            .map(parse_dispatch_validation_outcome)
-            .transpose()?,
-        result_artifact_id: input.result_artifact_id,
-        metadata_json: serde_json::json!({ "source": "cli_a2a_import_result" }),
-    }))
-}
-
-fn parse_dispatch_outcome_kind(value: &str) -> Result<DispatchOutcomeKind> {
-    DispatchOutcomeKind::parse_value(value)
-        .ok_or_else(|| anyhow::anyhow!("invalid dispatch outcome kind {value}"))
-}
-
-fn parse_dispatch_failure_class(value: &str) -> Result<DispatchOutcomeFailureClass> {
-    DispatchOutcomeFailureClass::parse_value(value)
-        .ok_or_else(|| anyhow::anyhow!("invalid dispatch failure class {value}"))
-}
-
-fn parse_dispatch_task_class(value: &str) -> Result<DispatchTaskClass> {
-    DispatchTaskClass::parse_value(value)
-        .ok_or_else(|| anyhow::anyhow!("invalid dispatch task class {value}"))
-}
-
-fn parse_dispatch_validation_outcome(value: &str) -> Result<DispatchValidationOutcome> {
-    DispatchValidationOutcome::parse_value(value)
-        .ok_or_else(|| anyhow::anyhow!("invalid dispatch validation outcome {value}"))
 }

@@ -1,5 +1,5 @@
-use issue_finder::dispatch::native_runtime::{
-    NativeThreadManager, NativeThreadStore, SendTurnRequest,
+use issue_finder::dispatch::codex_runtime::{
+    CodexRuntimeManager, CodexRuntimeStore, SendTurnRequest,
 };
 use issue_finder::paths::IssueFinderPaths;
 use std::{fs, time::Duration};
@@ -8,18 +8,18 @@ use std::{fs, time::Duration};
 #[ignore = "requires the installed Codex daemon and authenticated desktop state"]
 fn real_daemon_runtime_round_trip_and_reconcile() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let root = std::env::temp_dir().join("issue-finder-native-runtime-e2e");
+        let root = std::env::temp_dir().join("issue-finder-codex-runtime-e2e");
         fs::create_dir_all(&root).unwrap();
         let state = root.join("state");
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
         let paths = test_paths(state);
-        let store = NativeThreadStore::open(&paths).unwrap();
-        let mut manager = NativeThreadManager::connect(store).await.unwrap();
+        let store = CodexRuntimeStore::open(&paths).unwrap();
+        let mut manager = CodexRuntimeManager::connect(store).await.unwrap();
         let marker = format!("IF-NATIVE-RUNTIME-{}", chrono::Utc::now().timestamp());
         let thread_id = manager
             .start_thread(
-                &format!("Issue Finder native runtime {marker}"),
+                &format!("Issue Finder Codex runtime {marker}"),
                 workspace.to_str().unwrap(),
             )
             .await
@@ -32,6 +32,7 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
                 ),
                 cwd: workspace.to_string_lossy().to_string(),
                 client_user_message_id: format!("client-{marker}"),
+                output_schema: None,
             })
             .await
             .unwrap();
@@ -44,7 +45,7 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
         for _ in 0..60 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             manager.reconcile(&thread_id).await.unwrap();
-            let check = NativeThreadStore::open(&paths).unwrap();
+            let check = CodexRuntimeStore::open(&paths).unwrap();
             if check.items(&thread_id).unwrap().iter().any(|item| {
                 item.item_type == "agentMessage"
                     && item
@@ -82,7 +83,7 @@ fn real_daemon_runtime_round_trip_and_reconcile() {
                 }
             }
         }
-        panic!("timed out waiting for native runtime response");
+        panic!("timed out waiting for Codex runtime response");
     });
 }
 
@@ -96,8 +97,8 @@ fn real_daemon_resumes_selected_thread_without_creating_another_thread() {
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
         let paths = test_paths(state);
-        let store = NativeThreadStore::open(&paths).unwrap();
-        let mut manager = NativeThreadManager::connect(store).await.unwrap();
+        let store = CodexRuntimeStore::open(&paths).unwrap();
+        let mut manager = CodexRuntimeManager::connect(store).await.unwrap();
         let selected_thread_id = manager
             .start_thread(
                 &format!("Issue Finder native resume {marker}"),
@@ -114,6 +115,7 @@ fn real_daemon_resumes_selected_thread_without_creating_another_thread() {
                 ),
                 cwd: workspace.to_string_lossy().to_string(),
                 client_user_message_id: format!("client-{marker}-seed"),
+                output_schema: None,
             })
             .await
             .unwrap();
@@ -140,6 +142,7 @@ fn real_daemon_resumes_selected_thread_without_creating_another_thread() {
                 ),
                 cwd: workspace.to_string_lossy().to_string(),
                 client_user_message_id: format!("client-{marker}"),
+                output_schema: None,
             })
             .await
             .unwrap();
@@ -163,7 +166,7 @@ fn real_daemon_resumes_selected_thread_without_creating_another_thread() {
 }
 
 async fn wait_for_agent_marker(
-    manager: &NativeThreadManager,
+    manager: &CodexRuntimeManager,
     paths: &IssueFinderPaths,
     thread_id: &str,
     marker: &str,
@@ -171,7 +174,7 @@ async fn wait_for_agent_marker(
     for _ in 0..60 {
         tokio::time::sleep(Duration::from_secs(1)).await;
         manager.reconcile(thread_id).await.unwrap();
-        let check = NativeThreadStore::open(paths).unwrap();
+        let check = CodexRuntimeStore::open(paths).unwrap();
         if check.items(thread_id).unwrap().iter().any(|item| {
             item.item_type == "agentMessage" && item.payload.to_string().contains(marker)
         }) {
@@ -190,8 +193,8 @@ fn real_daemon_approval_request_is_persisted_and_declined() {
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
         let paths = test_paths(state);
-        let store = NativeThreadStore::open(&paths).unwrap();
-        let mut manager = NativeThreadManager::connect(store).await.unwrap();
+        let store = CodexRuntimeStore::open(&paths).unwrap();
+        let mut manager = CodexRuntimeManager::connect(store).await.unwrap();
         let marker = format!("IF-APPROVAL-{}", chrono::Utc::now().timestamp());
         let thread_id = manager
             .start_thread(
@@ -206,13 +209,14 @@ fn real_daemon_approval_request_is_persisted_and_declined() {
                 prompt: "Use the request_permissions tool to request network access, then wait for the decision. Do not edit files.".to_string(),
                 cwd: workspace.to_string_lossy().to_string(),
                 client_user_message_id: format!("client-{marker}"),
+                output_schema: None,
             })
             .await
             .unwrap();
         let deadline=std::time::Instant::now()+Duration::from_secs(30);
         while std::time::Instant::now()<deadline {
             let _ = tokio::time::timeout(Duration::from_secs(2), manager.pump_once()).await;
-            let check = NativeThreadStore::open(&paths).unwrap();
+            let check = CodexRuntimeStore::open(&paths).unwrap();
             if let Some(request) = check
                 .pending_server_requests()
                 .unwrap()

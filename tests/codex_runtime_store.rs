@@ -1,13 +1,13 @@
-use issue_finder::dispatch::native_runtime::NativeThreadStore;
+use issue_finder::dispatch::codex_runtime::CodexRuntimeStore;
 use issue_finder::paths::IssueFinderPaths;
 use serde_json::json;
 use tempfile::tempdir;
 
 #[test]
-fn native_store_projects_thread_turn_item_and_outbox_into_one_database() {
+fn codex_store_projects_thread_turn_item_and_outbox_into_one_database() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path().to_path_buf());
-    let store = NativeThreadStore::open(&paths).unwrap();
+    let store = CodexRuntimeStore::open(&paths).unwrap();
     store
         .upsert_thread(&json!({"id":"thread-1","name":"test","cwd":"/tmp/test","status":"idle"}))
         .unwrap();
@@ -48,10 +48,10 @@ fn native_store_projects_thread_turn_item_and_outbox_into_one_database() {
 }
 
 #[test]
-fn native_item_identity_is_scoped_to_its_thread() {
+fn codex_item_identity_is_scoped_to_its_thread() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path().to_path_buf());
-    let store = NativeThreadStore::open(&paths).unwrap();
+    let store = CodexRuntimeStore::open(&paths).unwrap();
     for thread_id in ["thread-1", "thread-2"] {
         store
             .upsert_thread(&json!({"id":thread_id,"status":"idle"}))
@@ -82,10 +82,10 @@ fn native_item_identity_is_scoped_to_its_thread() {
 }
 
 #[test]
-fn native_item_identity_is_scoped_to_its_turn() {
+fn codex_item_identity_is_scoped_to_its_turn() {
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path().to_path_buf());
-    let store = NativeThreadStore::open(&paths).unwrap();
+    let store = CodexRuntimeStore::open(&paths).unwrap();
     store
         .upsert_thread(&json!({"id":"thread-1","status":"idle"}))
         .unwrap();
@@ -107,6 +107,38 @@ fn native_item_identity_is_scoped_to_its_turn() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].turn_id.as_deref(), Some("turn-1"));
     assert_eq!(items[1].turn_id.as_deref(), Some("turn-2"));
+}
+
+#[test]
+fn pending_request_and_response_survive_store_restart() {
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path().to_path_buf());
+    {
+        let store = CodexRuntimeStore::open(&paths).unwrap();
+        store
+            .record_server_request(
+                "epoch-1:request-7",
+                "epoch-1",
+                &json!(7),
+                "item/commandExecution/requestApproval",
+                &json!({"threadId":"thread-1","turnId":"turn-1","command":"cargo test"}),
+            )
+            .unwrap();
+    }
+
+    let store = CodexRuntimeStore::open(&paths).unwrap();
+    let pending = store.pending_server_requests().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, "epoch-1:request-7");
+    store
+        .queue_pending_response(&pending[0].id, &json!({"decision":"accept"}))
+        .unwrap();
+
+    drop(store);
+    let reopened = CodexRuntimeStore::open(&paths).unwrap();
+    let ready = reopened.ready_responses().unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].response, Some(json!({"decision":"accept"})));
 }
 
 fn test_paths(home: std::path::PathBuf) -> IssueFinderPaths {

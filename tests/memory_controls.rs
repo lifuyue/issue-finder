@@ -419,7 +419,7 @@ fn seed_dispatch(store: &MemoryStore) -> SeededDispatch {
             id: "controls-dispatch".to_string(),
             issue_key: IssueKey::new("owner/repo", 42),
             agent_id: "codex".to_string(),
-            outcome_kind: Some("fix_ready".to_string()),
+            outcome_kind: Some("success".to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded: true,
             failure_class: None,

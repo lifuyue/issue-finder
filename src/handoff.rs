@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::agent_policy::{build_agent_policy, AgentPolicyManifest};
 use crate::context_pack::{default_context_pack, write_context_pack, ContextPack};
+use crate::context_snapshot::ContextSnapshot;
 use crate::evidence_pack::EvidencePack;
 use crate::github::GitHubIssue;
 use crate::llm_review::{LlmConfirmation, LlmReview};
@@ -120,6 +121,7 @@ pub struct WrittenHandoff {
     pub agent_policy_path: String,
     pub probe_json_path: String,
     pub prepare_events_path: String,
+    pub context_snapshot_path: String,
 }
 
 impl Handoff {
@@ -597,6 +599,7 @@ pub fn write_handoff_with_events(
             )],
         )?;
     }
+    let (_, context_snapshot_path) = ContextSnapshot::write(&dir, &handoff)?;
 
     Ok(WrittenHandoff {
         id: handoff.id.clone(),
@@ -607,6 +610,7 @@ pub fn write_handoff_with_events(
         agent_policy_path: agent_policy_path.to_string_lossy().to_string(),
         probe_json_path: probe_json_path.to_string_lossy().to_string(),
         prepare_events_path: prepare_events_path.to_string_lossy().to_string(),
+        context_snapshot_path: context_snapshot_path.to_string_lossy().to_string(),
     })
 }
 

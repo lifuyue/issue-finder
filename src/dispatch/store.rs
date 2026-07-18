@@ -22,7 +22,7 @@ use super::model::{
     NewDispatchRun, NewDispatchRunOutcome, NewGitHubInteraction, NewGitHubInteractionDecision,
     NewIssueTask, NewMemoryEvent,
 };
-use super::task_package::IssueTaskPackage;
+use super::task_contract::TaskPackage;
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -257,7 +257,7 @@ impl DispatchStore {
         collect_rows(rows)
     }
 
-    pub fn set_issue_task_package_artifact(
+    pub fn set_task_package_artifact(
         &self,
         issue_task_id: &str,
         artifact_id: &str,
@@ -302,12 +302,33 @@ impl DispatchStore {
     pub fn create_dispatch_run(&self, input: NewDispatchRun) -> Result<DispatchRun> {
         let id = next_id("dispatch-run");
         let created_at = now();
+        let issue_task = self.get_issue_task(&input.issue_task_id)?;
+        let package_artifact_id = issue_task.current_package_artifact_id.clone();
+        let package = package_artifact_id
+            .as_deref()
+            .and_then(|artifact_id| self.read_artifact_bytes(artifact_id).ok())
+            .and_then(|bytes| serde_json::from_slice::<TaskPackage>(&bytes).ok());
+        let context_snapshot_id = package
+            .as_ref()
+            .map(|package| package.context_snapshot.snapshot_id.clone());
+        let max_attempts = package
+            .as_ref()
+            .map(|package| package.runtime_policy.max_attempts)
+            .unwrap_or(3);
+        let max_time_seconds = package
+            .as_ref()
+            .map(|package| package.runtime_policy.max_time_seconds)
+            .unwrap_or(3600);
+        let token_budget = package
+            .as_ref()
+            .and_then(|package| package.runtime_policy.token_budget);
         self.conn.execute(
             "INSERT INTO dispatch_runs (
                 id, issue_task_id, agent_id, status, requested_by, approval_state,
-                created_at, selected_thread_id
+                created_at, selected_thread_id, package_artifact_id, context_snapshot_id,
+                max_attempts, max_time_seconds, token_budget
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id,
                 input.issue_task_id,
@@ -316,7 +337,12 @@ impl DispatchStore {
                 input.requested_by,
                 input.approval_state.as_str(),
                 created_at,
-                input.selected_thread_id
+                input.selected_thread_id,
+                package_artifact_id,
+                context_snapshot_id,
+                max_attempts,
+                max_time_seconds,
+                token_budget
             ],
         )?;
         self.get_dispatch_run(&id)
@@ -327,7 +353,9 @@ impl DispatchStore {
         self.conn
             .query_row(
                 "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
-                        created_at, started_at, completed_at, selected_thread_id,
+                        created_at, started_at, completed_at, selected_thread_id, current_turn_id,
+                        package_artifact_id, context_snapshot_id, attempt_count, max_attempts,
+                        max_time_seconds, token_budget, active_pending_request_id, supervisor_pid,
                         result_artifact_id, failure_reason
                  FROM dispatch_runs
                  WHERE id = ?1",
@@ -343,7 +371,9 @@ impl DispatchStore {
     ) -> Result<Vec<DispatchRun>> {
         let mut statement = self.conn.prepare(
             "SELECT id, issue_task_id, agent_id, status, requested_by, approval_state,
-                    created_at, started_at, completed_at, selected_thread_id,
+                    created_at, started_at, completed_at, selected_thread_id, current_turn_id,
+                    package_artifact_id, context_snapshot_id, attempt_count, max_attempts,
+                    max_time_seconds, token_budget, active_pending_request_id, supervisor_pid,
                     result_artifact_id, failure_reason
              FROM dispatch_runs
              WHERE issue_task_id = ?1
@@ -359,6 +389,47 @@ impl DispatchStore {
              SET selected_thread_id = ?2
              WHERE id = ?1",
             params![run_id, thread_id],
+        )?;
+        self.get_dispatch_run(run_id)
+    }
+
+    pub fn set_dispatch_run_runtime_progress(
+        &self,
+        run_id: &str,
+        turn_id: &str,
+        attempt: u32,
+    ) -> Result<DispatchRun> {
+        self.conn.execute(
+            "UPDATE dispatch_runs SET current_turn_id=?2,attempt_count=?3 WHERE id=?1",
+            params![run_id, turn_id, attempt],
+        )?;
+        self.get_dispatch_run(run_id)
+    }
+
+    pub fn set_dispatch_run_attempt(&self, run_id: &str, attempt: u32) -> Result<DispatchRun> {
+        self.conn.execute(
+            "UPDATE dispatch_runs SET attempt_count=MAX(attempt_count,?2) WHERE id=?1",
+            params![run_id, attempt],
+        )?;
+        self.get_dispatch_run(run_id)
+    }
+
+    pub fn set_dispatch_run_supervisor_pid(&self, run_id: &str, pid: u32) -> Result<DispatchRun> {
+        self.conn.execute(
+            "UPDATE dispatch_runs SET supervisor_pid=?2 WHERE id=?1",
+            params![run_id, pid],
+        )?;
+        self.get_dispatch_run(run_id)
+    }
+
+    pub fn set_dispatch_run_active_request(
+        &self,
+        run_id: &str,
+        request_id: Option<&str>,
+    ) -> Result<DispatchRun> {
+        self.conn.execute(
+            "UPDATE dispatch_runs SET active_pending_request_id=?2 WHERE id=?1",
+            params![run_id, request_id],
         )?;
         self.get_dispatch_run(run_id)
     }
@@ -397,6 +468,14 @@ impl DispatchStore {
         status: DispatchRunStatus,
         failure_reason: Option<String>,
     ) -> Result<DispatchRun> {
+        let current = self.get_dispatch_run(run_id)?;
+        if !valid_run_transition(current.status, status) {
+            anyhow::bail!(
+                "invalid dispatch run transition {} -> {} for {run_id}",
+                current.status,
+                status
+            );
+        }
         let now = now();
         let started_at = if dispatch_started(status) {
             Some(now.as_str())
@@ -473,12 +552,36 @@ impl DispatchStore {
 
         let id = next_id("dispatch-outcome");
         let recorded_at = now();
-        self.conn.execute(
+        let source_run = self.get_dispatch_run(&input.run_id)?;
+        let evaluation_artifact_id = input
+            .metadata_json
+            .get("evaluationArtifactId")
+            .and_then(Value::as_str);
+        let final_attempt = input
+            .metadata_json
+            .get("attempt")
+            .and_then(Value::as_u64)
+            .unwrap_or(source_run.attempt_count as u64);
+        let terminal_status = input.outcome_kind.terminal_status();
+        let issue_status = match input.outcome_kind {
+            DispatchOutcomeKind::Success => IssueTaskStatus::Succeeded,
+            DispatchOutcomeKind::Partial => IssueTaskStatus::Partial,
+            DispatchOutcomeKind::Failed => IssueTaskStatus::Failed,
+            DispatchOutcomeKind::Canceled => IssueTaskStatus::Canceled,
+        };
+        let failure_reason = input.failure_detail.clone().or_else(|| {
+            input
+                .failure_class
+                .map(|failure_class| failure_class.as_str().to_string())
+        });
+        let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute(
             "INSERT INTO dispatch_run_outcomes (
                 id, run_id, idempotency_key, outcome_kind, failure_class, failure_detail,
-                task_class, validation_outcome, result_artifact_id, metadata_json, recorded_at
+                task_class, validation_outcome, result_artifact_id, package_artifact_id,
+                context_snapshot_id, evaluation_artifact_id, final_attempt, metadata_json, recorded_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 input.run_id,
@@ -491,10 +594,30 @@ impl DispatchStore {
                     .validation_outcome
                     .map(DispatchValidationOutcome::as_str),
                 input.result_artifact_id,
+                source_run.package_artifact_id,
+                source_run.context_snapshot_id,
+                evaluation_artifact_id,
+                final_attempt,
                 json_text(&input.metadata_json)?,
                 recorded_at
             ],
         )?;
+        let completed_at = now();
+        transaction.execute(
+            "UPDATE dispatch_runs SET status=?2,completed_at=?3,result_artifact_id=?4,failure_reason=?5 WHERE id=?1",
+            params![
+                input.run_id,
+                terminal_status.as_str(),
+                completed_at,
+                input.result_artifact_id,
+                failure_reason
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE issue_tasks SET status=?2,updated_at=?3 WHERE id=(SELECT issue_task_id FROM dispatch_runs WHERE id=?1)",
+            params![input.run_id, issue_status.as_str(), completed_at],
+        )?;
+        transaction.commit()?;
         self.get_dispatch_run_outcome(&id)
             .with_context(|| format!("dispatch run outcome {id} was not persisted"))
     }
@@ -504,7 +627,8 @@ impl DispatchStore {
             .query_row(
                 "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
                         failure_detail, task_class, validation_outcome, result_artifact_id,
-                        metadata_json, recorded_at
+                        package_artifact_id, context_snapshot_id, evaluation_artifact_id,
+                        final_attempt, metadata_json, recorded_at
                  FROM dispatch_run_outcomes
                  WHERE id = ?1",
                 params![id],
@@ -521,7 +645,8 @@ impl DispatchStore {
             .query_row(
                 "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
                         failure_detail, task_class, validation_outcome, result_artifact_id,
-                        metadata_json, recorded_at
+                        package_artifact_id, context_snapshot_id, evaluation_artifact_id,
+                        final_attempt, metadata_json, recorded_at
                  FROM dispatch_run_outcomes
                  WHERE run_id = ?1",
                 params![run_id],
@@ -539,7 +664,8 @@ impl DispatchStore {
             .query_row(
                 "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
                         failure_detail, task_class, validation_outcome, result_artifact_id,
-                        metadata_json, recorded_at
+                        package_artifact_id, context_snapshot_id, evaluation_artifact_id,
+                        final_attempt, metadata_json, recorded_at
                  FROM dispatch_run_outcomes
                  WHERE idempotency_key = ?1",
                 params![idempotency_key],
@@ -553,7 +679,8 @@ impl DispatchStore {
         let mut statement = self.conn.prepare(
             "SELECT id, run_id, idempotency_key, outcome_kind, failure_class,
                     failure_detail, task_class, validation_outcome, result_artifact_id,
-                    metadata_json, recorded_at
+                    package_artifact_id, context_snapshot_id, evaluation_artifact_id,
+                    final_attempt, metadata_json, recorded_at
              FROM dispatch_run_outcomes
              ORDER BY recorded_at, id",
         )?;
@@ -673,13 +800,13 @@ impl DispatchStore {
     pub fn write_task_package_artifact(
         &self,
         issue_task_id: &str,
-        package: &IssueTaskPackage,
+        package: &TaskPackage,
     ) -> Result<AgentArtifact> {
         let artifact = self.write_artifact(
             NewArtifact {
                 issue_task_id: Some(issue_task_id.to_string()),
                 run_id: None,
-                kind: "issue_task_package".to_string(),
+                kind: "task_package".to_string(),
                 content_type: "application/json".to_string(),
                 metadata_json: serde_json::json!({
                     "packageKind": package.kind.as_str(),
@@ -688,7 +815,7 @@ impl DispatchStore {
             },
             serde_json::to_vec_pretty(package)?,
         )?;
-        self.set_issue_task_package_artifact(issue_task_id, &artifact.id)?;
+        self.set_task_package_artifact(issue_task_id, &artifact.id)?;
         Ok(artifact)
     }
 
@@ -1203,126 +1330,15 @@ impl DispatchStore {
 fn initialize_schema(conn: &Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
-        0 => create_schema_v3(conn)?,
-        1 => migrate_schema_v1_to_v3(conn)?,
-        2 => migrate_schema_v2_to_v3(conn)?,
-        3 => create_schema_v3(conn)?,
-        other => anyhow::bail!("unsupported dispatch database schema version {other}"),
+        0 | 7 => create_schema_v7(conn)?,
+        other => anyhow::bail!(
+            "dispatch database schema {other} is obsolete; remove dispatch state and regenerate approved tasks"
+        ),
     }
     Ok(())
 }
 
-fn migrate_schema_v1_to_v3(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "ALTER TABLE dispatch_runs RENAME COLUMN selected_session_link_id TO selected_thread_id",
-        [],
-    )?;
-    create_schema_v3(conn)?;
-    if table_exists(conn, "agent_events")? {
-        conn.execute_batch(
-            r#"
-            INSERT INTO dispatch_events (
-                id, run_id, thread_id, issue_task_id, event_kind,
-                subject_type, subject_id, source, severity, correlation_id,
-                causation_id, native_event_id, payload_json, created_at
-            )
-            SELECT
-                id,
-                run_id,
-                session_link_id,
-                NULL,
-                CASE event_type
-                    WHEN 'dispatch_approval_resolved' THEN 'dispatch_approval_resolved'
-                    WHEN 'dispatch_outcome_recorded' THEN 'dispatch_outcome_recorded'
-                    WHEN 'dispatch_starting' THEN 'dispatch_starting'
-                    WHEN 'dispatch_failed' THEN 'dispatch_failed'
-                    WHEN 'session_synced' THEN 'legacy'
-                    WHEN 'session_transcript_read' THEN 'legacy'
-                    WHEN 'session_started' THEN 'thread_started'
-                    WHEN 'session_resumed' THEN 'thread_resumed'
-                    WHEN 'turn_started' THEN 'turn_started'
-                    WHEN 'a2a_result_imported' THEN 'a2a_result_imported'
-                    ELSE 'legacy'
-                END,
-                CASE
-                    WHEN session_link_id IS NOT NULL THEN 'thread'
-                    WHEN run_id IS NOT NULL THEN 'dispatch_run'
-                    ELSE 'system'
-                END,
-                COALESCE(session_link_id, run_id),
-                'migration',
-                CASE
-                    WHEN event_type = 'dispatch_failed' THEN 'error'
-                    ELSE 'info'
-                END,
-                run_id,
-                NULL,
-                native_event_id,
-                payload_json,
-                created_at
-            FROM agent_events
-            WHERE NOT EXISTS (
-                SELECT 1 FROM dispatch_events WHERE dispatch_events.id = agent_events.id
-            )
-            ORDER BY created_at, id;
-
-            DROP TABLE agent_events;
-            PRAGMA user_version = 3;
-            "#,
-        )?;
-    }
-    Ok(())
-}
-
-fn migrate_schema_v2_to_v3(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        r#"
-        PRAGMA foreign_keys = OFF;
-        ALTER TABLE dispatch_runs RENAME COLUMN selected_session_link_id TO selected_thread_id;
-        ALTER TABLE dispatch_events RENAME TO dispatch_events_v2;
-        CREATE TABLE dispatch_events (
-            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-            id TEXT NOT NULL UNIQUE,
-            run_id TEXT,
-            thread_id TEXT,
-            issue_task_id TEXT,
-            event_kind TEXT NOT NULL,
-            subject_type TEXT NOT NULL,
-            subject_id TEXT,
-            source TEXT NOT NULL,
-            severity TEXT NOT NULL,
-            correlation_id TEXT,
-            causation_id TEXT,
-            native_event_id TEXT,
-            payload_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE SET NULL
-        );
-        INSERT INTO dispatch_events
-        SELECT sequence, id, run_id, session_link_id, issue_task_id,
-               CASE event_kind
-                   WHEN 'session_started' THEN 'thread_started'
-                   WHEN 'session_resumed' THEN 'thread_resumed'
-                   ELSE event_kind
-               END,
-               CASE subject_type WHEN 'session' THEN 'thread' ELSE subject_type END,
-               subject_id, source, severity, correlation_id, causation_id,
-               native_event_id, payload_json, created_at
-        FROM dispatch_events_v2;
-        DROP TABLE dispatch_events_v2;
-        DROP TABLE IF EXISTS session_transcript_items;
-        DROP TABLE IF EXISTS agent_session_links;
-        CREATE INDEX IF NOT EXISTS idx_dispatch_events_run ON dispatch_events(run_id, sequence);
-        CREATE INDEX IF NOT EXISTS idx_dispatch_events_thread ON dispatch_events(thread_id, sequence);
-        PRAGMA user_version = 3;
-        PRAGMA foreign_keys = ON;
-        "#,
-    )?;
-    Ok(())
-}
-
-fn create_schema_v3(conn: &Connection) -> Result<()> {
+fn create_schema_v7(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS agent_profiles (
@@ -1370,6 +1386,15 @@ fn create_schema_v3(conn: &Connection) -> Result<()> {
             started_at TEXT,
             completed_at TEXT,
             selected_thread_id TEXT,
+            current_turn_id TEXT,
+            package_artifact_id TEXT,
+            context_snapshot_id TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3,
+            max_time_seconds INTEGER NOT NULL DEFAULT 3600,
+            token_budget INTEGER,
+            active_pending_request_id TEXT,
+            supervisor_pid INTEGER,
             result_artifact_id TEXT,
             failure_reason TEXT,
             FOREIGN KEY (issue_task_id) REFERENCES issue_tasks(id) ON DELETE CASCADE,
@@ -1386,6 +1411,10 @@ fn create_schema_v3(conn: &Connection) -> Result<()> {
             task_class TEXT,
             validation_outcome TEXT,
             result_artifact_id TEXT,
+            package_artifact_id TEXT,
+            context_snapshot_id TEXT,
+            evaluation_artifact_id TEXT,
+            final_attempt INTEGER NOT NULL,
             metadata_json TEXT NOT NULL,
             recorded_at TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES dispatch_runs(id) ON DELETE CASCADE,
@@ -1508,6 +1537,13 @@ fn create_schema_v3(conn: &Connection) -> Result<()> {
             FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS codex_threads(id TEXT PRIMARY KEY,name TEXT,cwd TEXT,status_json TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS codex_turns(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(thread_id) REFERENCES codex_threads(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS codex_items(id TEXT NOT NULL,thread_id TEXT NOT NULL,turn_id TEXT NOT NULL DEFAULT '',item_type TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(thread_id,turn_id,id),FOREIGN KEY(thread_id) REFERENCES codex_threads(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS codex_runtime_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,thread_id TEXT,turn_id TEXT,method TEXT NOT NULL,delivery TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS codex_outbox(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,turn_id TEXT,method TEXT NOT NULL,client_message_id TEXT UNIQUE,payload_json TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pending_requests(id TEXT PRIMARY KEY,connection_epoch TEXT NOT NULL,wire_id_json TEXT NOT NULL,thread_id TEXT,turn_id TEXT,request_type TEXT NOT NULL,method TEXT NOT NULL,payload_json TEXT NOT NULL,status TEXT NOT NULL,response_json TEXT,created_at TEXT NOT NULL,resolved_at TEXT);
+
         CREATE INDEX IF NOT EXISTS idx_issue_tasks_issue_key ON issue_tasks(issue_key);
         CREATE INDEX IF NOT EXISTS idx_dispatch_runs_issue_task ON dispatch_runs(issue_task_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_run_outcomes_run ON dispatch_run_outcomes(run_id);
@@ -1519,22 +1555,14 @@ fn create_schema_v3(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_github_interaction_decisions_run ON github_interaction_decisions(run_id);
         CREATE INDEX IF NOT EXISTS idx_dispatch_failures_run ON dispatch_failures(run_id);
         CREATE INDEX IF NOT EXISTS idx_adapter_probe_agent ON adapter_probe_results(agent_id, capability, checked_at);
-        PRAGMA user_version = 3;
+        CREATE INDEX IF NOT EXISTS idx_codex_turns_thread ON codex_turns(thread_id,updated_at);
+        CREATE INDEX IF NOT EXISTS idx_codex_items_thread ON codex_items(thread_id,updated_at);
+        CREATE INDEX IF NOT EXISTS idx_codex_events_thread ON codex_runtime_events(thread_id,sequence);
+        CREATE INDEX IF NOT EXISTS idx_pending_requests_thread ON pending_requests(thread_id,status);
+        PRAGMA user_version = 7;
         "#,
     )?;
     Ok(())
-}
-
-fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
-    let exists = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            params![name],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some();
-    Ok(exists)
 }
 
 fn agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<AgentProfile> {
@@ -1595,8 +1623,17 @@ fn dispatch_run_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRun> {
         started_at: row.get(7)?,
         completed_at: row.get(8)?,
         selected_thread_id: row.get(9)?,
-        result_artifact_id: row.get(10)?,
-        failure_reason: row.get(11)?,
+        current_turn_id: row.get(10)?,
+        package_artifact_id: row.get(11)?,
+        context_snapshot_id: row.get(12)?,
+        attempt_count: row.get::<_, i64>(13)? as u32,
+        max_attempts: row.get::<_, i64>(14)? as u32,
+        max_time_seconds: row.get::<_, i64>(15)? as u64,
+        token_budget: row.get::<_, Option<i64>>(16)?.map(|value| value as u64),
+        active_pending_request_id: row.get(17)?,
+        supervisor_pid: row.get::<_, Option<i64>>(18)?.map(|value| value as u32),
+        result_artifact_id: row.get(19)?,
+        failure_reason: row.get(20)?,
     })
 }
 
@@ -1605,7 +1642,7 @@ fn dispatch_run_outcome_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRunO
     let failure_class: Option<String> = row.get(4)?;
     let task_class: Option<String> = row.get(6)?;
     let validation_outcome: Option<String> = row.get(7)?;
-    let metadata: String = row.get(9)?;
+    let metadata: String = row.get(13)?;
     Ok(DispatchRunOutcome {
         id: row.get(0)?,
         run_id: row.get(1)?,
@@ -1625,8 +1662,12 @@ fn dispatch_run_outcome_from_row(row: &Row<'_>) -> rusqlite::Result<DispatchRunO
             .map(|value| parse_enum(value, DispatchValidationOutcome::parse_value))
             .transpose()?,
         result_artifact_id: row.get(8)?,
+        package_artifact_id: row.get(9)?,
+        context_snapshot_id: row.get(10)?,
+        evaluation_artifact_id: row.get(11)?,
+        final_attempt: row.get::<_, i64>(12)? as u32,
         metadata_json: parse_json(&metadata)?,
-        recorded_at: row.get(10)?,
+        recorded_at: row.get(14)?,
     })
 }
 
@@ -1845,16 +1886,38 @@ fn dispatch_started(status: DispatchRunStatus) -> bool {
         DispatchRunStatus::Starting
             | DispatchRunStatus::Running
             | DispatchRunStatus::NeedsUser
-            | DispatchRunStatus::Completed
+            | DispatchRunStatus::Evaluating
+            | DispatchRunStatus::Succeeded
+            | DispatchRunStatus::Partial
             | DispatchRunStatus::Failed
             | DispatchRunStatus::Canceled
     )
 }
 
+fn valid_run_transition(from: DispatchRunStatus, to: DispatchRunStatus) -> bool {
+    use DispatchRunStatus::*;
+    from == to
+        || matches!(
+            (from, to),
+            (Proposed, Approved | Canceled)
+                | (Approved, Starting | Canceled)
+                | (Starting, Running | Failed | Approved)
+                | (Running, NeedsUser | Evaluating | Failed | Canceled)
+                | (NeedsUser, Running | Canceled)
+                | (
+                    Evaluating,
+                    Running | NeedsUser | Succeeded | Partial | Failed | Canceled
+                )
+        )
+}
+
 fn dispatch_terminal(status: DispatchRunStatus) -> bool {
     matches!(
         status,
-        DispatchRunStatus::Completed | DispatchRunStatus::Failed | DispatchRunStatus::Canceled
+        DispatchRunStatus::Succeeded
+            | DispatchRunStatus::Partial
+            | DispatchRunStatus::Failed
+            | DispatchRunStatus::Canceled
     )
 }
 

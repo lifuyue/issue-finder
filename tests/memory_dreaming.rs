@@ -288,7 +288,7 @@ fn seed_dispatch(store: &MemoryStore, id: &str, succeeded: bool) -> SeededDispat
             id: id.to_string(),
             issue_key: IssueKey::new("owner/repo", 42),
             agent_id: "codex".to_string(),
-            outcome_kind: Some(if succeeded { "fix_ready" } else { "failed" }.to_string()),
+            outcome_kind: Some(if succeeded { "success" } else { "failed" }.to_string()),
             task_type: "rust_cli_panic".to_string(),
             succeeded,
             failure_class: (!succeeded).then(|| "validation_failed".to_string()),

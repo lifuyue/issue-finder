@@ -61,7 +61,7 @@ pub fn current_eval_contract() -> EvalContract {
             "dispatch_timeline",
             "dispatch_trace",
             "dispatch_artifacts",
-            "native_runtime_eval",
+            "codex_runtime_eval",
         ],
         supported_verifier_dimensions: vec![
             "safety",

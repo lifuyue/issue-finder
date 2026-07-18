@@ -5,6 +5,7 @@ pub const TOOL_SCOUT: &str = "issue-finder.scout";
 pub const TOOL_ASSESS: &str = "issue-finder.assess";
 pub const TOOL_PREPARE: &str = "issue-finder.prepare";
 pub const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
+pub const TOOL_SUBMIT_RESULT: &str = "issue-finder.submit_result";
 pub const TOOL_STATUS: &str = "issue-finder.status";
 pub const TOOL_MEMORY_STATUS: &str = "issue-finder.memory_status";
 pub const TOOL_MEMORY_RECALL: &str = "issue-finder.memory_recall";
@@ -18,12 +19,13 @@ pub use crate::dispatch::tool_specs::{
     TOOL_A2A_APPROVE_SEND, TOOL_A2A_EXPORT_TASK, TOOL_A2A_IMPORT_RESULT, TOOL_A2A_REJECT_SEND,
     TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_AGENT_PROBE, TOOL_DISPATCH,
     TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS, TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE,
-    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_PROPOSE, TOOL_DISPATCH_RECORD_OUTCOME,
-    TOOL_DISPATCH_REJECT, TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST,
-    TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS,
-    TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT,
-    TOOL_GITHUB_DRAFT_FINAL_COMMENT, TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS,
-    TOOL_GITHUB_POST_COMMENT, TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
+    TOOL_DISPATCH_IMPORT_HANDOFF, TOOL_DISPATCH_INTERRUPT, TOOL_DISPATCH_PENDING_REQUESTS,
+    TOOL_DISPATCH_REJECT, TOOL_DISPATCH_RESPOND, TOOL_DISPATCH_REVIEW_APPROVE,
+    TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW,
+    TOOL_DISPATCH_STATUS, TOOL_DISPATCH_STEER, TOOL_DISPATCH_SYNC, TOOL_DISPATCH_TIMELINE,
+    TOOL_DISPATCH_TRACE, TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
+    TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
+    TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -72,6 +74,12 @@ pub struct IssueFinderToolSpec {
     pub description: String,
     pub input_schema: Value,
     pub defer_loading: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProfile {
+    Control,
+    Worker,
 }
 
 pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
@@ -158,6 +166,26 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
         recommended_workflow: recommended_workflow(),
         tools,
     }
+}
+
+pub fn list_tool_specs_for_profile(profile: ToolProfile) -> IssueFinderToolSpecsEnvelope {
+    let mut envelope = list_tool_specs();
+    if profile == ToolProfile::Worker {
+        envelope.quick_start.summary =
+            "Read only the immutable task context, then submit one structured candidate result."
+                .to_string();
+        envelope.quick_start.first_call.default_tool = TOOL_READ_CONTEXT.to_string();
+        envelope.quick_start.first_call.default_arguments = json!({});
+        envelope.recommended_workflow.clear();
+        envelope.tools.retain(|tool| tool.name == "read_context");
+        envelope.tools.push(tool_spec(
+            "submit_result",
+            "Submit an immutable candidate result for deterministic evaluation by the active run supervisor.",
+            candidate_result_schema(),
+            false,
+        ));
+    }
+    envelope
 }
 
 fn quick_start() -> ToolQuickStart {
@@ -314,6 +342,29 @@ fn read_context_schema() -> Value {
     })
 }
 
+pub fn candidate_result_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "runId": { "type": "string" },
+            "issueTaskId": { "type": "string" },
+            "packageId": { "type": "string" },
+            "status": { "type": "string", "enum": ["success", "partial", "failed", "needs_user"] },
+            "summary": { "type": "string" },
+            "changedFiles": { "type": "array", "items": { "type": "string" } },
+            "reproduction": {},
+            "successCriteria": { "type": "array", "items": { "type": "object" } },
+            "validation": { "type": "array", "items": { "type": "object" } },
+            "residualRisks": { "type": "array", "items": { "type": "string" } },
+            "failureReason": { "type": ["string", "null"] },
+            "suggestedGitHubReply": { "type": ["string", "null"] },
+            "sessionContext": {}
+        },
+        "required": ["runId", "issueTaskId", "packageId", "status", "summary", "changedFiles", "reproduction", "successCriteria", "validation", "residualRisks", "failureReason", "suggestedGitHubReply", "sessionContext"],
+        "additionalProperties": false
+    })
+}
+
 fn empty_schema() -> Value {
     json!({
         "type": "object",
@@ -388,9 +439,10 @@ mod tests {
         TOOL_A2A_REJECT_SEND, TOOL_AGENTS_LIST, TOOL_AGENT_CAPABILITIES, TOOL_AGENT_PROBE,
         TOOL_ASSESS, TOOL_DISPATCH, TOOL_DISPATCH_APPROVE, TOOL_DISPATCH_ARTIFACTS,
         TOOL_DISPATCH_EVENTS, TOOL_DISPATCH_EXECUTE, TOOL_DISPATCH_IMPORT_HANDOFF,
-        TOOL_DISPATCH_RECORD_OUTCOME, TOOL_DISPATCH_REJECT, TOOL_DISPATCH_REVIEW_APPROVE,
-        TOOL_DISPATCH_REVIEW_LIST, TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW,
-        TOOL_DISPATCH_STATUS, TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE,
+        TOOL_DISPATCH_INTERRUPT, TOOL_DISPATCH_PENDING_REQUESTS, TOOL_DISPATCH_REJECT,
+        TOOL_DISPATCH_RESPOND, TOOL_DISPATCH_REVIEW_APPROVE, TOOL_DISPATCH_REVIEW_LIST,
+        TOOL_DISPATCH_REVIEW_REJECT, TOOL_DISPATCH_REVIEW_SHOW, TOOL_DISPATCH_STATUS,
+        TOOL_DISPATCH_STEER, TOOL_DISPATCH_SYNC, TOOL_DISPATCH_TIMELINE, TOOL_DISPATCH_TRACE,
         TOOL_GITHUB_APPROVE_COMMENT, TOOL_GITHUB_DRAFT_FINAL_COMMENT,
         TOOL_GITHUB_DRAFT_TRACKING_COMMENT, TOOL_GITHUB_INTERACTIONS, TOOL_GITHUB_POST_COMMENT,
         TOOL_GITHUB_REJECT_COMMENT, TOOL_GITHUB_RETRY_COMMENT, TOOL_MEMORY_DREAMS_LIST,
@@ -445,7 +497,11 @@ mod tests {
                 TOOL_DISPATCH_APPROVE,
                 TOOL_DISPATCH_REJECT,
                 TOOL_DISPATCH_EXECUTE,
-                TOOL_DISPATCH_RECORD_OUTCOME,
+                TOOL_DISPATCH_PENDING_REQUESTS,
+                TOOL_DISPATCH_RESPOND,
+                TOOL_DISPATCH_STEER,
+                TOOL_DISPATCH_INTERRUPT,
+                TOOL_DISPATCH_SYNC,
                 TOOL_A2A_EXPORT_TASK,
                 TOOL_A2A_APPROVE_SEND,
                 TOOL_A2A_REJECT_SEND,

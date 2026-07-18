@@ -3,7 +3,6 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
-use super::adapters::codex_app_server::probe_codex_app_server;
 use super::model::{
     AdapterProbeResult, AdapterProbeStatus, AgentCapability, CapabilityStatus,
     NewAdapterProbeResult,
@@ -25,7 +24,7 @@ pub fn probe_agent(
 ) -> Result<AgentProbeReport> {
     let agent = store.get_agent_profile(agent_id)?;
     let capabilities = store.list_agent_capabilities(agent_id)?;
-    let runtime_probe = (agent.adapter == "codex_app_server").then(probe_codex_app_server);
+    let runtime_probe = None;
     let mut probes = Vec::new();
     for capability in capabilities {
         if !refresh {

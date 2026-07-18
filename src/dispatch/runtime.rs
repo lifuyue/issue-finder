@@ -8,12 +8,11 @@ use crate::config::Config;
 use crate::paths::IssueFinderPaths;
 
 use super::a2a_gateway::{self, A2aApprovalResult, A2aExportResult, A2aResultImport};
-use super::adapters::codex_app_server::{
-    codex_capability_mappings, default_codex_app_server_startup_metadata,
-};
 use super::capability_probe::{probe_agent, AgentProbeReport};
+use super::evaluator::{
+    evaluate_candidate, CandidateResult, EvaluatedCandidate, EvaluationDisposition,
+};
 use super::events::dispatch_run_event;
-use super::execution::{execute_approved_codex_app_server_dispatch, DispatchExecutionResult};
 use super::github_projection::{
     self, GitHubApprovalResult, GitHubCommentPolicyResult, GitHubCommentWriter, GitHubPostResult,
     ReqwestGitHubCommentWriter,
@@ -30,6 +29,7 @@ use super::model::{
 use super::packaging::{self, IssueReviewDetail, IssueReviewResolution, PackageImportResult};
 use super::policy::{classify_action, ensure_capability_preconditions};
 use super::store::DispatchStore;
+use super::supervisor::{self, DispatchExecutionResult};
 use super::timeline::{
     approval_latency, dispatch_timeline, dispatch_trace, ApprovalLatency, DispatchTimeline,
     DispatchTrace,
@@ -83,8 +83,15 @@ pub struct DispatchOutcomeRecordResult {
     pub outcome: DispatchRunOutcome,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitResultOutcome {
+    pub evaluation: EvaluatedCandidate,
+    pub terminal: Option<DispatchOutcomeRecordResult>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct DispatchOutcomeRecordRequest {
+pub(crate) struct DispatchOutcomeRecordRequest {
     pub run_id: String,
     pub idempotency_key: Option<String>,
     pub outcome_kind: DispatchOutcomeKind,
@@ -206,61 +213,32 @@ impl DispatchRuntime {
         a2a_gateway::reject_send(&self.store, approval_request_id)
     }
 
-    pub fn import_a2a_result(
-        &self,
-        run_id: &str,
-        path: &Path,
-        kind: &str,
-        content_type: &str,
-        status: Option<DispatchRunStatus>,
-        outcome: Option<DispatchOutcomeRecordRequest>,
-    ) -> Result<A2aResultImport> {
-        let inferred_outcome = status.and_then(terminal_outcome_for_status);
-        let imported_validation = if outcome
-            .as_ref()
-            .map(|request| request.outcome_kind == DispatchOutcomeKind::FixReady)
-            .unwrap_or(inferred_outcome == Some(DispatchOutcomeKind::FixReady))
-        {
-            Some(a2a_gateway::validate_fix_result_import(
-                path,
-                kind,
-                content_type,
-            )?)
-        } else {
-            None
-        };
-        let mut result =
-            a2a_gateway::import_result(&self.store, run_id, path, kind, content_type, status)?;
-        let outcome_request = outcome.or_else(|| {
-            inferred_outcome.map(|outcome_kind| DispatchOutcomeRecordRequest {
-                run_id: run_id.to_string(),
-                idempotency_key: Some(format!("a2a_result_import:{}", result.artifact.id)),
-                outcome_kind,
-                failure_class: None,
-                failure_detail: None,
-                task_class: None,
-                validation_outcome: imported_validation,
-                result_artifact_id: Some(result.artifact.id.clone()),
-                metadata_json: json!({
-                    "source": "a2a_import_result",
-                    "artifactKind": kind,
-                    "coarseTerminalOutcome": true
-                }),
-            })
-        });
-        if let Some(mut request) = outcome_request {
-            request.run_id = run_id.to_string();
-            if request.result_artifact_id.is_none() {
-                request.result_artifact_id = Some(result.artifact.id.clone());
-            }
-            if request.idempotency_key.is_none() {
-                request.idempotency_key = Some(format!("a2a_result_import:{}", result.artifact.id));
-            }
-            let recorded = self.record_dispatch_outcome(request)?;
-            result.run = recorded.run;
-            result.outcome = Some(recorded.outcome);
+    pub fn import_a2a_result(&self, run_id: &str, path: &Path) -> Result<A2aResultImport> {
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("unable to read A2A candidate result {}", path.display()))?;
+        let candidate: CandidateResult =
+            serde_json::from_slice(&bytes).context("A2A candidate result is invalid")?;
+        if candidate.run_id != run_id {
+            anyhow::bail!("A2A candidate result runId does not match import target");
         }
-        Ok(result)
+        let evaluated = self.submit_result(candidate)?;
+        let run = self.store.get_dispatch_run(run_id)?;
+        self.store.append_dispatch_event(dispatch_run_event(
+            &run,
+            DispatchEventKind::A2aResultImported,
+            DispatchEventSource::A2a,
+            DispatchEventSeverity::Info,
+            json!({
+                "candidateResultArtifactId": evaluated.evaluation.result_artifact.id,
+                "evaluationArtifactId": evaluated.evaluation.evaluation_artifact.id,
+                "sourcePath": path
+            }),
+        ))?;
+        Ok(A2aResultImport {
+            run: self.store.get_dispatch_run(run_id)?,
+            artifact: evaluated.evaluation.result_artifact,
+            outcome: evaluated.terminal.map(|terminal| terminal.outcome),
+        })
     }
 
     pub fn propose_dispatch(&self, request: DispatchProposalRequest) -> Result<DispatchProposal> {
@@ -374,7 +352,7 @@ impl DispatchRuntime {
         })
     }
 
-    pub fn record_dispatch_outcome(
+    pub(crate) fn commit_terminal_outcome(
         &self,
         request: DispatchOutcomeRecordRequest,
     ) -> Result<DispatchOutcomeRecordResult> {
@@ -398,28 +376,7 @@ impl DispatchRuntime {
                 result_artifact_id: request.result_artifact_id.clone(),
                 metadata_json: request.metadata_json,
             })?;
-        crate::eval_fault::crash_at("after_outcome_insert_before_projection");
-        if let Some(artifact_id) = outcome.result_artifact_id.as_deref() {
-            if run.result_artifact_id.as_deref() != Some(artifact_id) {
-                self.store
-                    .set_dispatch_run_result_artifact(&run.id, artifact_id)?;
-            }
-        }
-        let failure_reason = outcome.failure_detail.clone().or_else(|| {
-            outcome
-                .failure_class
-                .map(|class| class.as_str().to_string())
-        });
-        let mut run = self.store.update_dispatch_run_status(
-            &run.id,
-            outcome.outcome_kind.terminal_status(),
-            failure_reason,
-        )?;
-        if outcome.outcome_kind == DispatchOutcomeKind::FixReady {
-            self.store
-                .update_issue_task_status(&run.issue_task_id, IssueTaskStatus::FixReady)?;
-        }
-        run = self.store.get_dispatch_run(&run.id)?;
+        let run = self.store.get_dispatch_run(&run.id)?;
         let outcome_event_exists = self
             .store
             .list_dispatch_events_for_run(&run.id)?
@@ -453,47 +410,153 @@ impl DispatchRuntime {
         })
     }
 
+    pub fn submit_result(&self, result: CandidateResult) -> Result<SubmitResultOutcome> {
+        let run = self.store.get_dispatch_run(&result.run_id)?;
+        let evaluation = evaluate_candidate(&self.store, &run, &result)?;
+        let terminal = match evaluation.report.disposition {
+            EvaluationDisposition::AcceptedSuccess => {
+                Some(self.commit_terminal_outcome(DispatchOutcomeRecordRequest {
+                    run_id: run.id.clone(),
+                    idempotency_key: Some(format!(
+                        "evaluation:{}",
+                        evaluation.evaluation_artifact.id
+                    )),
+                    outcome_kind: DispatchOutcomeKind::Success,
+                    failure_class: None,
+                    failure_detail: None,
+                    task_class: None,
+                    validation_outcome: Some(DispatchValidationOutcome::Passed),
+                    result_artifact_id: Some(evaluation.result_artifact.id.clone()),
+                    metadata_json: json!({
+                        "source": "deterministic_evaluator",
+                        "evaluationArtifactId": evaluation.evaluation_artifact.id,
+                        "attempt": evaluation.report.attempt,
+                    }),
+                })?)
+            }
+            EvaluationDisposition::AcceptedPartial => {
+                Some(self.commit_terminal_outcome(DispatchOutcomeRecordRequest {
+                    run_id: run.id.clone(),
+                    idempotency_key: Some(format!(
+                        "evaluation:{}",
+                        evaluation.evaluation_artifact.id
+                    )),
+                    outcome_kind: DispatchOutcomeKind::Partial,
+                    failure_class: None,
+                    failure_detail: None,
+                    task_class: None,
+                    validation_outcome: Some(DispatchValidationOutcome::Passed),
+                    result_artifact_id: Some(evaluation.result_artifact.id.clone()),
+                    metadata_json: json!({
+                        "source": "deterministic_evaluator",
+                        "evaluationArtifactId": evaluation.evaluation_artifact.id,
+                        "attempt": evaluation.report.attempt,
+                    }),
+                })?)
+            }
+            EvaluationDisposition::Failed => Some(
+                self.commit_terminal_outcome(DispatchOutcomeRecordRequest {
+                    run_id: run.id.clone(),
+                    idempotency_key: Some(format!(
+                        "evaluation:{}",
+                        evaluation.evaluation_artifact.id
+                    )),
+                    outcome_kind: DispatchOutcomeKind::Failed,
+                    failure_class: Some(DispatchOutcomeFailureClass::ValidationFailed),
+                    failure_detail: result
+                        .failure_reason
+                        .clone()
+                        .or_else(|| Some(evaluation.report.feedback.join(" "))),
+                    task_class: None,
+                    validation_outcome: Some(DispatchValidationOutcome::Failed),
+                    result_artifact_id: Some(evaluation.result_artifact.id.clone()),
+                    metadata_json: json!({
+                        "source": "deterministic_evaluator",
+                        "evaluationArtifactId": evaluation.evaluation_artifact.id,
+                        "attempt": evaluation.report.attempt,
+                    }),
+                })?,
+            ),
+            EvaluationDisposition::Retry | EvaluationDisposition::NeedsUser => None,
+        };
+        if let Some(terminal) = terminal.as_ref() {
+            super::projectors::project_terminal_outcome(&self.store, &terminal.outcome)?;
+        }
+        Ok(SubmitResultOutcome {
+            evaluation,
+            terminal,
+        })
+    }
+
     pub fn execute_dispatch(&self, run_id: &str) -> Result<DispatchExecutionResult> {
-        execute_approved_codex_app_server_dispatch(&self.store, run_id)
+        supervisor::launch(&self.store.paths(), run_id)
     }
 
     pub fn sync_dispatch(&self, run_id: &str) -> Result<DispatchStatusSnapshot> {
         let run = self.store.get_dispatch_run(run_id)?;
-        if let Some(thread_id) = run.selected_thread_id.as_deref() {
-            let runtime = tokio::runtime::Runtime::new()?;
-            let native_store = super::native_runtime::NativeThreadStore::open(&self.store.paths())?;
-            let manager = runtime.block_on(super::native_runtime::NativeThreadManager::connect(
-                native_store,
-            ))?;
-            runtime.block_on(manager.reconcile(thread_id))?;
-            let check = super::native_runtime::NativeThreadStore::open(&self.store.paths())?;
-            if let Some(turn) = check.latest_turn(thread_id)? {
-                let normalized = turn.status.trim().to_ascii_lowercase().replace('-', "_");
-                if matches!(
-                    normalized.as_str(),
-                    "needs_user" | "needs_approval" | "waiting_for_approval"
-                ) {
-                    self.store.update_dispatch_run_status(
-                        run_id,
-                        DispatchRunStatus::NeedsUser,
-                        None,
-                    )?;
-                } else if matches!(
-                    normalized.as_str(),
-                    "failed" | "error" | "interrupted" | "canceled"
-                ) {
-                    self.store.update_dispatch_run_status(
-                        run_id,
-                        DispatchRunStatus::Failed,
-                        Some(format!(
-                            "native turn {} ended with {}",
-                            turn.id, turn.status
-                        )),
-                    )?;
-                }
-            }
-        }
+        let _ = run;
         self.dispatch_status(run_id)
+    }
+
+    pub fn pending_requests(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<super::codex_runtime::PendingRequest>> {
+        let run = self.store.get_dispatch_run(run_id)?;
+        let thread_id = run.selected_thread_id.as_deref();
+        Ok(
+            super::codex_runtime::CodexRuntimeStore::open(&self.store.paths())?
+                .pending_server_requests()?
+                .into_iter()
+                .filter(|request| request.thread_id.as_deref() == thread_id)
+                .collect(),
+        )
+    }
+
+    pub fn respond_pending_request(&self, request_id: &str, response: Value) -> Result<()> {
+        super::codex_runtime::CodexRuntimeStore::open(&self.store.paths())?
+            .queue_pending_response(request_id, &response)
+    }
+
+    pub fn steer_dispatch(&self, run_id: &str, message: &str) -> Result<()> {
+        let run = self.store.get_dispatch_run(run_id)?;
+        let thread_id = run.selected_thread_id.context("run has no Codex thread")?;
+        let runtime = super::codex_runtime::CodexRuntimeStore::open(&self.store.paths())?;
+        let turn = runtime
+            .latest_turn(&thread_id)?
+            .context("run has no active turn")?;
+        runtime.enqueue_control(
+            &format!(
+                "control:steer:{}:{}",
+                run.id,
+                chrono::Utc::now().timestamp_micros()
+            ),
+            &thread_id,
+            "turn/steer",
+            &json!({
+                "threadId": thread_id,
+                "expectedTurnId": turn.id,
+                "clientUserMessageId": format!("issue-finder:steer:{}", run.id),
+                "input":[{"type":"text","text":message}]
+            }),
+        )?;
+        Ok(())
+    }
+
+    pub fn interrupt_dispatch(&self, run_id: &str) -> Result<()> {
+        let run = self.store.get_dispatch_run(run_id)?;
+        let thread_id = run.selected_thread_id.context("run has no Codex thread")?;
+        let runtime = super::codex_runtime::CodexRuntimeStore::open(&self.store.paths())?;
+        let turn = runtime
+            .latest_turn(&thread_id)?
+            .context("run has no active turn")?;
+        runtime.enqueue_control(
+            &format!("control:interrupt:{}", run.id),
+            &thread_id,
+            "turn/interrupt",
+            &json!({"threadId":thread_id,"turnId":turn.id}),
+        )?;
+        Ok(())
     }
 
     pub fn draft_github_tracking_comment(
@@ -566,15 +629,6 @@ impl DispatchRuntime {
     }
 }
 
-fn terminal_outcome_for_status(status: DispatchRunStatus) -> Option<DispatchOutcomeKind> {
-    match status {
-        DispatchRunStatus::Completed => Some(DispatchOutcomeKind::FixReady),
-        DispatchRunStatus::Failed => Some(DispatchOutcomeKind::Failed),
-        DispatchRunStatus::Canceled => Some(DispatchOutcomeKind::Canceled),
-        _ => None,
-    }
-}
-
 fn ensure_builtin_agents(store: &DispatchStore) -> Result<()> {
     store.ensure_agent_profile(NewAgentProfile {
         id: Some("codex".to_string()),
@@ -621,54 +675,36 @@ fn dispatch_approval_prompt(
 }
 
 fn codex_capabilities() -> Vec<(AgentCapabilityName, CapabilityStatus, serde_json::Value)> {
-    let startup = default_codex_app_server_startup_metadata();
-    let binary = startup
-        .get("binary")
-        .cloned()
-        .unwrap_or_else(|| json!({ "name": "codex", "available": false }));
-    let mut capabilities = codex_capability_mappings()
+    let methods = [
+        (AgentCapabilityName::StartSession, "thread/start"),
+        (AgentCapabilityName::ResumeSession, "thread/resume"),
+        (AgentCapabilityName::RenameSession, "thread/name/set"),
+        (AgentCapabilityName::SetGoal, "thread/goal/set"),
+        (AgentCapabilityName::ReadTranscript, "thread/read"),
+        (AgentCapabilityName::StreamEvents, "turn/start"),
+        (AgentCapabilityName::InterruptRun, "turn/interrupt"),
+        (AgentCapabilityName::ReviewMode, "review/start"),
+    ];
+    let mut capabilities = methods
         .into_iter()
-        .map(|mapping| {
-            let wired_to_runtime = matches!(
-                mapping.capability,
-                AgentCapabilityName::StartSession
-                    | AgentCapabilityName::ResumeSession
-                    | AgentCapabilityName::RenameSession
-                    | AgentCapabilityName::SetGoal
-            );
-            if wired_to_runtime {
-                (
-                    mapping.capability,
-                    CapabilityStatus::Experimental,
-                    json!({
-                        "protocol": "codex_app_server_json_rpc",
-                        "method": mapping.method,
-                        "status": "wired_to_dispatch_runtime",
-                        "binary": binary.clone(),
-                        "startup": startup.clone()
-                    }),
-                )
-            } else {
-                (
-                    mapping.capability,
-                    CapabilityStatus::Unsupported,
-                    json!({
-                        "protocol": "codex_app_server_json_rpc",
-                        "method": mapping.method,
-                        "reason": "Codex exposes this native method, but Issue Finder does not wire this capability in the first dispatch runtime implementation",
-                        "binary": binary.clone(),
-                        "startup": startup.clone()
-                    }),
-                )
-            }
+        .map(|(capability, method)| {
+            (
+                capability,
+                CapabilityStatus::Supported,
+                json!({
+                    "protocol": "codex_app_server_json_rpc",
+                    "method": method,
+                    "runtimeOwner": "dispatch/codex_runtime",
+                    "liveDiscoveryRequired": true
+                }),
+            )
         })
         .collect::<Vec<_>>();
     capabilities.push((
         AgentCapabilityName::OpenPr,
         CapabilityStatus::Unsupported,
         json!({
-            "reason": "Issue Finder must not create pull requests in the first implementation",
-            "startup": startup
+            "reason": "Issue Finder does not publish pull requests"
         }),
     ));
     capabilities

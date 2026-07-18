@@ -6,6 +6,8 @@ For current contributor guidance, prefer:
 
 - [`AGENTS.md`](../../AGENTS.md) for repository collaboration rules and owner boundaries.
 - [`docs/usage.md`](../usage.md) for the current CLI, local state layout, and dispatch workflow.
+- [`docs/agent-loop-target-architecture.md`](../agent-loop-target-architecture.md) for the current
+  complete agent-loop architecture and deletion boundaries.
 - [`docs/agent-safe-preparation-runtime.md`](../agent-safe-preparation-runtime.md), [`docs/sandbox.md`](../sandbox.md), and [`docs/execpolicy.md`](../execpolicy.md) for the current preparation and safety boundary.
 - Source owner modules for executable truth: `src/prepare_gate.rs`, `src/dispatch/*`, `src/memory/*`, `src/recommendation/*`, `src/tool_specs.rs`, and `src/tool_runtime.rs`.
 

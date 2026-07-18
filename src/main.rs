@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use issue_finder::cli::{
-    Cli, Command, FeedbackCommand, InboxCommand, MemoryDreamsCommand, MemoryHintsCommand,
-    ProfileCommand, ToolsCommand,
+    Cli, Command, FeedbackCommand, InboxCommand, McpProfile, MemoryDreamsCommand,
+    MemoryHintsCommand, ProfileCommand, ToolsCommand,
 };
 use issue_finder::config::{initialize_interactive, Config};
 use issue_finder::dispatch::{handle_agents_cli, handle_dispatch_cli};
@@ -22,9 +22,9 @@ use issue_finder::recommendation::{
     RecommendationEventType, RepositoryScope, ScoutOptions,
 };
 use issue_finder::tool_runtime::{
-    default_call_id, IssueFinderToolInvocation, IssueFinderToolOutput, IssueFinderToolRuntime,
+    default_call_id, IssueFinderToolOutput, IssueFinderToolRuntime, WorkerCapability,
 };
-use issue_finder::tool_specs::list_tool_specs;
+use issue_finder::tool_specs::{list_tool_specs, ToolProfile};
 use issue_finder::workflow;
 
 #[tokio::main]
@@ -250,11 +250,11 @@ async fn main() -> Result<()> {
                     report.metrics.total_samples
                 );
             }
-            issue_finder::cli::EvalCommand::NativeRuntime(eval_args) => {
+            issue_finder::cli::EvalCommand::CodexRuntime(eval_args) => {
                 let marker = eval_args.marker.unwrap_or_else(|| {
                     format!("IF-NATIVE-EVAL-{}", chrono::Utc::now().timestamp_millis())
                 });
-                let report = issue_finder::native_runtime_eval::run_native_runtime_eval(
+                let report = issue_finder::codex_runtime_eval::run_codex_runtime_eval(
                     &eval_args.workspace.to_string_lossy(),
                     eval_args.timeout_seconds,
                     marker,
@@ -417,10 +417,10 @@ async fn main() -> Result<()> {
             }
             ToolsCommand::Call(args) => {
                 let call_id = args.call_id.unwrap_or_else(default_call_id);
-                let invocation = IssueFinderToolInvocation::from_json_arguments(
+                let invocation = issue_finder::tool_adapters::json::parse_invocation(
                     args.tool.clone(),
                     &args.arguments,
-                    Some(call_id.clone()),
+                    call_id.clone(),
                     args.turn_id.clone(),
                 );
                 let output = match invocation {
@@ -458,6 +458,40 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string(&output)?);
             }
         },
+        Command::Mcp(args) => {
+            let config = Config::load_or_default(&paths)?;
+            let (runtime, profile) = match args.profile {
+                McpProfile::Control => (
+                    IssueFinderToolRuntime::new(paths.clone(), config),
+                    ToolProfile::Control,
+                ),
+                McpProfile::Worker => {
+                    let capability = WorkerCapability {
+                        run_id: args.run_id.context("worker MCP requires --run-id")?,
+                        issue_task_id: args
+                            .issue_task_id
+                            .context("worker MCP requires --issue-task-id")?,
+                        package_id: args
+                            .package_id
+                            .context("worker MCP requires --package-id")?,
+                        snapshot_id: args
+                            .snapshot_id
+                            .context("worker MCP requires --snapshot-id")?,
+                        workspace: args.workspace.context("worker MCP requires --workspace")?,
+                    };
+                    (
+                        IssueFinderToolRuntime::worker(paths.clone(), config, capability),
+                        ToolProfile::Worker,
+                    )
+                }
+            };
+            issue_finder::tool_adapters::mcp::serve_stdio(runtime, profile).await?;
+        }
+        Command::Supervise(args) => {
+            issue_finder::dispatch::RunSupervisor::new(paths.clone())
+                .run(&args.run_id)
+                .await?;
+        }
         Command::Doctor => {
             doctor::ensure_paths(&paths)?;
             let config = Config::load_or_default(&paths)?;
