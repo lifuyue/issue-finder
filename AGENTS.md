@@ -1,57 +1,48 @@
-# 仓库协作指南
+# 仓库指南
 
-## 项目结构与模块划分
+## 当前仓库简介
 
-本仓库是一个 Rust 2021 命令行程序包。二进制入口在 `src/main.rs`，可复用逻辑从 `src/lib.rs` 导出。命令解析位于 `src/cli.rs`；工作流编排和 issue 选择位于 `src/workflow.rs`；tool contract runtime、结构化输出 DTO 和上下文读取安全边界分别位于 `src/tool_runtime.rs`、`src/tool_outputs.rs` 和 `src/tool_context.rs`；prepare gate 的唯一策略实现位于 `src/prepare_gate.rs`。状态路径、收件箱、报告、GitHub 访问、工作区准备、评分、扫描、配置、诊断检查和大模型支持分别放在职责对应的 `src/*.rs` 模块中。集成测试位于 `tests/`。历史设计抉择位于 `docs/superpowers/specs/`，使用前先读 `docs/superpowers/README.md`；历史 Rust 设计说明位于 `docs/issue-finder-rust-design.md`。被忽略的 `reference/` 目录是外部参考资料。
+Issue Finder 用于发现、评估和准备 GitHub issue 贡献任务。仓库包含 Rust 2021 CLI 和独立的 Codex skill 两套实现。
 
-## 面向编码代理的设计方向
+Rust CLI 提供 issue 推荐、评估、工作区准备、handoff、dispatch、贡献记忆以及 JSON tool contract 和 MCP 接口。独立 skill 在当前 Codex 会话中组织发现、选择、实现和验证流程，其 Python helper 提供 `scout`、`prepare`、`finish`，不依赖 Rust CLI、MCP 或 dispatch。
 
-本项目仍处于足够早期的阶段。当大规模重构能够简化模型、移除陈旧架构，或让工作流更容易理解时，应积极推进。不要仅为了兼容旧的本地版本、旧状态结构或旧命令行为而保留遗留逻辑。优先干净地替换过时路径，避免用最小化补丁不断堆叠新旧并存的设计。
+## 项目简要导览
 
-文档也是产品设计的一部分。发现过期文档时，应在同一次变更中更新它，或删除会误导后续贡献者的章节或文件。不要留下过时说明、待办式备注，或相互冲突的新旧描述让之后的贡献者和编码代理自行判断。
+- `skills/issue-finder/`：独立 skill 包，包含 `SKILL.md`、`scripts/issue_finder.py` 和展示元数据 `agents/openai.yaml`。
+- `src/main.rs`、`src/lib.rs`、`src/cli.rs`：CLI 入口、库导出和命令行参数定义。
+- `src/workflow.rs`、`src/prepare_gate.rs`：工作流编排、issue 选择和 prepare gate 策略。
+- `src/recommendation/`、`src/value_*.rs`、`src/scoring.rs`、`src/competition.rs`：推荐排序、价值评估和竞争分析。
+- `src/github.rs`、`src/github_enrichment.rs`、`src/discovery.rs`：GitHub 访问、证据补充和候选发现。
+- `src/workspace.rs`、`src/repo_scan.rs`、`src/probe.rs`：工作区准备、仓库扫描和探测。
+- `src/tool_specs.rs`、`src/tool_runtime.rs`、`src/tool_outputs.rs`、`src/tool_context.rs`、`src/tool_adapters/`：工具定义、执行、结构化输出、上下文读取和协议适配。
+- `src/dispatch/`、`src/memory/`：执行调度、任务与结果管理，以及贡献记忆。
+- `src/paths.rs`、`src/config.rs`、`src/doctor.rs`、`src/inbox.rs`、`src/report.rs`、`src/handoff.rs`、`src/context_pack.rs`：本地路径、配置、诊断、收件箱、报告和交接上下文。
+- `tests/`：Rust 集成测试、独立 skill 的 Python 测试及离线评测 fixtures。
+- `README.md`、`README.zh-CN.md`、`docs/skills.md`、`docs/usage.md`：项目介绍、安装和使用说明。
+- `docs/recommendation-evals/`：推荐评测记录；`docs/superpowers/`：历史设计文档及索引。
+- `.github/workflows/`：CI 和发布工作流。
 
-## 多 Worktree 子线程协作规则
+## 常用命令
 
-当主线程把工作委派给独立 worktree 子线程时，先遵守 `docs/development/worktree-thread-orchestration.md`。在任何文件写入或提交前，子线程必须创建或切换到主线程分配的 `fuyue/<stream>` 分支；不得在 detached `HEAD` 或 `main` 上提交。子线程不得 merge 到 `main`，不得创建 PR，除非主线程明确要求。
+- `cargo build`：编译调试版本，输出到 `target/debug/issue-finder`。
+- `cargo run -- doctor`：执行本地就绪检查。
+- `cargo run -- tools list`：输出 JSON 工具定义和流程元数据。
+- `cargo test`：运行 Rust 测试。
+- `cargo test --test <name>`：运行指定的 Rust 集成测试。
+- `cargo clippy --all-targets -- -D warnings`：执行 lint 检查，将警告视为错误。
+- `cargo fmt --all`：格式化 Rust 代码。
+- `cargo fmt --all -- --check`：检查 Rust 代码格式。
+- `cargo install --path .`：从当前 checkout 安装 CLI。
+- `python3 -m unittest discover -s tests -p 'test_skill_native.py' -v`：运行使用 mock GitHub 和临时 Git 仓库的独立 skill 测试，无第三方 Python 依赖。
 
-实现前必须先通过 brainstorming gate：探索当前项目上下文，提出 2-3 种方案和 trade-off，明确推荐方案，并说明 architecture、components、data flow、error handling、testing、non-goals、owner boundaries 和 open questions。即使隔离 worktree 缺少 brainstorming skill，也必须按该协议执行，不得把技能缺失当作豁免。完成计划后停止，等待主线程批准。
+Rust CLI 默认将本地状态写入 `~/.issue-finder`；设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` 可使用独立的状态目录。
 
-默认有两道门：plan approval gate 和 implementation approval gate。同一条主线程消息可以显式同时批准计划和开始实现；否则子线程只能在计划批准后继续等待实现批准。批准实现后仍应保持改动在分配范围内，不得添加用于保留陈旧边界的胶水代码。
+## 测试
 
-共享规则留在 owner 模块：prepare gate 只由 `src/prepare_gate.rs` 实现；dispatch 行为归 `src/dispatch/*`；recommendation 行为和 eval 归 `src/recommendation/*` 及对应 fixtures；memory 行为归 `src/memory/*`；tool schema/runtime 委托给各自 owner 模块。文档流程可以描述这些边界，但不得复制 product policy 或在非 owner 模块重新实现规则。
+Do not write tests for reversible, low-impact changes that mirror the implementation. If you do choose to verify your work with tests, make sure that the tests are meaningful and necessary to verify implementation.
 
-## 构建、测试与开发命令
+Run tests appropriate to the change and complete required checks. Once those pass, broaden or repeat testing only when new changes, failures, or unresolved concerns justify it; otherwise, continue toward completing the task.
 
-- `cargo build`：编译调试版本二进制，输出到 `target/debug/issue-finder`。
-- `cargo run -- doctor`：在本地运行命令行程序并执行就绪检查。
-- `cargo test`：运行全部单元测试和集成测试。
-- `cargo clippy --all-targets -- -D warnings`：对所有目标执行代码检查，并把警告视为错误。
-- `cargo fmt --all`：提交前格式化整个程序包。
-- `cargo install --path .`：把当前 checkout 安装为 `issue-finder`。
-- `cargo run -- tools list`：本地冒烟验证 JSON tool contract 是否能列出当前完整的 Issue Finder tool specs。
+## 解释代码
 
-进行隔离的手动运行时，设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo`，避免生成的状态写入 `~/.issue-finder`。
-
-## 编码风格与命名约定
-
-使用 `rustfmt`，保持代码符合 Rust 习惯并显式清晰。优先按照既有职责拆分小模块，不要创建宽泛的工具文件。函数、变量、模块和测试名称使用 `snake_case`；结构体、枚举和 trait 使用 `PascalCase`。命令行参数应通过 `clap` 使用清晰的 kebab-case 名称，例如 `--refresh` 或 `--date`。注释保持克制且有用，尤其用于说明安全边界。
-
-## 测试指南
-
-测试使用 Rust 内置测试框架，异步工作流使用 `tokio::test`。面向用户可见工作流、本地状态布局、GitHub 接口行为、工作区准备逻辑和 JSON tool contract 行为，应在 `tests/` 中增加集成测试覆盖。优先使用 `tempfile` 和类似 `ISSUE_FINDER_HOME` 的隔离方式；GitHub 和 tool contract 验证必须使用 mock 或临时状态，不依赖真实网络。测试名称应描述行为，例如 `scout_uses_mocked_github_search_responses`。
-
-## 推荐算法评测与迭代
-
-修改 discovery、fallback、feed ranking、quality policy、freshness 或 feedback cooldown 时，必须同步维护 `tests/fixtures/recommendation_eval/` 中的离线评测数据，或在同次变更中说明为什么无需新增样本。自动测试必须使用 fixture、mock 或临时状态，不得依赖真实 GitHub 网络。
-
-每个重要推荐算法版本完成后，必须运行离线 recommendation eval、`cargo test` 和 `cargo clippy --all-targets -- -D warnings`。重要版本还必须使用隔离的 `ISSUE_FINDER_HOME` 跑固定 6 组真实 profile，并由执行者直接读取 top candidates 的 issue 正文和评论评估价值。真实运行结果不作为 CI 强制测试，但应沉淀到 `docs/recommendation-evals/`，并将代表性失败样本补回离线 fixtures。
-
-不要提交 GitHub token、临时 `ISSUE_FINDER_HOME`、真实运行缓存、生成的用户状态或目标工作区改动。
-
-## 提交与拉取请求指南
-
-近期历史使用简短的祈使句摘要，有时带常规前缀，例如 `Fix daily failure handling and workspace branch checks` 或 `docs: add Issue Finder Rust design`。保持提交聚焦；有帮助时在摘要中提到受影响的工作流。拉取请求应包含简洁描述、已运行的测试、关联议题；只有当生成的 Markdown 或报告相关时才需要截图。
-
-## 安全与配置提示
-
-不要提交令牌、`.env` 文件、生成的 Issue Finder 状态或目标工作区改动。GitHub 和大模型凭据应放在环境变量或 `~/.issue-finder/config.toml` 中。保持项目的保守边界：Issue Finder 可以准备本地工作区并写入交接产物，但不应修改目标仓库源码、安装依赖、提交、推送或创建拉取请求。`issue-finder.prepare` 的默认 gate 只允许高价值类别；不要在 workflow、daily 或 tool adapter 中复制 gate 规则，应复用 `prepare_gate.rs`。
+Use plain language over jargon, and reference technical details only to the degree that it helps illustrate an idea or your work to the user. Communicate complex concepts in a clear and cohesive manner, and calibrate your writing to the level of background knowledge assumed from the user's prompt and context.

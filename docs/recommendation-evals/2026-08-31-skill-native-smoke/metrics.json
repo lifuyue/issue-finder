@@ -1,0 +1,15 @@
+{
+  "scope": "single_repository_read_only_smoke",
+  "date": "2026-08-31",
+  "repository": "rust-lang/cargo",
+  "scanLimit": 5,
+  "requestedLimit": 2,
+  "scanned": 5,
+  "visible": 1,
+  "rejected": 4,
+  "warnings": 0,
+  "pythonTestsPassed": 22,
+  "coarseFilterFixtures": 11,
+  "fixedSixProfileEvaluationRun": false,
+  "realIssueImplementationRun": false
+}

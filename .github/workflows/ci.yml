@@ -15,6 +15,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  skill:
+    name: Standalone skill checks
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.9', '3.13']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test skill with mocked GitHub and temporary Git repositories
+        run: python3 -m unittest discover -s tests -p 'test_skill_native.py' -v
+
   rust:
     name: Rust checks
     runs-on: macos-latest

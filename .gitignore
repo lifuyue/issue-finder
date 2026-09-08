@@ -10,6 +10,9 @@
 /target/
 /dist/
 /build/
+__pycache__/
+*.py[cod]
+.issue-finder-task.json
 
 # Editor and OS noise
 .DS_Store
