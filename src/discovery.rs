@@ -4,6 +4,7 @@ use std::fmt;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::config::ProfileConfig;
@@ -48,6 +49,7 @@ impl DiscoveryScope {
                 discovery_stages: Vec::new(),
                 stage_errors: Vec::new(),
                 fallback_exhausted: false,
+                search: None,
             },
             Self::Repository { repository } => DiscoveryDiagnostics {
                 scope: "repository".to_string(),
@@ -55,6 +57,7 @@ impl DiscoveryScope {
                 discovery_stages: Vec::new(),
                 stage_errors: Vec::new(),
                 fallback_exhausted: false,
+                search: None,
             },
         }
     }
@@ -147,6 +150,184 @@ impl fmt::Display for RepositoryScope {
 
 const REPOSITORY_SCOPE_ERROR: &str = "expected owner/repo or https://github.com/owner/repo";
 
+/// A bounded GitHub search chosen by the current agent. GitHub's ordering selects
+/// the candidate pool; the recommendation engine still owns the final ranking.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct SearchOptions {
+    pub query: String,
+    pub sort: SearchSort,
+    pub order: SearchOrder,
+    pub page: usize,
+    pub per_page: usize,
+    pub max_pages: usize,
+    pub api_budget: usize,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            sort: SearchSort::Updated,
+            order: SearchOrder::Desc,
+            page: 1,
+            per_page: 30,
+            max_pages: 2,
+            api_budget: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSort {
+    BestMatch,
+    Created,
+    Updated,
+    Comments,
+}
+
+impl SearchSort {
+    pub fn as_api_value(self) -> Option<&'static str> {
+        match self {
+            Self::BestMatch => None,
+            Self::Created => Some("created"),
+            Self::Updated => Some("updated"),
+            Self::Comments => Some("comments"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchOrder {
+    Asc,
+    Desc,
+}
+
+impl SearchOrder {
+    pub fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+
+impl SearchOptions {
+    pub fn validate(&self, scope: &DiscoveryScope) -> Result<()> {
+        if self.query.len() > 1024 || self.query.chars().any(char::is_control) {
+            anyhow::bail!(
+                "search query must be at most 1024 bytes and contain no control characters"
+            );
+        }
+        if !(1..=100).contains(&self.per_page)
+            || self.page == 0
+            || self.page > 1000 / self.per_page
+            || !(1..=10).contains(&self.max_pages)
+        {
+            anyhow::bail!("search requires perPage 1..100, maxPages 1..10, and a page within GitHub's first 1000 results");
+        }
+        if !(1..=1200).contains(&self.api_budget) {
+            anyhow::bail!("search apiBudget must be between 1 and 1200 requests");
+        }
+        for token in self.query.split_whitespace() {
+            let token = token.trim_matches(['(', ')']).to_ascii_lowercase();
+            let Some((qualifier, value)) = token.split_once(':') else {
+                continue;
+            };
+            let value = value.trim_matches('"');
+            if matches!(
+                (qualifier, value),
+                ("is", "closed" | "pr" | "pull-request" | "merged" | "locked")
+                    | ("state", "closed" | "all")
+                    | ("type", "pr" | "pull-request")
+                    | ("-is", "open" | "issue")
+                    | ("archived", "true")
+                    | ("-archived", "false")
+                    | ("-no", "assignee")
+            ) || (qualifier == "assignee" && value != "none")
+            {
+                anyhow::bail!(
+                    "search query conflicts with open, unassigned, unlocked issue discovery in active repositories: {token}"
+                );
+            }
+            if let DiscoveryScope::Repository { repository } = scope {
+                let matches_scope = value.eq_ignore_ascii_case(&repository.full_name());
+                if (qualifier == "repo" && !matches_scope)
+                    || (qualifier == "-repo" && matches_scope)
+                {
+                    anyhow::bail!(
+                        "search repo qualifier must match repository scope {}",
+                        repository.full_name()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn effective_query(&self, scope: &DiscoveryScope) -> Result<String> {
+        self.validate(scope)?;
+        let mut query = format!(
+            "is:issue is:open archived:false no:assignee {}",
+            self.query.trim()
+        );
+        if let DiscoveryScope::Repository { repository } = scope {
+            query.push_str(&format!(" repo:{}", repository.full_name()));
+        }
+        Ok(query.trim_end().to_string())
+    }
+
+    pub(crate) fn page_cache_key(
+        &self,
+        scope: &DiscoveryScope,
+        profile: &ProfileConfig,
+        page: usize,
+    ) -> Result<String> {
+        let identity = serde_json::to_vec(&(
+            self.effective_query(scope)?,
+            self.sort,
+            self.order,
+            self.per_page,
+            page,
+            profile,
+        ))?;
+        Ok(format!("agent-search-v1-{:x}", Sha256::digest(identity)))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchDiagnostics {
+    pub effective_query: String,
+    pub sort: SearchSort,
+    pub order: SearchOrder,
+    pub start_page: usize,
+    pub per_page: usize,
+    pub max_pages: usize,
+    pub pages_scanned: usize,
+    pub total_count: Option<usize>,
+    pub next_page: Option<usize>,
+    pub incomplete_results: bool,
+    pub scan_limit_reached: bool,
+    pub assessed_count: usize,
+    pub unassessed_count: usize,
+    pub enrichment_limit: usize,
+    pub evidence_incomplete: bool,
+    pub diagnostic_candidates: Vec<SearchDiagnosticCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchDiagnosticCandidate {
+    pub issue_reference: String,
+    pub url: String,
+    pub title: String,
+    pub body_excerpt: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveryDiagnostics {
@@ -156,6 +337,8 @@ pub struct DiscoveryDiagnostics {
     pub discovery_stages: Vec<DiscoveryStageStats>,
     pub stage_errors: Vec<String>,
     pub fallback_exhausted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchDiagnostics>,
 }
 
 impl DiscoveryDiagnostics {
@@ -163,6 +346,9 @@ impl DiscoveryDiagnostics {
         self.discovery_stages.append(&mut other.discovery_stages);
         self.stage_errors.append(&mut other.stage_errors);
         self.fallback_exhausted |= other.fallback_exhausted;
+        if other.search.is_some() {
+            self.search = other.search;
+        }
     }
 
     pub fn mark_ranked_and_visible(

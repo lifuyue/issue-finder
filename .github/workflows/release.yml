@@ -41,6 +41,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal
@@ -97,12 +99,23 @@ jobs:
           esac
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_tag.outputs.tag }}
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
+
+      - name: Package skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf dist/issue-finder-skills.tar.gz -C skills issue-finder-cli issue-finder
 
       - name: Generate checksums
         shell: bash
@@ -121,4 +134,5 @@ jobs:
             dist/issue-finder-aarch64-apple-darwin.tar.gz
             dist/issue-finder-x86_64-unknown-linux-gnu.tar.gz
             dist/issue-finder-x86_64-pc-windows-msvc.zip
+            dist/issue-finder-skills.tar.gz
             dist/SHA256SUMS

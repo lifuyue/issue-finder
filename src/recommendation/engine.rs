@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
@@ -9,7 +10,7 @@ use crate::config::Config;
 use crate::config::ProfileConfig;
 use crate::discovery::{
     select_enrichment_candidates, sort_candidates, DiscoveryCandidate, DiscoveryDiagnostics,
-    DiscoveryOutput, DiscoveryScope, RepositoryScope,
+    DiscoveryOutput, DiscoveryScope, RepositoryScope, SearchOptions,
 };
 use crate::github::{GitHubClient, GitHubIssue};
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
@@ -222,6 +223,95 @@ impl<'a> RecommendationEngine<'a> {
             filtered_count: run.filtered_count,
             diagnostics: run.diagnostics,
             api_budget: api_budget.report(),
+        })
+    }
+
+    /// Search the agent's chosen candidate pool, then use the same assessments,
+    /// feedback, evidence completion and display policy as the regular scout.
+    pub async fn scout_search(
+        &self,
+        limit: usize,
+        refresh: bool,
+        options: ScoutOptions,
+        scope: DiscoveryScope,
+        search: &SearchOptions,
+    ) -> Result<ScoutResult> {
+        search.validate(&scope)?;
+        if !(1..=100).contains(&limit) {
+            anyhow::bail!("search result limit must be between 1 and 100");
+        }
+        self.paths.ensure_layout()?;
+        let configured_budget = GitHubApiBudget::from_env().report().total_budget;
+        let api_budget = GitHubApiBudget::with_total_budget(Some(
+            configured_budget.map_or(search.api_budget, |limit| limit.min(search.api_budget)),
+        ));
+        let github = GitHubClient::with_budget(self.config, api_budget.clone())?;
+        let enrichment = GitHubEnrichmentClient::with_budget(self.config, api_budget.clone())?;
+        let output = github
+            .search_candidates(self.paths, refresh, &self.config.profile, &scope, search)
+            .await?;
+        let mut diagnostics = output.diagnostics;
+        let discovery_count = output.candidates.len();
+        let display_mode = match &scope {
+            DiscoveryScope::Global => DisplayMode::Global,
+            DiscoveryScope::Repository { .. } => DisplayMode::Repository,
+        };
+        let (mut ranked, mut discovery_by_key) = self
+            .rank_discovered_candidates(
+                &enrichment,
+                output.candidates,
+                limit,
+                refresh,
+                display_mode,
+            )
+            .await;
+        let completion_statuses = self
+            .complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
+            .await;
+        self.apply_feed_ranking(&mut ranked);
+        append_discovery_reasons(&mut ranked, &mut discovery_by_key);
+        competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
+        if let Some(details) = &mut diagnostics.search {
+            details.assessed_count = ranked.len();
+            details.unassessed_count = discovery_count.saturating_sub(ranked.len());
+            details.enrichment_limit = ENRICHED_SCOUT_CANDIDATE_LIMIT;
+            details.evidence_incomplete = details.unassessed_count > 0
+                || ranked.iter().any(|item| {
+                    !item.enriched_issue.warnings.is_empty()
+                        || competition_timeline_missing(&item.enriched_issue)
+                });
+        }
+        let assessed_keys = ranked
+            .iter()
+            .map(|item| candidate_key(&item.issue))
+            .collect::<HashSet<_>>();
+        discovery_by_key.retain(|key, _| assessed_keys.contains(key));
+        let filtered_count = ranked
+            .iter()
+            .filter(|item| !displayable(item, options.include_filtered))
+            .count();
+        let ranked = competition_completion::select_display_candidates(
+            ranked,
+            limit,
+            options.include_filtered,
+            display_mode.completed_per_repo_limit(limit),
+        );
+        annotate_diagnostics(&mut diagnostics, &discovery_by_key, &ranked);
+        let report = api_budget.report();
+        if !report.budget_exhausted.is_empty() {
+            diagnostics.stage_errors.push(
+                "GitHub API request budget exhausted; candidate evidence may be incomplete. Refine the query or increase apiBudget for a subsequent call.".to_string(),
+            );
+        }
+        if options.record_exposure {
+            self.record_exposure(&ranked, options.source, &scope)?;
+        }
+        Ok(ScoutResult {
+            ranked,
+            discovery_count,
+            filtered_count,
+            diagnostics,
+            api_budget: report,
         })
     }
 
@@ -1095,12 +1185,9 @@ fn scout_result_cache_key(
     limit: usize,
     include_filtered: bool,
 ) -> String {
-    format!(
-        "{}__limit-{limit}__filtered-{include_filtered}__tech-{}__keywords-{}",
-        scope.cache_fragment(),
-        profile.tech_stack.join("+"),
-        profile.keywords.join("+")
-    )
+    let identity = serde_json::to_vec(&(scope, profile, limit, include_filtered))
+        .expect("scout cache identity contains only serializable values");
+    format!("scout-v2-{:x}", Sha256::digest(identity))
 }
 
 pub fn select_display_candidates(

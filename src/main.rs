@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use issue_finder::cli::{
     Cli, Command, FeedbackCommand, InboxCommand, McpProfile, MemoryDreamsCommand,
-    MemoryHintsCommand, ProfileCommand, ToolsCommand,
+    MemoryHintsCommand, ProfileCommand, ToolsCommand, ToolsProfile,
 };
 use issue_finder::config::{initialize_interactive, Config};
 use issue_finder::dispatch::{handle_agents_cli, handle_dispatch_cli};
@@ -24,12 +24,13 @@ use issue_finder::recommendation::{
 use issue_finder::tool_runtime::{
     default_call_id, IssueFinderToolOutput, IssueFinderToolRuntime, WorkerCapability,
 };
-use issue_finder::tool_specs::{list_tool_specs, ToolProfile};
+use issue_finder::tool_specs::{list_tool_specs_for_profile, ToolProfile};
 use issue_finder::workflow;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
@@ -411,53 +412,62 @@ async fn main() -> Result<()> {
                 );
             }
         },
-        Command::Tools(args) => match args.command {
-            ToolsCommand::List => {
-                println!("{}", serde_json::to_string(&list_tool_specs())?);
-            }
-            ToolsCommand::Call(args) => {
-                let call_id = args.call_id.unwrap_or_else(default_call_id);
-                let invocation = issue_finder::tool_adapters::json::parse_invocation(
-                    args.tool.clone(),
-                    &args.arguments,
-                    call_id.clone(),
-                    args.turn_id.clone(),
-                );
-                let output = match invocation {
-                    Ok(invocation) => match Config::load_or_default(&paths) {
-                        Ok(config) => {
-                            IssueFinderToolRuntime::new(paths.clone(), config)
-                                .execute(invocation)
-                                .await
-                        }
-                        Err(error) if args.tool == "issue-finder.status" => {
-                            IssueFinderToolRuntime::new_with_config_load_error(
-                                paths.clone(),
-                                Config::default(),
-                                Some(error.to_string()),
-                            )
-                            .execute(invocation)
-                            .await
-                        }
+        Command::Tools(args) => {
+            let profile = match args.profile {
+                ToolsProfile::Session => ToolProfile::Session,
+                ToolsProfile::Control => ToolProfile::Control,
+            };
+            let runtime = |config| match profile {
+                ToolProfile::Session => IssueFinderToolRuntime::session(paths.clone(), config),
+                _ => IssueFinderToolRuntime::new(paths.clone(), config),
+            };
+            match args.command {
+                ToolsCommand::List => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&list_tool_specs_for_profile(profile))?
+                    );
+                }
+                ToolsCommand::Call(args) => {
+                    let call_id = args.call_id.unwrap_or_else(default_call_id);
+                    let invocation = issue_finder::tool_adapters::json::parse_invocation(
+                        args.tool.clone(),
+                        &args.arguments,
+                        call_id.clone(),
+                        args.turn_id.clone(),
+                    );
+                    let output = match invocation {
+                        Ok(invocation) => match Config::load_or_default(&paths) {
+                            Ok(config) => runtime(config).execute(invocation).await,
+                            Err(error) if args.tool == "issue-finder.status" => {
+                                runtime(Config::default())
+                                    .with_config_load_error(error.to_string())
+                                    .execute(invocation)
+                                    .await
+                            }
+                            Err(error) => IssueFinderToolOutput::failure(
+                                call_id,
+                                args.turn_id,
+                                args.tool,
+                                "system_error",
+                                error.to_string(),
+                            ),
+                        },
                         Err(error) => IssueFinderToolOutput::failure(
                             call_id,
                             args.turn_id,
                             args.tool,
-                            "system_error",
-                            error.to_string(),
+                            "invalid_arguments",
+                            error,
                         ),
-                    },
-                    Err(error) => IssueFinderToolOutput::failure(
-                        call_id,
-                        args.turn_id,
-                        args.tool,
-                        "invalid_arguments",
-                        error,
-                    ),
-                };
-                println!("{}", serde_json::to_string(&output)?);
+                    };
+                    println!("{}", serde_json::to_string(&output)?);
+                    if profile == ToolProfile::Session && !output.success {
+                        std::process::exit(1);
+                    }
+                }
             }
-        },
+        }
         Command::Mcp(args) => {
             let config = Config::load_or_default(&paths)?;
             let (runtime, profile) = match args.profile {

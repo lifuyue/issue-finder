@@ -13,6 +13,7 @@
 __pycache__/
 *.py[cod]
 .issue-finder-task.json
+.issue-finder-cli-task.json
 
 # Editor and OS noise
 .DS_Store

@@ -1,12 +1,17 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 
+mod session;
+
 pub const TOOL_SCOUT: &str = "issue-finder.scout";
 pub const TOOL_ASSESS: &str = "issue-finder.assess";
 pub const TOOL_PREPARE: &str = "issue-finder.prepare";
 pub const TOOL_READ_CONTEXT: &str = "issue-finder.read_context";
 pub const TOOL_SUBMIT_RESULT: &str = "issue-finder.submit_result";
 pub const TOOL_STATUS: &str = "issue-finder.status";
+pub const TOOL_TASK_STATUS: &str = "issue-finder.task_status";
+pub const TOOL_FINISH: &str = "issue-finder.finish";
+pub const TOOL_FEEDBACK: &str = "issue-finder.feedback";
 pub const TOOL_MEMORY_STATUS: &str = "issue-finder.memory_status";
 pub const TOOL_MEMORY_RECALL: &str = "issue-finder.memory_recall";
 pub const TOOL_MEMORY_DREAMS_LIST: &str = "issue-finder.memory_dreams_list";
@@ -33,6 +38,8 @@ pub use crate::dispatch::tool_specs::{
 pub struct IssueFinderToolSpecsEnvelope {
     pub kind: String,
     pub version: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_contract_version: Option<u8>,
     pub quick_start: ToolQuickStart,
     pub recommended_workflow: Vec<ToolWorkflowStep>,
     pub tools: Vec<IssueFinderToolSpec>,
@@ -80,6 +87,7 @@ pub struct IssueFinderToolSpec {
 pub enum ToolProfile {
     Control,
     Worker,
+    Session,
 }
 
 pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
@@ -162,6 +170,7 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
     IssueFinderToolSpecsEnvelope {
         kind: "issue_finder_tool_specs".to_string(),
         version: 1,
+        session_contract_version: None,
         quick_start: quick_start(),
         recommended_workflow: recommended_workflow(),
         tools,
@@ -169,6 +178,9 @@ pub fn list_tool_specs() -> IssueFinderToolSpecsEnvelope {
 }
 
 pub fn list_tool_specs_for_profile(profile: ToolProfile) -> IssueFinderToolSpecsEnvelope {
+    if profile == ToolProfile::Session {
+        return session::list_session_specs();
+    }
     let mut envelope = list_tool_specs();
     if profile == ToolProfile::Worker {
         envelope.quick_start.summary =

@@ -1,5 +1,93 @@
 # Issue Finder Skill Integration
 
+The repository provides two independent skills. Both keep user interaction,
+implementation, and validation in the current Work agent session.
+
+| Mode | Entry | Runtime | Discovery and state |
+| --- | --- | --- | --- |
+| CLI + skill | `issue-finder-cli` | Installed Rust CLI, Git, GitHub credentials | CLI recommendation engine, bounded GitHub search tools, CLI state and task results |
+| Standalone skill | `issue-finder` | Python 3.9+, Git, authenticated `gh` | Independent coarse filtering and one workspace task JSON |
+
+Neither mode starts dispatch, another Codex process, or project approval objects.
+The skills do not call each other or switch implementations on failure.
+
+## CLI skill
+
+The package is [`skills/issue-finder-cli/`](../skills/issue-finder-cli/):
+
+```text
+skills/issue-finder-cli/
+  SKILL.md
+  agents/openai.yaml
+  references/install.md
+  references/tools.md
+```
+
+Add this repository as a Codex project and invoke
+`skills/issue-finder-cli/SKILL.md` explicitly, or follow the
+[root README](../README.md#cli--skill) to register it in `.agents/skills` for
+picker discovery. User-wide installation uses `~/.agents/skills/issue-finder-cli`.
+Copy the entire directory so references remain available. The package can run
+outside its source checkout after copying; its dependency is the installed CLI.
+
+The CLI skill is explicitly invoked (`allow_implicit_invocation: false`) to
+avoid competing with the independent skill for the same request. Supported
+local discovery locations, symlink behavior, and this metadata field are defined
+in the [official Codex skill documentation](https://learn.chatgpt.com/docs/build-skills).
+
+### Prerequisites and first use
+
+The skill checks `issue-finder --version` and
+`issue-finder tools --profile session list`, requiring `sessionContractVersion: 1`
+and its seven tools. If absent or incompatible, it prompts for the latest
+compatible official stable CLI installation in the agent's execution environment.
+A local desktop installation does not supply a remote/cloud runtime. The
+[published release channel](https://github.com/lifuyue/issue-finder/releases/latest)
+and Cargo installation are described in the bundled
+[installation reference](../skills/issue-finder-cli/references/install.md).
+A stable package may lag this checkout: source installation is an explicit
+alternative, never a silent `cargo run` fallback.
+
+Session authentication resolves `GITHUB_TOKEN`, configured token, then a bounded,
+captured `gh auth token --hostname github.com` lookup. It never prints or saves
+the fallback token. Missing configuration is valid: defaults and per-call
+`profile` settings suffice. `init`, profile bootstrap, optional LLM configuration,
+and MCP registration are unnecessary for this path.
+
+### One agent, structured tools
+
+```text
+status -> scout -> assess -> prepare
+                            -> current agent implements and reviews
+                            -> finish -> current agent reports
+                   task_status resumes an existing workspace
+                   feedback records read/dismiss/restore
+```
+
+Use `issue-finder tools --profile session call issue-finder.TOOL --arguments JSON`.
+See [current-session tool examples](./usage.md#current-session-tools). The catalog
+is the authoritative argument schema. GitHub query, sort, pagination, and API
+budget are explicit inputs; returned warnings and evidence qualify the ranking.
+API search order controls retrieval, while the CLI separately ranks contribution
+candidates. The agent decides which issue to pursue from its body and discussion.
+
+An explicit issue skips discovery. Recommendation-only and assessment-only
+requests never prepare a workspace. A prepare-only request stops before edits.
+For implementation, prepare refreshes evidence and uses the shared prepare gate;
+the current session receives a workspace/task rather than a dispatch package.
+Continue using `task_status` with the absolute workspace. Finish executes the
+explicit check argument arrays selected by the agent and verifies task identity
+and changes against its base. A failed check remains recoverable; the agent fixes
+and retries. A passing finish records execution evidence, not semantic proof that
+the patch fixes the issue.
+
+The current agent follows user authorization, target repository instructions,
+and host permissions. Commit, push, PRs, and public comments are outside these
+CLI tools and need user authorization. Generated task metadata must not enter
+contribution commits.
+
+## Standalone skill
+
 The installable product skill lives at
 [`skills/issue-finder/SKILL.md`](../skills/issue-finder/SKILL.md). Its whole package is:
 
@@ -10,7 +98,7 @@ skills/issue-finder/
   agents/openai.yaml
 ```
 
-Use the [root README installation instructions](../README.md#codex-skill-install-and-use)
+Use the [root README installation instructions](../README.md#standalone-skill)
 to copy or symlink this directory into `~/.agents/skills/issue-finder`, or copy it
 into a target repository's `.agents/skills/issue-finder`. Copying only `SKILL.md`
 is insufficient: the workflow needs its bundled script. The package is standalone
@@ -21,8 +109,7 @@ It does not call the Rust CLI or read `~/.issue-finder`.
 
 The current Codex session owns semantic selection, feasibility review, code edits,
 debugging, final diff review, and reporting. The helper owns only deterministic
-GitHub reads, workspace operations, checks, and result collection. There is one
-skill, three commands, and at most one temporary task JSON per prepared workspace.
+GitHub reads, workspace operations, checks, and result collection. This independent package has three commands, and at most one temporary task JSON per prepared workspace.
 No MCP, plugin runtime, dispatch database, handoff pack, nested Codex, or project
 approval objects are involved. The optional `openai.yaml` contains UI metadata only.
 
@@ -106,13 +193,12 @@ The skill introduces no intermediate approvals, but cannot grant filesystem or
 network access. Respect target `AGENTS.md`, host permissions, and user stopping
 points. A recommendation-only invocation does not prepare or modify a workspace.
 
-## Migration and validation scope
+## Validation scope
 
-This integration implements the standalone skill path. The existing Rust runtime
-is retained as a comparison baseline, not an adapter or fallback. Removing the
-old dispatch/memory/MCP/handoff runtime is a later migration step after real-world
-workflow and quality comparisons; it is not a prerequisite for installing this
-skill. Rust CLI architecture documents describe that separate implementation.
+The two skills are separately supported modes. The standalone helper does not
+reuse CLI search, state, or result handling. CLI architecture documents describe
+its recommendation engine and the separate handoff/dispatch workflows; dispatch
+is not a prerequisite for either current-session skill.
 
 Offline tests use mocked GitHub responses and temporary real Git repositories:
 
@@ -126,14 +212,15 @@ They do not replace or change the Rust recommendation datasets. Automated checks
 cover discovery filtering, paginated competition, clean/dirty/cached workspace
 preparation, safe paths, validation retries, and task-file exclusion. Live six-profile
 comparison and Codex end-to-end quality evaluation are separate evidence; passing
-these tests does not establish that parity or warrant deleting the Rust baseline.
+these tests does not establish that parity or imply parity between the two modes.
 The [initial read-only smoke report](./recommendation-evals/2026-08-31-skill-native-smoke/report.md)
 records observed GitHub behavior, the failures turned into fixtures, and its limits.
 
-## Existing Rust CLI generated context (not the installable skill)
+## Handoff generated context (not an installable entry skill)
 
-The Rust CLI still writes a per-item context entry for its handoff workflow.
-Do not install these generated files in place of the stable package above.
+The CLI writes a per-item context entry for its separate handoff workflow.
+Do not install these generated files in place of either stable package above.
+The session tool profile does not use this handoff entry as its workflow skill.
 
 Each prepared item includes:
 

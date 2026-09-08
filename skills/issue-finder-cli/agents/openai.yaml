@@ -1,0 +1,6 @@
+interface:
+  display_name: "Issue Finder CLI"
+  short_description: "Find and complete issues with CLI tools in this session"
+  default_prompt: "Use $issue-finder-cli to find and complete one suitable GitHub issue in the current session."
+policy:
+  allow_implicit_invocation: false

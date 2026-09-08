@@ -60,6 +60,81 @@ async fn enrichment_cache_is_used_unless_refresh_is_passed() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn changed_issue_evidence_invalidates_recent_aggregate_and_source_caches() {
+    let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
+    let (base_url, handle) = start_enrichment_server();
+    let dir = tempdir().unwrap();
+    let paths = test_paths(dir.path());
+    paths.ensure_layout().unwrap();
+    let config = test_config();
+    let original = issue();
+    let enriched = GitHubEnrichmentClient::with_api_base(&config, base_url)
+        .unwrap()
+        .enrich_issue(&paths, &original, true)
+        .await;
+    handle.join().unwrap();
+    assert!(!enriched.comments.is_empty());
+    assert!(!competition_timeline_missing(&enriched));
+    assert!(enriched.warnings.is_empty());
+
+    let cache_path = paths.enrichment_cache_path(&original.repo_full_name, original.number);
+    let cached_snapshot = std::fs::read(&cache_path).unwrap();
+    // An older search-page cache must not overwrite newer issue evidence.
+    let mut older_search_item = original.clone();
+    older_search_item.updated_at = (Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    older_search_item.body = "Old reproduction from a cached search page".to_string();
+    let current = GitHubEnrichmentClient::with_api_base_and_budget(
+        &config,
+        "http://127.0.0.1:9",
+        GitHubApiBudget::with_total_budget(Some(0)),
+    )
+    .unwrap()
+    .enrich_issue(&paths, &older_search_item, false)
+    .await;
+    assert_eq!(current.issue.body, original.body);
+    assert_eq!(current.comments, enriched.comments);
+    assert!(current.warnings.is_empty());
+    let mut body_changed = original.clone();
+    body_changed.body = "Updated reproduction: parser also fails for empty input".to_string();
+    let mut title_changed = original.clone();
+    title_changed.title = "Parser rejects empty input".to_string();
+    let mut discussion_changed = original.clone();
+    discussion_changed.updated_at = (Utc::now() + chrono::Duration::seconds(1)).to_rfc3339();
+
+    for current in [body_changed, title_changed, discussion_changed] {
+        // Keep the aggregate and per-source snapshots recent. A zero budget proves that
+        // stale source caches cannot silently restore old comments or competition confidence.
+        std::fs::write(&cache_path, &cached_snapshot).unwrap();
+        let budget = GitHubApiBudget::with_total_budget(Some(0));
+        let refreshed = GitHubEnrichmentClient::with_api_base_and_budget(
+            &config,
+            "http://127.0.0.1:9",
+            budget.clone(),
+        )
+        .unwrap()
+        .enrich_issue(&paths, &current, false)
+        .await;
+
+        assert_eq!(refreshed.issue.title, current.title);
+        assert_eq!(refreshed.issue.body, current.body);
+        assert_eq!(refreshed.issue.updated_at, current.updated_at);
+        assert!(refreshed.comments.is_empty());
+        assert_ne!(refreshed.repository.forks, enriched.repository.forks);
+        assert!(competition_timeline_missing(&refreshed));
+        assert!(refreshed
+            .competition
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("GitHub API budget exhausted")));
+        assert!(!assess_issue(&refreshed, &config.profile)
+            .missing_evidence
+            .is_empty());
+        assert_eq!(budget.report().total_network_requests, 0);
+        assert!(budget.report().cache_hits.is_empty());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn stale_enrichment_cache_refreshes_from_network() {
     let _test_lock = ENRICHMENT_TEST_LOCK.lock().await;
     let (base_url, handle) = start_enrichment_server();

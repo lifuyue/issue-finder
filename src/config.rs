@@ -1,5 +1,7 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -31,6 +33,7 @@ pub struct ResolvedGitHubToken {
 pub enum GitHubTokenSource {
     EnvGithubToken,
     Config,
+    GitHubCli,
     Missing,
 }
 
@@ -39,6 +42,7 @@ impl GitHubTokenSource {
         match self {
             Self::EnvGithubToken => "env:GITHUB_TOKEN",
             Self::Config => "config",
+            Self::GitHubCli => "gh",
             Self::Missing => "missing",
         }
     }
@@ -68,7 +72,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             github: GitHubConfig {
-                token: std::env::var("GITHUB_TOKEN").unwrap_or_default(),
+                token: String::new(),
                 username: String::new(),
             },
             profile: ProfileConfig {
@@ -145,6 +149,61 @@ impl Config {
             source: GitHubTokenSource::Missing,
         }
     }
+
+    /// Session tools can reuse the current host's GitHub CLI login without
+    /// copying its secret into configuration or exposing subprocess output.
+    pub fn resolved_session_github_token(&self) -> ResolvedGitHubToken {
+        let resolved = self.resolved_github_token();
+        if resolved.source != GitHubTokenSource::Missing {
+            return resolved;
+        }
+
+        github_cli_token()
+            .map(|token| ResolvedGitHubToken {
+                token,
+                source: GitHubTokenSource::GitHubCli,
+            })
+            .unwrap_or(resolved)
+    }
+}
+
+fn github_cli_token() -> Option<String> {
+    let mut child = Command::new("gh")
+        .args(["auth", "token", "--hostname", "github.com"])
+        .env("GH_PROMPT_DISABLED", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return None,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+
+    let mut output = String::new();
+    child
+        .stdout
+        .take()?
+        .take(16_385)
+        .read_to_string(&mut output)
+        .ok()?;
+    let token = output.trim();
+    if token.is_empty() || output.len() > 16_384 || token.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(token.to_string())
 }
 
 pub fn initialize_interactive(paths: &IssueFinderPaths, force: bool) -> Result<Config> {
@@ -159,7 +218,10 @@ pub fn initialize_interactive(paths: &IssueFinderPaths, force: bool) -> Result<C
     let mut config = Config::default();
 
     println!("Issue Finder config: {}", paths.config.display());
-    config.github.token = prompt("GitHub token", &config.github.token)?;
+    config.github.token = prompt(
+        "GitHub token (optional; GITHUB_TOKEN is read at runtime)",
+        "",
+    )?;
     config.github.username = prompt("GitHub username (optional)", &config.github.username)?;
     config.profile.tech_stack = prompt_list("Tech stack", &config.profile.tech_stack)?;
     config.profile.keywords = prompt_list("Profile keywords", &config.profile.keywords)?;

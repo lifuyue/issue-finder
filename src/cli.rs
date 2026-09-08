@@ -422,8 +422,17 @@ pub struct MemoryEvalArgs {
 
 #[derive(Debug, Args)]
 pub struct ToolsArgs {
+    /// Tool surface: current-session agent workflow or dispatch control plane.
+    #[arg(long, value_enum, default_value_t = ToolsProfile::Control, global = true)]
+    pub profile: ToolsProfile,
     #[command(subcommand)]
     pub command: ToolsCommand,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ToolsProfile {
+    Session,
+    Control,
 }
 
 #[derive(Debug, Subcommand)]
@@ -439,7 +448,7 @@ pub struct ToolsCallArgs {
     /// Tool name, for example issue-finder.scout.
     pub tool: String,
     /// Tool arguments as a JSON object.
-    #[arg(long)]
+    #[arg(long, default_value = "{}")]
     pub arguments: String,
     /// Tool call id to echo in the output envelope.
     #[arg(long)]

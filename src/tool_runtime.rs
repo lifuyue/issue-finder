@@ -4,6 +4,8 @@ use chrono::Utc;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod session;
+
 use crate::config::{Config, GitHubTokenSource};
 use crate::context_snapshot::StoredContextSnapshot;
 use crate::dispatch::tools::{execute_dispatch_tool, is_dispatch_tool, DispatchToolError};
@@ -226,6 +228,18 @@ impl IssueFinderToolOutput {
 }
 
 impl IssueFinderToolRuntime {
+    pub fn session(paths: IssueFinderPaths, config: Config) -> Self {
+        Self {
+            profile: ToolProfile::Session,
+            ..Self::new(paths, config)
+        }
+    }
+
+    pub fn with_config_load_error(mut self, error: String) -> Self {
+        self.config_load_error = Some(error);
+        self
+    }
+
     pub fn new(paths: IssueFinderPaths, config: Config) -> Self {
         Self {
             paths,
@@ -281,25 +295,29 @@ impl IssueFinderToolRuntime {
             );
         }
 
-        let result = match invocation.tool_name.as_str() {
-            TOOL_STATUS => self.call_status(&invocation).await,
-            TOOL_SCOUT => self.call_scout(&invocation).await,
-            TOOL_ASSESS => self.call_assess(&invocation).await,
-            TOOL_PREPARE => self.call_prepare(&invocation).await,
-            TOOL_READ_CONTEXT => self.call_read_context(&invocation),
-            TOOL_SUBMIT_RESULT => self.call_submit_result(&invocation),
-            TOOL_MEMORY_STATUS => self.call_memory_status(&invocation),
-            TOOL_MEMORY_RECALL => self.call_memory_recall(&invocation),
-            TOOL_MEMORY_DREAMS_LIST => self.call_memory_dreams_list(&invocation),
-            TOOL_MEMORY_DREAM_SHOW => self.call_memory_dream_show(&invocation),
-            TOOL_MEMORY_HINTS_LIST => self.call_memory_hints_list(&invocation),
-            TOOL_MEMORY_HINT_UPDATE => self.call_memory_hint_update(&invocation),
-            TOOL_MEMORY_TOMBSTONE => self.call_memory_tombstone(&invocation),
-            tool_name if is_dispatch_tool(tool_name) => self.call_dispatch_tool(&invocation),
-            _ => Err(RuntimeFailure::InvalidArguments(format!(
-                "unknown Issue Finder tool {}",
-                invocation.tool_name
-            ))),
+        let result = if self.profile == ToolProfile::Session {
+            self.call_session_tool(&invocation).await
+        } else {
+            match invocation.tool_name.as_str() {
+                TOOL_STATUS => self.call_status(&invocation).await,
+                TOOL_SCOUT => self.call_scout(&invocation).await,
+                TOOL_ASSESS => self.call_assess(&invocation).await,
+                TOOL_PREPARE => self.call_prepare(&invocation).await,
+                TOOL_READ_CONTEXT => self.call_read_context(&invocation),
+                TOOL_SUBMIT_RESULT => self.call_submit_result(&invocation),
+                TOOL_MEMORY_STATUS => self.call_memory_status(&invocation),
+                TOOL_MEMORY_RECALL => self.call_memory_recall(&invocation),
+                TOOL_MEMORY_DREAMS_LIST => self.call_memory_dreams_list(&invocation),
+                TOOL_MEMORY_DREAM_SHOW => self.call_memory_dream_show(&invocation),
+                TOOL_MEMORY_HINTS_LIST => self.call_memory_hints_list(&invocation),
+                TOOL_MEMORY_HINT_UPDATE => self.call_memory_hint_update(&invocation),
+                TOOL_MEMORY_TOMBSTONE => self.call_memory_tombstone(&invocation),
+                tool_name if is_dispatch_tool(tool_name) => self.call_dispatch_tool(&invocation),
+                _ => Err(RuntimeFailure::InvalidArguments(format!(
+                    "unknown Issue Finder tool {}",
+                    invocation.tool_name
+                ))),
+            }
         };
 
         match result {
@@ -325,6 +343,16 @@ impl IssueFinderToolRuntime {
         match self.profile {
             ToolProfile::Control => tool_name != TOOL_SUBMIT_RESULT,
             ToolProfile::Worker => matches!(tool_name, TOOL_READ_CONTEXT | TOOL_SUBMIT_RESULT),
+            ToolProfile::Session => matches!(
+                tool_name,
+                TOOL_STATUS
+                    | TOOL_SCOUT
+                    | TOOL_ASSESS
+                    | TOOL_PREPARE
+                    | crate::tool_specs::TOOL_TASK_STATUS
+                    | crate::tool_specs::TOOL_FINISH
+                    | crate::tool_specs::TOOL_FEEDBACK
+            ),
         }
     }
 

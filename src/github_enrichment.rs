@@ -259,8 +259,23 @@ impl GitHubEnrichmentClient {
         refresh: bool,
         include_competition_timeline: bool,
     ) -> EnrichedIssue {
+        let cached = load_cached_enrichment(paths, issue).ok().flatten();
+        let refresh = refresh
+            || cached.as_ref().is_some_and(|cached| {
+                if let (Ok(incoming), Ok(existing)) = (
+                    DateTime::parse_from_rfc3339(&issue.updated_at),
+                    DateTime::parse_from_rfc3339(&cached.issue.updated_at),
+                ) {
+                    if incoming < existing {
+                        return false;
+                    }
+                }
+                cached.issue.updated_at != issue.updated_at
+                    || cached.issue.title != issue.title
+                    || cached.issue.body != issue.body
+            });
         if !refresh {
-            if let Ok(Some(mut cached)) = load_cached_enrichment(paths, issue) {
+            if let Some(mut cached) = cached {
                 if !include_competition_timeline || !competition_timeline_missing(&cached) {
                     canonicalize_enriched_issue_repo(&mut cached);
                     return cached;

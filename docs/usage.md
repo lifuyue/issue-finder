@@ -1,12 +1,118 @@
 # Issue Finder Usage Guide
 
-Issue Finder is a local-first task preparation tool for developers who use coding agents. The root README stays short; this guide keeps the operational details for installing, configuring, and running the CLI.
+Issue Finder exposes current-session tools for a Work agent and separate terminal,
+handoff, and dispatch workflows. The CLI skill is the primary agent integration;
+its installed catalog defines the callable schemas.
 
-This guide describes the current implementation. The complete Codex workflow, supervisor, worker
-tool surface, evaluator loop, and module ownership are defined in
-[Agent Loop Architecture](./agent-loop-target-architecture.md).
+## Current-session tools
 
-## Workflow
+Use [`skills/issue-finder-cli/SKILL.md`](../skills/issue-finder-cli/SKILL.md)
+in the current Codex project. The agent handles all user interaction and code
+work; the CLI provides structured operations without starting another agent.
+
+```bash
+issue-finder tools --profile session list
+issue-finder tools --profile session call issue-finder.status --arguments '{"checkAuth":true}'
+```
+
+Require `sessionContractVersion: 1`. Missing configuration is accepted. Session
+credentials resolve from `GITHUB_TOKEN`, then optional `[github].token`, then
+captured GitHub CLI authentication. `gh` is optional when another credential
+source is available. Run `gh auth login` if needed; do not expose its token in
+tool output or persist it merely to initialize Issue Finder. The current agent
+passes user interests directly rather than driving `init` or scanning unrelated
+conversation history.
+
+Keep the resolved `profile` returned by scout and pass it to every subsequent
+assess and prepare call, including additional comment pages. Preferences override
+only one invocation; omitting them restores configured defaults.
+
+| Step | Tool | Key arguments |
+| --- | --- | --- |
+| Readiness | `issue-finder.status` | `checkAuth` |
+| Discovery | `issue-finder.scout` | `repo`, `limit`, `search`, `profile`, `refresh`, `recordExposure` |
+| Evidence | `issue-finder.assess` | `issue` or `url`, `commentsPage`, `commentsPerPage`, `profile` |
+| Preparation | `issue-finder.prepare` | `issue` or `url`, `checkout`, `workspaceRoot`, `profile` |
+| Continuation | `issue-finder.task_status` | `workspace` |
+| Validation/result | `issue-finder.finish` | `workspace`, `checks`, `checkTimeoutSeconds`, `summary` |
+| Feedback | `issue-finder.feedback` | `issue`, `action`: `read`, `dismiss`, or `restore` |
+
+Start broad interest-based discovery with the curated recommendation feed:
+
+```bash
+issue-finder tools --profile session call issue-finder.scout --arguments '{"limit":8,"profile":{"techStack":["Rust"],"keywords":["cli"]}}'
+```
+
+For a bounded, explicitly controlled GitHub search:
+
+```bash
+issue-finder tools --profile session call issue-finder.scout --arguments '{"repo":"owner/repo","limit":8,"search":{"query":"label:bug","sort":"updated","order":"desc","page":1,"perPage":30,"maxPages":2,"apiBudget":120},"profile":{"techStack":["Rust"],"keywords":["cli"]}}'
+```
+
+Omit `repo` for cross-repository discovery. Omit `search` for the curated feed;
+an explicit global search should include relevant query terms/qualifiers. A
+supplied `repo` is a hard boundary,
+including when a query contains conflicting scope qualifiers. `search.sort`
+accepts `updated`, `created`, `comments`, or `best_match`; `order` is `asc` or
+`desc`. GitHub sorting decides which candidates are retrieved, then Issue Finder
+ranks those candidates using its recommendation engine. `page`, `perPage`,
+`maxPages`, and `apiBudget` bound the work. Inspect returned search, filter,
+pagination, budget, and warning information before expanding a search. An API
+failure or an incomplete search is not an empty-candidate conclusion.
+
+Assessment reads an issue and a bounded discussion page without preparing files:
+
+```bash
+issue-finder tools --profile session call issue-finder.assess --arguments '{"issue":"owner/repo#123","commentsPage":1,"commentsPerPage":30,"profile":{"techStack":["Rust"],"keywords":["cli"]}}'
+```
+
+The agent reads bodies and relevant discussion rather than selecting only by
+score. Follow discussion pagination when necessary. A supplied issue skips
+discovery; recommendation-only requests stop before preparation.
+
+If search returns no usable recommendation, inspect its bounded
+`diagnostics.search.diagnosticCandidates` when present. These are retrieved
+issues excluded from recommendations, with reasons/evidence for investigation.
+Assess a plausible entry to resolve an evidence gap; do not present this pool
+as a recommended shortlist.
+
+```bash
+issue-finder tools --profile session call issue-finder.prepare --arguments '{"issue":"owner/repo#123","profile":{"techStack":["Rust"],"keywords":["cli"]}}'
+issue-finder tools --profile session call issue-finder.task_status --arguments '{"workspace":"/absolute/workspace"}'
+```
+
+`checkout` may name a verified matching local checkout; `workspaceRoot` selects
+a contribution directory. Paths must be absolute. Do not assume the Issue Finder
+project itself is the contribution target. Prepare refreshes GitHub evidence and
+reuses the shared value gate before creating the workspace task. Read gate
+outcomes and preserve existing work. A returned workspace/task does not require
+a handoff import, dispatch run, or approval object.
+
+After the current agent implements and reviews the change, finish with checks
+chosen from the target repository:
+
+```bash
+issue-finder tools --profile session call issue-finder.finish --arguments '{"workspace":"/absolute/workspace","checks":[["cargo","test"],["cargo","clippy","--all-targets","--","-D","warnings"]],"checkTimeoutSeconds":600,"summary":"Describe the fix."}'
+```
+
+Checks are executable/argument arrays run without a shell. This is explicit check
+execution; no checks are inferred or run during preparation. Finish verifies task
+identity and actual changes, records outcomes, and leaves failed validation
+recoverable for a fix and retry. The agent reviews the final diff and reports
+what was actually verified. Passing commands do not establish semantic
+correctness. Generated `.issue-finder-cli-task.json` metadata must not be committed.
+
+Parse JSON `success`, `status`, warnings, and errors on every call. A successful
+call can return a business stop such as a blocked gate; it is not a completed
+workflow step. Do not replace failed finish with `inbox done` or a dispatch
+result. `tools --profile session` deliberately omits worker/supervisor tools.
+The unqualified `tools list` catalog remains the separate control profile.
+
+The following sections describe the terminal and handoff/dispatch paths. Their
+approval model applies to dispatch, not to this current-session workflow. Module
+ownership for dispatch is documented in [Agent Loop Architecture](./agent-loop-target-architecture.md).
+
+## Handoff and dispatch workflow
 
 ```text
 Discover good first issues
@@ -30,9 +136,9 @@ Discover good first issues
 
 ## Requirements
 
-- Rust toolchain and Cargo
-- Git
-- GitHub Personal Access Token with read access for discovery
+- An installed Issue Finder binary and Git
+- GitHub credentials with read access for discovery
+- Rust 1.89+ and Cargo only when installing/building from source
 
 Optional:
 
@@ -46,11 +152,18 @@ Optional:
 Install the published crate:
 
 ```bash
-cargo install issue-finder
+cargo install issue-finder --locked
 issue-finder --help
 ```
 
-When working from this checkout, use Cargo directly:
+Prebuilt platform archives and SHA-256 checksums are available from the
+[official stable release channel](https://github.com/lifuyue/issue-finder/releases/latest).
+For the CLI skill, verify `sessionContractVersion: 1` in the session catalog after
+installation. If the published stable release does not yet support it, explicitly
+install this checkout with `cargo install --path . --locked`; the skill does not
+silently fall back to source commands.
+
+For CLI development from this checkout, use Cargo directly:
 
 ```bash
 cargo run -- --help
@@ -60,17 +173,18 @@ cargo run -- --help
 
 Issue Finder uses the GitHub REST API to discover issues and read repository metadata. Discovery, assessment, preparation, and local dispatch state only need read access.
 
-You can enter a token during `issue-finder init`, or provide one through the environment:
-
-```bash
-export GITHUB_TOKEN="$(gh auth token)"
-```
+`GITHUB_TOKEN` takes precedence over `[github].token` in configuration. Session
+tools additionally reuse the host's `gh` authentication automatically, without
+printing or saving its secret. Terminal and control-profile operations use the
+environment/configuration sources. Provide their token through your environment
+or secret manager, or enter one during optional `issue-finder init`.
+Inherited environment tokens are not displayed or copied into saved defaults.
 
 GitHub write permission is optional. It is used only by `issue-finder dispatch github post <interaction-id>` after a local interaction policy decision creates a draft and a human approves the `github_post` approval request.
 
 ## Common Commands
 
-Initialize local configuration and directories:
+Optionally initialize local configuration and directories for terminal workflows:
 
 ```bash
 issue-finder init
@@ -88,7 +202,7 @@ Check local readiness:
 issue-finder doctor
 ```
 
-Check JSON tool readiness before an agent calls discovery or prepare:
+Check the separate control-profile JSON tools for a handoff/dispatch integration:
 
 ```bash
 issue-finder tools list
@@ -242,7 +356,8 @@ outcome semantics, hard gates, and canonical 50-task catalog are defined in
 | `issue-finder init` | Create local config and Issue Finder state directories |
 | `issue-finder profile bootstrap --json` | Scan supported local Agent indexes and project manifests, then print a profile bootstrap report |
 | `issue-finder doctor` | Check Git, GitHub auth, config, directory permissions, platform, and optional LLM status |
-| `issue-finder tools list` | Print the current Issue Finder JSON tool catalog |
+| `issue-finder tools --profile session list` | Print current-session tools and `sessionContractVersion` |
+| `issue-finder tools list` | Print the separate control-profile JSON tool catalog |
 | `issue-finder tools call issue-finder.status --arguments '{}'` | Return JSON config, token source, and GitHub auth diagnostics without printing tokens |
 | `issue-finder scout --limit 10` | Discover and rank good-first-issue candidates |
 | `issue-finder scout --repo owner/repo --limit 10` | Discover and rank candidates strictly within one repository |
@@ -321,6 +436,10 @@ Issue Finder stores local state under `~/.issue-finder` by default:
 ~/.issue-finder/
   config.toml
   state.sqlite3
+  sessions/
+    <task-id>/
+      task.json
+      result.json
   cache/
     github-issues.json
     discovery/
@@ -361,6 +480,16 @@ Issue Finder stores local state under `~/.issue-finder` by default:
   reports/
     YYYY-MM-DD.md
 ```
+
+`sessions/<task-id>` stores canonical current-session task and result data. The
+workspace copy `.issue-finder-cli-task.json` must match the recorded task;
+`task_status` checks identity and reports `in_progress` when current changes differ
+from the last result; `lastResult` remains available as historical evidence. Keep
+the same `ISSUE_FINDER_HOME` when resuming or finishing. Conflicting prepare/finish
+calls return an operation-busy error that can be retried after the active call
+finishes. OS locks release when a process exits; their files can remain in place.
+If completion feedback could not be saved, `feedbackRecorded` is false with a
+warning; retrying finish reconciles feedback without repeating unchanged checks.
 
 `state.sqlite3` stores contribution memory tables. `dispatch/dispatch.sqlite3` is the unified source for dispatch, native threads/turns/items/events/outbox, approvals, A2A mappings, and GitHub projection; dispatch artifacts live under `dispatch/artifacts/`.
 
@@ -461,9 +590,17 @@ Runtime topic docs:
 - [Skills and context pack](./skills.md)
 - [Superpowers design archive](./superpowers/README.md)
 
-## Safety Boundary
+## Execution boundaries
 
-Issue Finder is intentionally conservative.
+The current-session profile reads GitHub, prepares workspaces, records task data,
+and runs only the explicit check argument arrays submitted to `finish`. The
+current agent owns source edits and chooses checks from reviewed repository
+instructions and code. Host permissions and target repository rules apply;
+checks can execute project code and are not sandboxed by the CLI. These tools do
+not install dependencies, commit, push, open PRs, or publish GitHub comments.
+
+The following boundaries describe handoff preparation and the separate dispatch
+control plane.
 
 Allowed:
 
@@ -475,7 +612,7 @@ Allowed:
 - Write Issue Finder state under `~/.issue-finder` or `ISSUE_FINDER_HOME`
 - After explicit local approvals, start or resume a native execution-agent session, approve outbound A2A artifacts, or post a drafted GitHub comment
 
-Not allowed for the Issue Finder process itself:
+Not performed by handoff preparation:
 
 - Modify target repository source
 - Automatically run target repository validation commands
@@ -485,8 +622,11 @@ Not allowed for the Issue Finder process itself:
 - Create pull requests
 - Reset, clean, or delete workspaces
 
-Issue Finder writes suggested validation commands into the handoff package but does not run them automatically.
-Validation, build, lint, install, network-heavy, and project-defined script commands are classified as requiring approval or forbidden for downstream agents.
+Handoff preparation writes suggested validation commands into the handoff
+package without running them. Its downstream policy classifies validation,
+build, lint, install, network-heavy, and project-defined scripts for dispatch
+approval. This policy does not introduce a second approval workflow into the
+current-session skill.
 # External evaluation contract
 
 Evaluation harnesses should negotiate capabilities before running:

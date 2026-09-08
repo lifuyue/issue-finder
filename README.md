@@ -4,137 +4,131 @@
   <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center">
-  <strong>Issue Finder</strong> helps you find and complete worthwhile GitHub issues. This repository includes a standalone Codex skill that runs discovery, workspace preparation, implementation, and validation in your current session.
-</p>
+Issue Finder helps coding agents find and complete worthwhile GitHub issues.
+The current agent handles the conversation, selects the issue, implements the
+change, validates it, and reports the result.
 
----
+## CLI + skill
 
-## Codex skill: install and use
+The primary CLI integration is
+[`skills/issue-finder-cli/SKILL.md`](./skills/issue-finder-cli/SKILL.md). Its
+current-session tool profile exposes discovery, GitHub search controls,
+assessment, workspace preparation, continuation, validation, and feedback.
+It needs no MCP server, dispatch setup, second agent session, or interactive
+Issue Finder configuration.
 
-The repository ships a complete, installable skill at
-[`skills/issue-finder/SKILL.md`](./skills/issue-finder/SKILL.md), with its helper
-script and Codex UI metadata alongside it. **This is the repository's direct
-skill integration:** install or link that folder into a Codex skill directory,
-then invoke `$issue-finder`. It needs no Rust binary, MCP server, plugin, second
-Codex session, or Issue Finder approval workflow.
+Add this checkout as a Codex project and invoke the source skill directly:
 
-Prerequisites: Python 3.9+, Git, [GitHub CLI](https://cli.github.com/), and Codex
-with local skill support. Authenticate GitHub once:
-
-```bash
-gh auth login
-gh auth setup-git
+```text
+Use skills/issue-finder-cli/SKILL.md to recommend five Rust CLI issues.
+Use skills/issue-finder-cli/SKILL.md to find and complete one issue in owner/repo.
 ```
 
-From a checkout of **this repository**, install the whole folder for your user:
+To make it available in the skill picker, link the source package from the
+project root:
 
 ```bash
-mkdir -p "$HOME/.agents/skills"
-cp -R skills/issue-finder "$HOME/.agents/skills/issue-finder"
+mkdir -p .agents/skills
+ln -s ../../skills/issue-finder-cli .agents/skills/issue-finder-cli
 ```
 
-Use this copy command for a fresh installation; if the destination already
-exists, update the existing installation deliberately instead of nesting another
-copy. For development, use an absolute symlink instead of copying:
+If the destination already exists, inspect and update the existing installation
+instead of nesting or overwriting it. Alternatively, copy the whole
+`skills/issue-finder-cli` directory to `~/.agents/skills/issue-finder-cli` for all
+projects. Choose one discovery scope to avoid duplicates. Codex supports these
+repository/user locations and symlinked folders; `skills/` itself is a source
+package location, not an automatic discovery directory.
+[Official skill discovery documentation](https://learn.chatgpt.com/docs/build-skills#where-to-save-skills)
+
+Then invoke the skill in Codex:
+
+```text
+$issue-finder-cli Recommend five issues matching my Rust and developer-tools interests.
+$issue-finder-cli Find and complete one suitable issue in owner/repo.
+$issue-finder-cli Complete https://github.com/owner/repo/issues/123.
+$issue-finder-cli Continue the task in /absolute/path/to/workspace.
+```
+
+Git and a compatible `issue-finder` binary must be available in the agent's
+execution environment. Install the published crate with Cargo:
 
 ```bash
-ln -s "$PWD/skills/issue-finder" "$HOME/.agents/skills/issue-finder"
+cargo install issue-finder --locked
 ```
 
-Alternatively, integrate it into just one target repository by copying the same
-folder to `<target-repo>/.agents/skills/issue-finder/`. Choose one scope to avoid
-duplicate skills. The source `skills/` folder is a distributable package, not an
-automatic discovery location. These user/repository paths and symlinks follow
-the [official Codex skill discovery documentation](https://developers.openai.com/codex/skills/#where-to-save-skills).
-If the skill does not appear, restart Codex.
-
-Optionally choose a persistent contribution directory:
+Prebuilt binaries and checksums are available from the
+[official stable releases](https://github.com/lifuyue/issue-finder/releases/latest).
+The skill checks the installed capabilities and provides installation/update
+guidance if the CLI is missing or incompatible. Before a compatible stable
+release is published, explicitly install this checkout with
+`cargo install --path . --locked`. Package version alone does not establish
+compatibility; the catalog must include `sessionContractVersion: 1`:
 
 ```bash
-export ISSUE_FINDER_WORKSPACE_ROOT="$HOME/Code/contributions"
+issue-finder tools --profile session list
+issue-finder tools --profile session call issue-finder.status --arguments '{"checkAuth":true}'
 ```
 
-This is also the default. Keep it outside existing repositories and make sure
-your Codex host permits writes there and GitHub network access. Installation
-does not grant sandbox permissions or install project dependencies.
+Session tools use `GITHUB_TOKEN`, optional configured credentials, or the current
+host's authenticated `gh` login. No `init` is required. If needed, authenticate
+once with `gh auth login`; use `gh auth setup-git` for private clone/fetch access.
+CLI state defaults to `~/.issue-finder`; `ISSUE_FINDER_HOME` selects an isolated
+state directory.
 
-Examples in Codex:
+GitHub search sort, query, pagination, and API budget are explicit tool inputs.
+The CLI ranks the retrieved candidates; the agent reads their issue evidence
+and chooses work that fits the request. Recommendation-only requests stop before
+workspace preparation. All user interaction stays in the current agent session.
+See [skill integration](./docs/skills.md) and the
+[CLI session usage guide](./docs/usage.md#current-session-tools) for the contracts
+and recovery flow.
+
+## Standalone skill
+
+[`skills/issue-finder/SKILL.md`](./skills/issue-finder/SKILL.md) remains an
+independent alternative. Install or link that whole directory into
+`~/.agents/skills/issue-finder` or a target repository's `.agents/skills/issue-finder`,
+then invoke `$issue-finder`. It requires Python 3.9+, Git, and authenticated `gh`.
+Its bundled Python helper implements `scout`, `prepare`, and `finish`; it does
+not depend on the Rust CLI, read CLI state, or fall back to it.
 
 ```text
 $issue-finder Find and complete one suitable issue in owner/repo.
-$issue-finder Complete https://github.com/owner/repo/issues/123.
 $issue-finder Recommend five issues in this repository; do not clone or edit.
-$issue-finder Continue the prepared task in /absolute/path/to/workspace.
 ```
 
-The current session selects and reviews the issue, implements it, and validates
-the result. The bundled script provides only `scout`, `prepare`, and `finish`.
-Normal operation has no extra candidate, plan, or review confirmation; user scope,
-target repository instructions, and host permissions still apply. Commit, push,
-PR creation, and GitHub comments require user authorization and are never done
-by the helper. See [skill integration and behavior](./docs/skills.md) for command
-examples, recovery, and limitations.
+Its search uses a smaller, coarse filter rather than the CLI recommendation
+engine. Both skills let the current agent implement and validate; choose the
+skill explicitly and keep its workflow for that task. See
+[standalone behavior and commands](./docs/skills.md#standalone-skill).
 
-## Existing Rust CLI
+## Other CLI workflows
 
-The Rust CLI remains available as the existing handoff/dispatch implementation
-and a migration comparison baseline. It is not a dependency or fallback for the
-standalone skill; the following commands and architecture docs describe the CLI.
-
-### Installing and running Issue Finder
-
-```bash
-cargo install issue-finder
-```
-
-Configure GitHub access and check local readiness:
-
-```bash
-export GITHUB_TOKEN="$(gh auth token)"
-issue-finder init
-issue-finder doctor
-```
-
-Find candidates and prepare a handoff:
-
-```bash
-issue-finder scout --limit 10
-issue-finder scout --repo owner/repo --limit 10
-issue-finder prepare owner/repo#123
-issue-finder handoff <inbox-id> --print
-```
-
-Issue Finder writes local state under `~/.issue-finder` by default. Use `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` for isolated runs.
-
-### Dispatch and tools
-
-Issue Finder includes an approval-gated dispatch control plane for native agent sessions, A2A task artifacts, and GitHub comment projection. Start with the [usage guide](./docs/usage.md) for the current command flow.
-
-Issue Finder also exposes a JSON tool contract for coding agents:
-
-```bash
-issue-finder tools list
-```
+The CLI also includes terminal commands, handoff generation, contribution
+memory, JSON/MCP adapters, and a separate dispatch control plane. Dispatch
+manages native agent sessions and its own approvals; the current-session skill
+does not invoke it. See the [usage guide](./docs/usage.md).
 
 ## Docs
 
-- [**Bundled Issue Finder skill**](./skills/issue-finder/SKILL.md)
-- [**Skill installation, integration, and behavior**](./docs/skills.md)
-- [**Usage guide**](./docs/usage.md)
-- [**Agent loop architecture**](./docs/agent-loop-target-architecture.md)
-- [**Agent-safe preparation runtime**](./docs/agent-safe-preparation-runtime.md)
-- [**Safe probes**](./docs/safe-probes.md)
-- [**Historical design archive**](./docs/superpowers/README.md)
-- [**Repository guidance for coding agents**](./AGENTS.md)
+- [CLI skill](./skills/issue-finder-cli/SKILL.md)
+- [Standalone skill](./skills/issue-finder/SKILL.md)
+- [Skill installation and behavior](./docs/skills.md)
+- [CLI usage](./docs/usage.md)
+- [Dispatch agent loop architecture](./docs/agent-loop-target-architecture.md)
+- [Handoff preparation runtime](./docs/agent-safe-preparation-runtime.md)
+- [Historical design archive](./docs/superpowers/README.md)
+- [Repository guide](./AGENTS.md)
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_skill_native.py' -v
+cargo build
 cargo test
 cargo clippy --all-targets -- -D warnings
-cargo fmt --all
+cargo fmt --all -- --check
+python3 -m unittest discover -s tests -p 'test_skill_native.py' -v
 ```
 
-This repository is licensed under the [MIT License](./LICENSE).
+For isolated CLI runs, set `ISSUE_FINDER_HOME=/tmp/issue-finder-demo`.
+The repository is licensed under the [MIT License](./LICENSE).

@@ -12,11 +12,15 @@ use crate::config::{Config, ProfileConfig};
 use crate::discovery::{
     gfi_repositories, merge_candidates, overlay_repositories, profile_trusted_repositories,
     DiscoveryCandidate, DiscoveryOutput, DiscoveryScope, DiscoveryStageStats, RepoTrustTier,
-    RepositoryScope, TrustedRepository,
+    RepositoryScope, SearchDiagnosticCandidate, SearchDiagnostics, SearchOptions,
+    TrustedRepository,
 };
 use crate::errors::IssueFinderError;
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
 use crate::paths::{atomic_write, IssueFinderPaths};
+
+mod issue_context;
+pub use issue_context::{IssueComment, IssueContext};
 
 const SEARCH_CACHE_TTL_MINUTES: i64 = 180;
 const FALLBACK_DISCOVERY_CACHE_TTL_MINUTES: i64 = 360;
@@ -152,6 +156,19 @@ struct DiscoveryCachePayload {
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
     items: Vec<SearchIssue>,
+    #[serde(default)]
+    total_count: Option<usize>,
+    #[serde(default)]
+    incomplete_results: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SearchPageCache {
+    fetched_at: DateTime<Utc>,
+    candidates: Vec<DiscoveryCandidate>,
+    returned: usize,
+    total_count: Option<usize>,
+    incomplete_results: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,6 +186,8 @@ struct SearchIssue {
     assignees: Option<Vec<serde_json::Value>>,
     created_at: String,
     updated_at: String,
+    #[serde(default)]
+    state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,6 +275,221 @@ impl GitHubClient {
 
     pub fn request_stats(&self) -> GitHubApiBudgetReport {
         self.budget.report()
+    }
+
+    pub async fn search_candidates(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        profile: &ProfileConfig,
+        scope: &DiscoveryScope,
+        search: &SearchOptions,
+    ) -> Result<DiscoveryOutput> {
+        let effective_query = search.effective_query(scope)?;
+        paths.ensure_layout()?;
+        let source = match scope {
+            DiscoveryScope::Global => GitHubRequestSource::DiscoveryGlobal,
+            DiscoveryScope::Repository { .. } => GitHubRequestSource::DiscoveryRepository,
+        };
+        let mut diagnostics = scope.diagnostics();
+        let mut details = SearchDiagnostics {
+            effective_query: effective_query.clone(),
+            sort: search.sort,
+            order: search.order,
+            start_page: search.page,
+            per_page: search.per_page,
+            max_pages: search.max_pages,
+            pages_scanned: 0,
+            total_count: None,
+            next_page: None,
+            incomplete_results: false,
+            scan_limit_reached: false,
+            assessed_count: 0,
+            unassessed_count: 0,
+            enrichment_limit: 0,
+            evidence_incomplete: false,
+            diagnostic_candidates: Vec::new(),
+        };
+        let mut candidates = Vec::new();
+        let last_page = (search.page + search.max_pages - 1).min(1000 / search.per_page);
+        for page in search.page..=last_page {
+            let lane = format!("agent_search:page:{page}");
+            let cache_key = search.page_cache_key(scope, profile, page)?;
+            let cache_path = paths.discovery_cache_path(source.as_str(), &cache_key);
+            let cached = if refresh {
+                None
+            } else {
+                fs::read(&cache_path)
+                    .ok()
+                    .and_then(|raw| serde_json::from_slice::<SearchPageCache>(&raw).ok())
+                    .filter(|cached| {
+                        Utc::now() - cached.fetched_at < Duration::minutes(SEARCH_CACHE_TTL_MINUTES)
+                    })
+            };
+            let output = if let Some(cached) = cached {
+                self.budget.record_cache_hit(source);
+                cached
+            } else {
+                if page > search.page {
+                    tokio::time::sleep(self.fallback_global_search_spacing()).await;
+                }
+                match self
+                    .search_agent_page(scope, search, profile, &effective_query, page, source)
+                    .await
+                {
+                    Ok(output) => {
+                        // Incomplete responses remain useful for this call, but must not
+                        // replace a complete cached search page.
+                        if !output.incomplete_results {
+                            atomic_write(&cache_path, serde_json::to_vec(&output)?)?;
+                        }
+                        output
+                    }
+                    Err(error) => {
+                        diagnostics.stage_errors.push(format!("{lane}: {error}"));
+                        details.next_page = Some(page);
+                        break;
+                    }
+                }
+            };
+            details.pages_scanned += 1;
+            details.total_count = output.total_count.or(details.total_count);
+            details.incomplete_results |= output.incomplete_results;
+            if output.incomplete_results {
+                diagnostics.stage_errors.push(format!(
+                    "{lane}: GitHub returned incomplete search results; refine the query or retry with refresh"
+                ));
+            }
+            diagnostics.discovery_stages.push(DiscoveryStageStats::new(
+                "agent_search",
+                &lane,
+                search.per_page,
+                output.returned,
+                output.candidates.len(),
+            ));
+            candidates.extend(output.candidates);
+            let has_more = output.returned == search.per_page
+                && output
+                    .total_count
+                    .is_none_or(|count| page * search.per_page < count);
+            details.next_page = has_more.then_some(page + 1);
+            if !has_more {
+                break;
+            }
+            if page == last_page {
+                details.scan_limit_reached = true;
+                if (page + 1) * search.per_page > 1000 {
+                    details.next_page = None;
+                    diagnostics.stage_errors.push(
+                        "GitHub exposes at most 1000 search results; narrow the query to continue"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        let candidates = merge_candidates(candidates, profile);
+        details.unassessed_count = candidates.len();
+        details.evidence_incomplete = !candidates.is_empty();
+        details.diagnostic_candidates = candidates
+            .iter()
+            .take(20)
+            .map(|candidate| SearchDiagnosticCandidate {
+                issue_reference: candidate.key(),
+                url: candidate.issue.url.clone(),
+                title: candidate.issue.title.clone(),
+                body_excerpt: candidate.issue.body.chars().take(600).collect(),
+                reason: "Retrieved from search; this entry is not a recommendation. Read issue context and assessment before selecting.".to_string(),
+            })
+            .collect();
+        diagnostics.search = Some(details);
+        Ok(DiscoveryOutput {
+            candidates,
+            diagnostics,
+        })
+    }
+
+    async fn search_agent_page(
+        &self,
+        scope: &DiscoveryScope,
+        search: &SearchOptions,
+        profile: &ProfileConfig,
+        query: &str,
+        page: usize,
+        source: GitHubRequestSource,
+    ) -> Result<SearchPageCache> {
+        self.record_request(source, format!("agent_search:page:{page}"))?;
+        let mut parameters = vec![
+            ("q", query.to_string()),
+            ("order", search.order.as_api_value().to_string()),
+            ("per_page", search.per_page.to_string()),
+            ("page", page.to_string()),
+        ];
+        if let Some(sort) = search.sort.as_api_value() {
+            parameters.push(("sort", sort.to_string()));
+        }
+        let response = self
+            .authorized(self.http.get(self.api_url("/search/issues")))
+            .query(&parameters)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await?;
+        let response = require_success(response).await?;
+        let payload = response.json::<SearchResponse>().await?;
+        let returned = payload.items.len();
+        let lane = format!("agent_search:page:{page}");
+        let candidates = payload
+            .items
+            .into_iter()
+            .filter_map(|item| {
+                if item.state.as_deref().is_some_and(|state| state != "open")
+                    || !should_include_issue(
+                        item.pull_request.is_some(),
+                        item.locked,
+                        item.assignee.is_some(),
+                        item.assignees
+                            .as_ref()
+                            .is_some_and(|assignees| !assignees.is_empty()),
+                        &item.labels,
+                    )
+                {
+                    return None;
+                }
+                let (owner, repo) = parse_repo_api_url(&item.repository_url).ok()?;
+                let repo_full_name = format!("{owner}/{repo}");
+                if let DiscoveryScope::Repository { repository } = scope {
+                    if !repo_full_name.eq_ignore_ascii_case(&repository.full_name()) {
+                        return None;
+                    }
+                }
+                let issue = GitHubIssue {
+                    id: item.id,
+                    number: item.number,
+                    title: item.title,
+                    body: item.body.unwrap_or_default(),
+                    labels: extract_label_names(&item.labels),
+                    url: item.html_url,
+                    repo_full_name,
+                    repo_name: repo,
+                    repo_description: String::new(),
+                    repo_stars: 0,
+                    created_at: item.created_at,
+                    updated_at: item.updated_at,
+                };
+                Some(DiscoveryCandidate::new(
+                    issue,
+                    &lane,
+                    RepoTrustTier::Global,
+                    profile,
+                ))
+            })
+            .collect();
+        Ok(SearchPageCache {
+            fetched_at: Utc::now(),
+            candidates,
+            returned,
+            total_count: payload.total_count,
+            incomplete_results: payload.incomplete_results,
+        })
     }
 
     pub async fn discover_issues(

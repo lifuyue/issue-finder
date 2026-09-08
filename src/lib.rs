@@ -33,6 +33,7 @@ pub mod recovery_eval;
 pub mod repo_scan;
 pub mod report;
 pub mod scoring;
+pub mod session;
 pub mod tool_adapters;
 pub mod tool_context;
 pub mod tool_outputs;
