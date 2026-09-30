@@ -147,6 +147,12 @@ Optional:
 - OpenAI-compatible API key, used only when optional LLM summaries are enabled
 - Codex CLI with `app-server`, required only for native Codex thread dispatch. Set `ISSUE_FINDER_CODEX_BIN` to override discovery; otherwise Issue Finder validates the PATH binary and, on macOS, can discover the Codex binary bundled with ChatGPT.app. The default daemon transport additionally requires the installer-managed standalone Codex under `CODEX_HOME/packages/standalone/current/codex`; the bundled binary alone is sufficient only for the explicitly selected stdio fallback.
 
+The CLI verifies HTTPS certificates against bundled public roots and the system's
+trusted CA store. For an HTTPS proxy or a private endpoint, install its CA through
+the operating system's trust settings. On Linux, `SSL_CERT_FILE` and
+`SSL_CERT_DIR` can select a custom CA bundle or certificate directory. Certificate
+verification remains enabled for GitHub and optional LLM requests.
+
 ## Installation
 
 Install the published crate:
