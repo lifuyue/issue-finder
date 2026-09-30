@@ -1,69 +1,77 @@
-# Current-session CLI tool mapping
+# Codex discovery and assessment tools
 
-Negotiate the installed catalog with `issue-finder tools --profile session list`.
-Call tools with `issue-finder tools --profile session call NAME --arguments JSON`.
-Use proper shell quoting or the host's structured process arguments for JSON;
-never interpolate issue content into executable shell text.
+`issue-finder tools list` defaults to the session profile. Negotiate
+`sessionContractVersion: 2`; only the following business tools are exposed.
+`issue-finder tools --profile session list` is the explicit equivalent. MCP also
+defaults to this profile. The separate legacy control catalog requires
+`--profile control`; it is outside this skill's Codex contract.
 
-| Agent step | Tool | Purpose |
+Call with `issue-finder tools call NAME --arguments JSON`. Quote JSON safely or
+use structured process arguments; never interpolate issue text into shell code.
+
+| Tool | Purpose | Arguments |
 | --- | --- | --- |
-| Prerequisites | `issue-finder.status` | Configuration and authentication diagnostics without token values |
-| Discover | `issue-finder.scout` | Bounded GitHub search, candidate enrichment, and contribution ranking |
-| Review | `issue-finder.assess` | One issue and paginated discussion without preparing a workspace |
-| Start work | `issue-finder.prepare` | Fresh assessment and workspace/task preparation |
-| Continue | `issue-finder.task_status` | Reopen a task by absolute workspace and check identity |
-| Validate and record | `issue-finder.finish` | Explicit check execution and task/result validation |
-| Feedback | `issue-finder.feedback` | Record read, dismiss, or restore for an issue |
+| `issue-finder.scout` | Discover, filter, and rank candidates | `repo`, `limit`, `search`, `profile`, `refresh`, `includeFiltered`, `recordExposure` |
+| `issue-finder.assess` | Read one issue, discussion, competition, and repository evidence | `issue` or `url`, `commentsPage`, `commentsPerPage`, `profile`, `refresh`, `recordRead` |
 
-`scout.search` separates retrieval from ranking: `query`, `sort`, `order`, `page`,
-`perPage`, `maxPages`, and `apiBudget` bound the GitHub work. `scout.profile` and
-`assess.profile` take `techStack` and `keywords` without changing saved preferences.
-Carry the resolved scout response's `profile` into every assess and prepare call;
-omitting it reverts that invocation to configured defaults.
-An empty profile override is not necessarily neutral. Inspect and disclose the
-resolved defaults rather than attributing them to the user.
-Search ordering is not the final ranking. Preserve explicit repository scope and
-read warnings, incomplete evidence, and budget details before expanding search.
+The installed catalog is the source of truth for argument bounds and defaults.
+`issue` uses `owner/repo#123`; `url` uses a GitHub issue URL. Supply one selector.
+These calls neither prepare a workspace nor run target-project checks or publish
+GitHub changes.
 
-`assess` accepts `commentsPage` and `commentsPerPage`; request further pages only
-when their discussion is relevant to selection or implementation. `prepare`
-rechecks fresh issue state so an earlier cached recommendation cannot authorize
-work on a changed or competing issue.
-Neither its score nor a successful gate replaces reading relevant comments and
-checking for unlinked competing PRs and current-code feasibility.
+## Discovery parameters
 
-`prepare.checkout`, `prepare.workspaceRoot`, `task_status.workspace`, and
-`finish.workspace` are absolute filesystem paths. Use returned paths rather than
-guessing workspace naming. The agent owns code edits; the CLI owns generated
-task/result data. Never edit task metadata to force a successful finish.
+`scout.search` accepts `query`, `sort`, `order`, `page`, `perPage`, `maxPages`, and
+`apiBudget`. Omitting it selects the curated recommendation feed. An explicit
+search is bounded GitHub retrieval followed by Issue Finder ranking. `sort` is
+`updated`, `created`, `comments`, or `best_match`; `order` is `asc` or `desc`.
+The explicit `repo` scope cannot be redirected by query qualifiers.
 
-`status` checks read/authentication readiness, not the full fork/push/PR chain.
-`finish` records local changes and checks; it does not create or track a PR,
-certify upstream CI, or establish that a contribution has merged. The current
-agent owns authorized GitHub publication and reports those outcomes separately.
-See [GitHub delivery](github-delivery.md).
+`profile.techStack` and `profile.keywords` override preferences for one call.
+Carry scout's resolved `profile` into assessment and discussion pagination.
+Omitting a field can inherit configured preferences; explicit empty arrays clear
+that preference for the call. No profile bootstrap or unrelated chat scan is
+required.
 
-Tool data is in `structured_content`. Scout returns `candidates`,
-`diagnostics.search`, and `apiBudget`; assess returns `issue` with the complete
-body and a discussion page (`comments`, `nextCommentsPage`, `commentsTruncated`,
-`totalComments`). Prepare returns `taskFile`, `task.taskId`, `task.workspace`,
-and `task.evidence.issueContext`. Its `.issue-finder-cli-task.json` is distinct
-from the independent skill's task file. Finish returns `changes.changedFiles`,
-`checks[].outputTail`, and `resultFile`. The CLI retains the task for continuation
-and keeps the canonical task/result under its session state directory.
+`includeFiltered` can expose filtered entries with reasons. Returned
+`diagnostics.search.diagnosticCandidates`, when present, is a bounded pool of
+retrieved but unrecommended issues. Assess plausible entries to fill evidence
+gaps; do not present them as vetted recommendations.
 
-When present, `diagnostics.search.diagnosticCandidates` contains a bounded pool
-of retrieved issues excluded from recommendations. Read their filtering reasons
-and assess plausible entries to fill evidence gaps; these are diagnostic leads,
-not recommended candidates.
+## Outputs and freshness
 
-Business stops and tool failures are distinct. Inspect the full JSON envelope,
-including `status` and any error code/details. A gate block does not imply a
-prepared task; an empty or incomplete search does not prove no matching issues
-exist. Correct invalid arguments from the negotiated schema, authenticate once
-if necessary, honor rate-limit information, and retry only when a changed input
-or resolved failure can produce useful progress.
+Inspect the full JSON envelope: `success`, `status`, warnings, and error details.
+Tool data is in `structured_content`:
 
-There is no `run_id`, dispatch approval, worker package, or nested agent in this
-profile. Do not switch to `submit_result`, `inbox done`, or a dispatch command to
-work around a failed finish.
+- Scout: `candidates`, `diagnostics.search`, `apiBudget`, and resolved `profile`.
+- Assess: `issue` with body and one discussion page, `assessment`, `competition`,
+  `repository`, `activity`, `assessmentFetchedAt`, and warnings when available.
+  `issueWarnings` identifies a locked discussion or existing assignee.
+- Discussion pagination: `issue.comments`, `nextCommentsPage`,
+  `commentsTruncated`, and `totalComments`.
+
+`no_candidates` means no recommendation from the performed search, not that
+GitHub has no matching issues. `issue_unavailable` identifies a closed issue or a PR reference and includes its
+reason and context. Locked or assigned open issues remain assessable; inspect
+`issueWarnings` before proceeding. `partial` discloses missing evidence or failed
+assessment work. Neither
+partial evidence nor a competition score establishes the absence of competing
+PRs. Assessment reasons, including popularity, are advisory information rather
+than repair authorization gates.
+
+Use `refresh: true` to bypass cached discovery/assessment evidence when stale
+information affects a decision. Assess retrieves the selected issue/discussion
+page on each call; refresh additionally updates cached assessment evidence.
+Read further pages only when needed. Honor rate limits rather than retrying
+through parallel clients.
+
+Shown/read events are recorded automatically unless `recordExposure: false` or
+`recordRead: false` opts out. Historical dismissed/done/prepared states do not
+hide or influence Codex recommendations. The CLI retains no Codex workspace task,
+validation result, or PR completion record. Codex owns those operations through
+its normal tools and chat context.
+
+Configuration and authentication failures are returned directly by business
+calls. Credentials resolve from `GITHUB_TOKEN`, optional `[github].token`, then
+captured host `gh` authentication; tokens are not printed or persisted by the
+fallback. GitHub reads and contribution publication have distinct permissions.

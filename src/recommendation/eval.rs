@@ -11,12 +11,15 @@ use crate::github_enrichment::{
 use crate::memory::outcome_projection::{ranking_adjustment_for_candidate, OutcomeFeedbackInput};
 use crate::paths::{atomic_write, IssueFinderPaths};
 use crate::recommendation::engine::{RecommendationEngine, ScoutOptions};
-use crate::recommendation::events::IssueKey;
-use crate::recommendation::events::RecommendationEventSource;
+use crate::recommendation::events::{
+    IssueKey, RecommendationEvent, RecommendationEventSource, RecommendationEventType,
+};
 use crate::recommendation::feed_ranker::{
     apply_recommendation_assessments, displayable, sort_by_feed,
 };
-use crate::recommendation::state::RecommendationIssueState;
+use crate::recommendation::state::{
+    derive_state_map_with_policy, FeedbackPolicy, RecommendationIssueState,
+};
 use crate::value_scoring::{assess_issue, RankedValueIssue, RiskTag};
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
@@ -60,6 +63,8 @@ pub struct EvaluationDataset {
     pub profile: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub feedback_policy: FeedbackPolicy,
     pub samples: Vec<EvaluationSample>,
 }
 
@@ -553,11 +558,11 @@ pub fn evaluate_dataset(dataset: &EvaluationDataset) -> DatasetReport {
     let mut ranked = dataset
         .samples
         .iter()
-        .map(|sample| rank_sample(sample, &profile))
+        .map(|sample| rank_sample(sample, &profile, dataset.feedback_policy))
         .collect::<Vec<_>>();
     sort_by_feed_for_eval(&mut ranked);
 
-    let metrics = metrics_for_ranked(&ranked, dataset.limit);
+    let metrics = metrics_for_ranked(&ranked, dataset.limit, dataset.feedback_policy);
     let failures = failures_for_ranked(&ranked);
     let ranked = ranked
         .iter()
@@ -663,6 +668,7 @@ pub fn profile_config(name: &str) -> ProfileConfig {
 fn rank_sample<'a>(
     sample: &'a EvaluationSample,
     profile: &ProfileConfig,
+    feedback_policy: FeedbackPolicy,
 ) -> RankedEvaluationSample<'a> {
     let enriched = sample.enriched_issue();
     let issue = sample.github_issue();
@@ -676,7 +682,7 @@ fn rank_sample<'a>(
         recommendation: Default::default(),
     };
     ranked.explanation = ranked.value_assessment.explanation.clone();
-    let states = sample.feedback_state(&ranked.issue);
+    let states = sample.feedback_state(&ranked.issue, feedback_policy);
     apply_recommendation_assessments(std::slice::from_mut(&mut ranked), &states);
     sample.apply_dispatch_outcome_replay(&mut ranked);
     RankedEvaluationSample {
@@ -713,7 +719,11 @@ fn sort_by_feed_for_eval(ranked: &mut [RankedEvaluationSample<'_>]) {
     });
 }
 
-fn metrics_for_ranked(ranked: &[RankedEvaluationSample<'_>], limit: usize) -> Metrics {
+fn metrics_for_ranked(
+    ranked: &[RankedEvaluationSample<'_>],
+    limit: usize,
+    feedback_policy: FeedbackPolicy,
+) -> Metrics {
     let visible = ranked
         .iter()
         .filter(|item| displayable(&item.ranked, false))
@@ -772,7 +782,9 @@ fn metrics_for_ranked(ranked: &[RankedEvaluationSample<'_>], limit: usize) -> Me
     let cooldown_passes = cooldown
         .iter()
         .filter(|item| {
-            if item.sample.feedback.done || item.sample.feedback.dismissed {
+            if feedback_policy == FeedbackPolicy::LegacyLifecycle
+                && (item.sample.feedback.done || item.sample.feedback.dismissed)
+            {
                 !displayable(&item.ranked, false)
             } else if item.sample.feedback.read_count > 0 {
                 item.ranked.recommendation.feedback_penalty >= 35
@@ -1193,33 +1205,44 @@ impl EvaluationSample {
         }
     }
 
-    fn feedback_state(&self, issue: &GitHubIssue) -> HashMap<IssueKey, RecommendationIssueState> {
-        if !self.feedback.has_feedback() {
-            return HashMap::new();
-        }
+    fn feedback_state(
+        &self,
+        issue: &GitHubIssue,
+        policy: FeedbackPolicy,
+    ) -> HashMap<IssueKey, RecommendationIssueState> {
         let timestamp = timestamp_or_age(None, self.feedback.feedback_age_days);
-        let state = RecommendationIssueState {
-            issue_key: IssueKey::from_issue(issue),
-            shown_count: self.feedback.shown_count,
-            read_count: self.feedback.read_count,
-            prepared_count: self.feedback.prepared_count,
-            dismissed: self.feedback.dismissed,
-            done: self.feedback.done,
-            restored_at: None,
-            last_shown_at: (self.feedback.shown_count > 0).then(|| timestamp.clone()),
-            last_read_at: (self.feedback.read_count > 0).then(|| timestamp.clone()),
-            last_prepared_at: (self.feedback.prepared_count > 0).then(|| timestamp.clone()),
-            last_feedback_at: Some(timestamp),
-            last_seen_issue_updated_at: Some(issue.updated_at.clone()),
-            last_seen_comments_count: Some(
-                self.feedback
-                    .last_seen_comments_count
-                    .unwrap_or(self.issue.comments_count),
+        let mut events = Vec::new();
+        for (event_type, count) in [
+            (RecommendationEventType::Shown, self.feedback.shown_count),
+            (RecommendationEventType::Read, self.feedback.read_count),
+            (
+                RecommendationEventType::Prepared,
+                self.feedback.prepared_count,
             ),
-        };
-        let mut states = HashMap::new();
-        states.insert(state.issue_key.clone(), state);
-        states
+            (
+                RecommendationEventType::Dismissed,
+                u32::from(self.feedback.dismissed),
+            ),
+            (RecommendationEventType::Done, u32::from(self.feedback.done)),
+        ] {
+            for _ in 0..count {
+                events.push(RecommendationEvent {
+                    event_id: format!("fixture-{:010}", events.len()),
+                    timestamp: timestamp.clone(),
+                    issue_key: IssueKey::from_issue(issue),
+                    event_type,
+                    source: RecommendationEventSource::FeedbackCommand,
+                    issue_updated_at: Some(issue.updated_at.clone()),
+                    issue_comments_count: Some(
+                        self.feedback
+                            .last_seen_comments_count
+                            .unwrap_or(self.issue.comments_count),
+                    ),
+                    metadata: serde_json::json!({}),
+                });
+            }
+        }
+        derive_state_map_with_policy(&events, policy)
     }
 
     fn apply_dispatch_outcome_replay(&self, ranked: &mut RankedValueIssue) {

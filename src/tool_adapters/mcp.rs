@@ -80,7 +80,13 @@ fn semantic_name(transport: &str) -> String {
     transport
         .strip_prefix("issue_finder_")
         .map(|name| format!("issue-finder.{name}"))
-        .unwrap_or_else(|| transport.to_string())
+        .unwrap_or_else(|| {
+            if transport.starts_with("issue-finder.") {
+                transport.to_string()
+            } else {
+                format!("issue-finder.{transport}")
+            }
+        })
 }
 
 async fn write_message(output: &mut tokio::io::Stdout, value: &Value) -> Result<()> {

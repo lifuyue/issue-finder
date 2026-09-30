@@ -439,7 +439,10 @@ async fn main() -> Result<()> {
                     let output = match invocation {
                         Ok(invocation) => match Config::load_or_default(&paths) {
                             Ok(config) => runtime(config).execute(invocation).await,
-                            Err(error) if args.tool == "issue-finder.status" => {
+                            Err(error)
+                                if profile == ToolProfile::Session
+                                    || args.tool == "issue-finder.status" =>
+                            {
                                 runtime(Config::default())
                                     .with_config_load_error(error.to_string())
                                     .execute(invocation)
@@ -469,8 +472,15 @@ async fn main() -> Result<()> {
             }
         }
         Command::Mcp(args) => {
-            let config = Config::load_or_default(&paths)?;
+            let (config, config_load_error) = match Config::load_or_default(&paths) {
+                Ok(config) => (config, None),
+                Err(error) => (Config::default(), Some(error.to_string())),
+            };
             let (runtime, profile) = match args.profile {
+                McpProfile::Session => (
+                    IssueFinderToolRuntime::session(paths.clone(), config),
+                    ToolProfile::Session,
+                ),
                 McpProfile::Control => (
                     IssueFinderToolRuntime::new(paths.clone(), config),
                     ToolProfile::Control,
@@ -494,6 +504,15 @@ async fn main() -> Result<()> {
                         ToolProfile::Worker,
                     )
                 }
+            };
+            let runtime = if let Some(error) = config_load_error {
+                if profile == ToolProfile::Session {
+                    runtime.with_config_load_error(error)
+                } else {
+                    anyhow::bail!(error);
+                }
+            } else {
+                runtime
             };
             issue_finder::tool_adapters::mcp::serve_stdio(runtime, profile).await?;
         }

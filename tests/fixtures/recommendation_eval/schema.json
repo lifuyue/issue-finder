@@ -8,6 +8,7 @@
     "name": { "type": "string" },
     "profile": { "type": "string" },
     "limit": { "type": "integer", "minimum": 1 },
+    "feedback_policy": { "enum": ["legacy_lifecycle", "codex_exposure"] },
     "samples": {
       "type": "array",
       "minItems": 1,

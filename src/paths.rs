@@ -102,14 +102,6 @@ impl IssueFinderPaths {
         self.home.join("dispatch")
     }
 
-    pub fn sessions_dir(&self) -> PathBuf {
-        self.home.join("sessions")
-    }
-
-    pub fn session_task_dir(&self, task_id: &str) -> PathBuf {
-        self.sessions_dir().join(task_id)
-    }
-
     pub fn dispatch_db_path(&self) -> PathBuf {
         self.dispatch_dir().join("dispatch.sqlite3")
     }

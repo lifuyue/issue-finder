@@ -1,6 +1,6 @@
 interface:
   display_name: "Issue Finder CLI"
-  short_description: "Find and complete issues with CLI tools in this session"
-  default_prompt: "Use $issue-finder-cli to find and complete one suitable GitHub issue in the current session."
+  short_description: "Discover and assess GitHub issues in Codex"
+  default_prompt: "Use $issue-finder-cli to discover and assess suitable GitHub issues. Continue authorized repairs and PR delivery using Codex tools."
 policy:
   allow_implicit_invocation: false

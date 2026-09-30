@@ -12,7 +12,7 @@
 
 ## 错误处理
 
-面向 CLI 的路径优先返回带上下文的 `anyhow::Result`，库内明确的领域错误可以使用 `thiserror`。不要吞掉外部命令、文件系统、HTTP 或 JSON 解析错误；需要降级时应让调用方能看到原因，并保持已有工作流的失败隔离语义。tool runtime 的参数错误和系统错误必须保持 `success=false`；业务 gate 阻止仍是 `success=true`、`status=blocked_by_gate`。
+面向 CLI 的路径优先返回带上下文的 `anyhow::Result`，库内明确的领域错误可以使用 `thiserror`。不要吞掉外部命令、文件系统、HTTP 或 JSON 解析错误；需要降级时应让调用方能看到原因，并保持已有工作流的失败隔离语义。tool runtime 的参数错误和系统错误必须保持 `success=false`；旧 control 流程的业务 gate 阻止仍是 `success=true`、`status=blocked_by_gate`。
 
 ## 外部服务与异步
 
@@ -33,6 +33,8 @@ GitHub 和 LLM 调用必须经过现有客户端或模块边界，不要在工�
 fallback discovery 应与 feed ranking 分层：GitHub adapter 负责取候选和来源标记，ranking/quality 模块负责解释为什么候选可见、降权或隐藏。新增权重必须能通过 recommendation eval fixture 解释和回归。
 
 ## Tool Contract
+
+Codex 默认 session 契约只包含 `scout` 和 `assess`。评分、类别和风险是评估信息，不得成为修复授权门槛。不得通过这两个工具执行任务准备、检查命令或结果完成记录。旧 control/worker 调用方仍使用的共享实现暂为兼容保留。
 
 `issue-finder tools list` 和 `issue-finder tools call` 是 JSON-only adapter。不要在这些命令的 stdout 添加人类提示、日志或表格；stdout 必须保持单个 JSON object，调试信息应走 stderr 或测试断言。未来 MCP/Codex dynamic tool adapter 应复用 `tool_runtime.rs`，不要重新实现 gate、assessment、prepare 或 context 读取逻辑。
 

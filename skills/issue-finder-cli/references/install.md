@@ -1,88 +1,68 @@
-# CLI installation and compatibility
+# Environment installation and compatibility
 
-Install the binary in the environment where the current agent executes commands.
-A CLI installed on the user's laptop is not automatically available in a remote
-or cloud project. Git is required. Python and MCP are not required for this skill.
+Cloud environment configuration owns CLI installation, dependencies, PATH, and
+supported credentials before Codex executes the task. A desktop installation
+does not supply a cloud runtime. Environment startup does not guarantee that
+runtime authentication or network access works; `scout` and `assess` return the
+actual failures when called. A missing CLI cannot run its own readiness check.
+
+## Install and persist
 
 The official release channel is
 [lifuyue/issue-finder releases](https://github.com/lifuyue/issue-finder/releases/latest).
-Use its latest stable release, not an arbitrary fork or an unpinned development
-branch. The release archive includes platform binaries and `SHA256SUMS`; current
-build targets are Apple Silicon macOS, x86-64 Linux GNU, and x86-64 Windows MSVC.
-Download the matching archive, verify its SHA-256 against the release checksums,
-and install its binary in an authorized directory on PATH. Other platforms can
-build the crate using Rust 1.89+ and Cargo.
-
-With Cargo available, the published package install/update command is:
+Platform archives include binaries and `SHA256SUMS`; verify the matching archive
+before installing its binary on PATH. Supported release targets are Apple Silicon
+macOS, x86-64 Linux GNU, and x86-64 Windows MSVC. With Rust 1.89+ and Cargo:
 
 ```bash
 cargo install issue-finder --locked
 ```
 
-Do not claim that a published version supports this skill until checking:
-
-```bash
-issue-finder --version
-issue-finder tools --profile session list
-```
-
-This skill requires `sessionContractVersion: 1` and the seven tools listed in
-`SKILL.md`. Matching version numbers do not replace this capability check. If an
-older binary remains first on PATH, locate it and explain the path mismatch.
-Do not repeatedly reinstall the same release when it lacks the contract.
-
-For development before a compatible stable package is published, the user can
-explicitly install this checked-out project:
+For an authorized installation from this checkout before a compatible release:
 
 ```bash
 cargo install --path /absolute/path/to/issue-finder --locked
 ```
 
-This is a source installation, not a claim about the latest public release. Run
-it only when installation from the current checkout is authorized. This skill
-never installs or updates itself, the binary, or target dependencies silently.
+This is a source installation, not evidence that the published package supports
+the current contract. Do not repeatedly install a release that lacks support.
 
-## Cloud environment persistence
+`cargo build` creates an artifact, not a PATH installation. Configure the installed
+binary's directory in the environment startup PATH; a one-off child-shell export
+is not persistent configuration. Verify from a fresh command shell:
 
-`cargo build` only creates a build artifact; it does not install `issue-finder`
-on PATH. An environment installation step must install the binary, and its
-startup configuration must make that installed location available to subsequent
-agent commands. Exporting PATH inside a one-off child shell is not persistent
-environment configuration. For an authorized source install with a custom
-`CARGO_HOME`, install into that home and persist its `bin` directory in PATH.
-Use the environment's configured Rust version; do not hardcode one from a past task.
+```bash
+command -v issue-finder
+issue-finder --version
+issue-finder tools list
+```
 
-Verify in a fresh command shell: `command -v issue-finder`, `issue-finder --version`,
-and `issue-finder tools --profile session list`. A successful invocation by an
-absolute `target/debug` path does not satisfy this check. After changing the
-environment template, use its supported publication workflow and verify a new
-task created from it. Repairing the current VM or a local setup script alone does
-not update the saved template or already-running tasks. If no configuration-write
-tool is available, prepare the exact setup changes and report that publication
-remains pending.
+Require `sessionContractVersion: 2` with exactly `issue-finder.scout` and
+`issue-finder.assess`. Package version alone does not establish compatibility.
+The default catalog and MCP profile are `session`; `--profile session` is an
+explicit equivalent. Updating the current VM does not update a saved cloud
+template or already-running tasks; use the environment's supported configuration
+workflow and verify a new task when changing that template.
 
-Preserve the host's proxy and CA configuration. Keep TLS certificate verification
-enabled. Some tools, including Maven, need explicit proxy configuration even when
-curl works; use a task-local configuration derived from the supported environment.
-Put caches in writable locations when a default home cache is read-only. Treat
-network, TLS, cache, and GitHub authorization failures as separate diagnoses.
+Preserve the host's proxy and CA configuration, keep TLS verification enabled,
+and use writable cache paths. Setup and Codex can use different shells or network
+settings; diagnose runtime failures from the actual call.
 
-## GitHub authentication
+## Credentials and optional configuration
 
-For GitHub authentication, session tools check `GITHUB_TOKEN`, then
-`[github].token` in optional configuration, then captured `gh auth token
---hostname github.com`. Existing credentials are never printed or persisted by
-the fallback. If none work, have the user authenticate with `gh auth login` in
-the execution environment, or configure a read-capable token through the host's
-secret mechanism. For private Git clone/fetch, Git credentials must also work;
-`gh auth setup-git` is the GitHub CLI setup option. Do not ask the user to paste
-tokens into the conversation.
+Session tools resolve `GITHUB_TOKEN`, optional `[github].token`, then a bounded,
+captured `gh auth token --hostname github.com` lookup. The fallback does not print
+or save the credential. Configure read access through the host's supported secret
+or authentication mechanism; never put tokens in JSON arguments or chat.
+`gh` is optional when another credential source is present. Python, MCP
+registration, a model API key, and a separate Codex CLI are not prerequisites.
 
-Read access is sufficient for discovery, not for the whole contribution workflow.
-For fork/push/PR delivery, use the separate capability checks and credential
-guidance in [GitHub delivery](github-delivery.md). CLI + skill does not inherently
-need an extra authorization round when the host already supplies a working identity.
+Missing configuration is valid. Defaults and per-call `profile` preferences are
+sufficient; `issue-finder init` is optional and is not a hidden questionnaire.
+Configuration, authentication, and network errors surface directly in business
+calls, without a separate preflight tool.
 
-Default configuration is enough to begin. Preferences can be passed in each
-tool call. `issue-finder init` remains optional and interactive; do not drive it
-as a hidden questionnaire in the agent workflow.
+Read access suffices for discovery and assessment. Codex handles authorized fork,
+push, and PR delivery with its normal tools and the environment's credentials;
+read access, successful local checks, or a pushed fork does not prove upstream
+PR permission.

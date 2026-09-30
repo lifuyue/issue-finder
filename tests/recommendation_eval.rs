@@ -112,3 +112,18 @@ fn recommendation_eval_fixtures_run_against_current_ranking_pipeline() {
             .expect("offline report snapshot should be written");
     }
 }
+
+#[test]
+fn codex_feedback_replay_recovers_lifecycle_candidates_and_keeps_exposure_cooldown() {
+    let report = evaluate_named_datasets(vec![(
+        "codex_feedback_replay",
+        include_str!("fixtures/recommendation_eval/datasets/codex_feedback_replay.json"),
+    )]);
+    let dataset = &report.datasets[0];
+    assert!(dataset.failures.is_empty(), "{:?}", dataset.failures);
+    assert_eq!(dataset.metrics.visible, dataset.metrics.samples);
+    assert_eq!(
+        dataset.metrics.feedback_cooldown_passes,
+        dataset.metrics.feedback_cooldown_total
+    );
+}

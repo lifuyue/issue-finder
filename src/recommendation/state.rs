@@ -7,6 +7,24 @@ use crate::paths::IssueFinderPaths;
 
 use super::events::{load_events, IssueKey, RecommendationEvent, RecommendationEventType};
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackPolicy {
+    #[default]
+    LegacyLifecycle,
+    CodexExposure,
+}
+
+impl FeedbackPolicy {
+    fn includes(self, event_type: RecommendationEventType) -> bool {
+        self == Self::LegacyLifecycle
+            || matches!(
+                event_type,
+                RecommendationEventType::Shown | RecommendationEventType::Read
+            )
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecommendationIssueState {
     pub issue_key: IssueKey,
@@ -27,11 +45,25 @@ pub struct RecommendationIssueState {
 pub fn load_state_map(
     paths: &IssueFinderPaths,
 ) -> Result<HashMap<IssueKey, RecommendationIssueState>> {
-    Ok(derive_state_map(&load_events(paths)?))
+    load_state_map_with_policy(paths, FeedbackPolicy::LegacyLifecycle)
 }
 
 pub fn derive_state_map(
     events: &[RecommendationEvent],
+) -> HashMap<IssueKey, RecommendationIssueState> {
+    derive_state_map_with_policy(events, FeedbackPolicy::LegacyLifecycle)
+}
+
+pub fn load_state_map_with_policy(
+    paths: &IssueFinderPaths,
+    policy: FeedbackPolicy,
+) -> Result<HashMap<IssueKey, RecommendationIssueState>> {
+    Ok(derive_state_map_with_policy(&load_events(paths)?, policy))
+}
+
+pub fn derive_state_map_with_policy(
+    events: &[RecommendationEvent],
+    policy: FeedbackPolicy,
 ) -> HashMap<IssueKey, RecommendationIssueState> {
     let mut states = HashMap::<IssueKey, RecommendationIssueState>::new();
     let mut sorted = events.to_vec();
@@ -42,6 +74,11 @@ pub fn derive_state_map(
     });
 
     for event in sorted {
+        // Codex has no lifecycle feedback or restore entry point. Keep that history
+        // for legacy callers without letting it affect Codex visibility or cooldown.
+        if !policy.includes(event.event_type) {
+            continue;
+        }
         let state =
             states
                 .entry(event.issue_key.clone())

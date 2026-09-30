@@ -99,6 +99,124 @@ async fn repo_scoped_scout_returns_same_repo_results_without_global_repo_cap() {
     );
 }
 
+#[tokio::test]
+async fn codex_scout_recovers_legacy_hidden_candidates_without_rewriting_feedback() {
+    use issue_finder::recommendation::engine::RecommendationEngine;
+    use issue_finder::recommendation::events::{
+        load_events, record_event_for_key, IssueKey, RecommendationEventType,
+    };
+
+    let _env_lock = env_lock::EnvLock::acquire();
+    let server = start_repo_scoped_mock_github();
+    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &server.base_url);
+    let _env_guard = EnvGuard;
+    let dir = tempdir().unwrap();
+    let paths = IssueFinderPaths {
+        home: dir.path().to_path_buf(),
+        config: dir.path().join("config.toml"),
+        cache_dir: dir.path().join("cache"),
+        workspaces_dir: dir.path().join("workspaces"),
+        inbox_dir: dir.path().join("inbox"),
+        reports_dir: dir.path().join("reports"),
+    };
+    for (number, event_type) in [
+        (1, RecommendationEventType::Done),
+        (2, RecommendationEventType::Dismissed),
+        (3, RecommendationEventType::Prepared),
+    ] {
+        record_event_for_key(
+            &paths,
+            IssueKey::new("owner/repo", number),
+            event_type,
+            RecommendationEventSource::FeedbackCommand,
+        )
+        .unwrap();
+    }
+    let original_events = load_events(&paths).unwrap();
+    let config = Config::default();
+    let scope = DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap());
+    let options = ScoutOptions {
+        include_filtered: true,
+        record_exposure: false,
+        source: RecommendationEventSource::ToolScout,
+    };
+    let legacy = RecommendationEngine::new(&paths, &config)
+        .scout(3, false, options, scope.clone())
+        .await
+        .unwrap();
+    assert_eq!(legacy.ranked.len(), 1);
+    assert_eq!(legacy.ranked[0].issue.number, 3);
+
+    let engine = RecommendationEngine::for_codex(&paths, &config);
+    let recovered = engine
+        .scout(3, false, options, scope.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered.ranked.len(),
+        3,
+        "Codex must not reuse a legacy result cache that hides candidates"
+    );
+    assert!(recovered
+        .ranked
+        .iter()
+        .all(|item| item.recommendation.feedback_penalty == 0));
+    assert_eq!(load_events(&paths).unwrap(), original_events);
+
+    engine
+        .scout(
+            3,
+            false,
+            ScoutOptions {
+                record_exposure: true,
+                ..options
+            },
+            scope.clone(),
+        )
+        .await
+        .unwrap();
+    let after_shown = engine.scout(3, false, options, scope).await.unwrap();
+    assert!(after_shown
+        .ranked
+        .iter()
+        .all(|item| item.recommendation.feedback_penalty > 0));
+    let issue = after_shown.ranked[0].issue.clone();
+    engine
+        .assess_issue(
+            issue.clone(),
+            false,
+            true,
+            RecommendationEventSource::ToolAssess,
+        )
+        .await
+        .unwrap();
+    let reread = engine
+        .assess_issue(issue, false, false, RecommendationEventSource::ToolAssess)
+        .await
+        .unwrap();
+    assert!(
+        reread.recommendation.feedback_penalty
+            > after_shown.ranked[0].recommendation.feedback_penalty
+    );
+    let events = load_events(&paths).unwrap();
+    assert_eq!(&events[..original_events.len()], original_events.as_slice());
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == RecommendationEventType::Shown)
+            .count(),
+        3
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == RecommendationEventType::Read)
+            .count(),
+        1
+    );
+    server.join();
+}
+
 #[test]
 fn repository_scope_rejects_issue_urls() {
     let error = RepositoryScope::parse("https://github.com/owner/repo/issues/12")

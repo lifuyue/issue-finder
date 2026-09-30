@@ -16,7 +16,7 @@ GitHub 和 LLM 相关工作流优先使用进程内 TCP mock server。响应内�
 
 ## Tool Contract 测试
 
-Tool contract 测试应覆盖 runtime 入口和 CLI adapter 入口。`tools call` 的 stdout 必须断言为单个 JSON object；`assess` 需要继续断言不写 handoff、inbox 或 workspace state；`prepare` gate 测试应复用 `prepare_gate` 的共享策略，不在测试里复制允许类别。`read_context` 测试必须覆盖非法 section、截断和 symlink/path traversal 防护。
+Tool contract 测试应覆盖 runtime 入口和 CLI adapter 入口。`tools call` 的 stdout 必须断言为单个 JSON object；`assess` 需要继续断言不写 handoff、inbox 或 workspace state；默认 JSON/MCP 入口只暴露 `scout` 和 `assess`，被删工具调用必须拒绝。旧 control 的 `prepare` gate 测试应复用 `prepare_gate` 的共享策略，不在测试里复制允许类别。`read_context` 测试必须覆盖非法 section、截断和 symlink/path traversal 防护。
 
 ## 高价值 Issue 覆盖
 

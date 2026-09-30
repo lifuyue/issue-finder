@@ -25,7 +25,7 @@ use crate::value_scoring::{assess_issue, RankedValueIssue};
 use super::competition_completion::{self, CompetitionCompletionStatus};
 use super::events::{record_event_for_issue, RecommendationEventSource, RecommendationEventType};
 use super::feed_ranker::{apply_recommendation_assessments, displayable, sort_by_feed};
-use super::state::load_state_map;
+use super::state::{load_state_map_with_policy, FeedbackPolicy};
 
 const ENRICHED_SCOUT_CANDIDATE_LIMIT: usize = 180;
 const FALLBACK_ENRICHMENT_CANDIDATE_LIMIT: usize = 80;
@@ -134,11 +134,24 @@ impl DisplayMode {
 pub struct RecommendationEngine<'a> {
     paths: &'a IssueFinderPaths,
     config: &'a Config,
+    feedback_policy: FeedbackPolicy,
 }
 
 impl<'a> RecommendationEngine<'a> {
     pub fn new(paths: &'a IssueFinderPaths, config: &'a Config) -> Self {
-        Self { paths, config }
+        Self {
+            paths,
+            config,
+            feedback_policy: FeedbackPolicy::LegacyLifecycle,
+        }
+    }
+
+    pub fn for_codex(paths: &'a IssueFinderPaths, config: &'a Config) -> Self {
+        Self {
+            paths,
+            config,
+            feedback_policy: FeedbackPolicy::CodexExposure,
+        }
     }
 
     pub async fn scout(
@@ -155,14 +168,19 @@ impl<'a> RecommendationEngine<'a> {
             &self.config.profile,
             limit,
             options.include_filtered,
+            self.feedback_policy,
         );
         if !refresh && !options.record_exposure {
             if let Some(cached) = load_cached_scout_result(self.paths, &scout_cache_key)? {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
                 let mut ranked = cached.ranked;
                 canonicalize_ranked_issues(&mut ranked);
-                let _ = apply_ranking_hints_to_ranked(self.paths, &mut ranked);
-                sort_by_feed(&mut ranked);
+                if self.feedback_policy == FeedbackPolicy::CodexExposure {
+                    self.apply_feed_ranking(&mut ranked);
+                } else {
+                    let _ = apply_ranking_hints_to_ranked(self.paths, &mut ranked);
+                    sort_by_feed(&mut ranked);
+                }
                 return Ok(ScoutResult {
                     ranked,
                     discovery_count: cached.discovery_count,
@@ -955,7 +973,8 @@ impl<'a> RecommendationEngine<'a> {
     }
 
     fn apply_feed_ranking(&self, ranked: &mut [RankedValueIssue]) {
-        let states = load_state_map(self.paths).unwrap_or_default();
+        let states =
+            load_state_map_with_policy(self.paths, self.feedback_policy).unwrap_or_default();
         apply_recommendation_assessments(ranked, &states);
         let _ = apply_ranking_hints_to_ranked(self.paths, ranked);
         sort_by_feed(ranked);
@@ -1184,8 +1203,9 @@ fn scout_result_cache_key(
     profile: &ProfileConfig,
     limit: usize,
     include_filtered: bool,
+    feedback_policy: FeedbackPolicy,
 ) -> String {
-    let identity = serde_json::to_vec(&(scope, profile, limit, include_filtered))
+    let identity = serde_json::to_vec(&(scope, profile, limit, include_filtered, feedback_policy))
         .expect("scout cache identity contains only serializable values");
     format!("scout-v2-{:x}", Sha256::digest(identity))
 }

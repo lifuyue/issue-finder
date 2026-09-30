@@ -61,13 +61,14 @@ pub struct SuperviseArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum McpProfile {
+    Session,
     Control,
     Worker,
 }
 
 #[derive(Debug, Args)]
 pub struct McpArgs {
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, default_value_t = McpProfile::Session)]
     pub profile: McpProfile,
     #[arg(long, requires = "issue_task_id")]
     pub run_id: Option<String>,
@@ -422,8 +423,8 @@ pub struct MemoryEvalArgs {
 
 #[derive(Debug, Args)]
 pub struct ToolsArgs {
-    /// Tool surface: current-session agent workflow or dispatch control plane.
-    #[arg(long, value_enum, default_value_t = ToolsProfile::Control, global = true)]
+    /// Tool surface: Codex discovery/assessment or legacy dispatch control plane.
+    #[arg(long, value_enum, default_value_t = ToolsProfile::Session, global = true)]
     pub profile: ToolsProfile,
     #[command(subcommand)]
     pub command: ToolsCommand,

@@ -1,0 +1,225 @@
+{
+  "name": "codex_feedback_replay",
+  "profile": "default_cli_devtools",
+  "limit": 10,
+  "feedback_policy": "codex_exposure",
+  "samples": [
+    {
+      "id": "codex_legacy_done",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 18000,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": [
+          "good first issue",
+          "A-lint"
+        ],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": [
+          "rust",
+          "compiler",
+          "cargo"
+        ],
+        "pushedAgeDays": 1
+      },
+      "feedback": {
+        "done": true,
+        "feedbackAgeDays": 0
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minFeedbackPenalty": 0,
+        "maxFeedbackPenalty": 0,
+        "reasons": [
+          "A local completion marker does not prove PR delivery; Codex must reconsider the issue."
+        ]
+      }
+    },
+    {
+      "id": "codex_legacy_dismissed",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 18001,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": [
+          "good first issue",
+          "A-lint"
+        ],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": [
+          "rust",
+          "compiler",
+          "cargo"
+        ],
+        "pushedAgeDays": 1
+      },
+      "feedback": {
+        "dismissed": true,
+        "feedbackAgeDays": 0
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minFeedbackPenalty": 0,
+        "maxFeedbackPenalty": 0,
+        "reasons": [
+          "With no restore tool, old dismissal must not hide a Codex candidate."
+        ]
+      }
+    },
+    {
+      "id": "codex_legacy_prepared",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 18002,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": [
+          "good first issue",
+          "A-lint"
+        ],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": [
+          "rust",
+          "compiler",
+          "cargo"
+        ],
+        "pushedAgeDays": 1
+      },
+      "feedback": {
+        "preparedCount": 1,
+        "feedbackAgeDays": 0
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minFeedbackPenalty": 0,
+        "maxFeedbackPenalty": 0,
+        "reasons": [
+          "Workspace preparation is owned by Codex and no longer reduces recommendation priority."
+        ]
+      }
+    },
+    {
+      "id": "codex_shown_with_done",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 18003,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": [
+          "good first issue",
+          "A-lint"
+        ],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": [
+          "rust",
+          "compiler",
+          "cargo"
+        ],
+        "pushedAgeDays": 1
+      },
+      "feedback": {
+        "shownCount": 1,
+        "done": true,
+        "feedbackAgeDays": 0
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minFeedbackPenalty": 50,
+        "maxFeedbackPenalty": 60,
+        "reasons": [
+          "Ignore local completion while retaining automatic display cooldown."
+        ]
+      }
+    },
+    {
+      "id": "codex_read_with_dismissal",
+      "sourceTier": "gfi_trusted",
+      "issue": {
+        "repoFullName": "rust-lang/rust-clippy",
+        "number": 18004,
+        "title": "TOCTOU: call Path::metadata after Path::exists",
+        "body": "Detect Path::exists followed by metadata. Expected behavior: lint suggests a single metadata call. Suggested fix: implement lint and UI tests.",
+        "labels": [
+          "good first issue",
+          "A-lint"
+        ],
+        "createdAgeDays": 2,
+        "updatedAgeDays": 1
+      },
+      "repository": {
+        "description": "Rust lints for compiler and cargo workflows",
+        "language": "Rust",
+        "stars": 13239,
+        "forks": 1800,
+        "watchers": 250,
+        "openIssues": 2860,
+        "topics": [
+          "rust",
+          "compiler",
+          "cargo"
+        ],
+        "pushedAgeDays": 1
+      },
+      "feedback": {
+        "readCount": 1,
+        "dismissed": true,
+        "feedbackAgeDays": 0
+      },
+      "expected": {
+        "quality": "excellent",
+        "behavior": "visible",
+        "minFeedbackPenalty": 160,
+        "maxFeedbackPenalty": 180,
+        "reasons": [
+          "Ignore old dismissal while retaining automatic assessment cooldown."
+        ]
+      }
+    }
+  ]
+}

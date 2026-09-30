@@ -209,7 +209,14 @@ fn tools_list_cli_outputs_single_json_workflow_entry_object() {
         "issue-finder.scout"
     );
     assert!(value["recommendedWorkflow"].is_array());
-    assert!(value["tools"].is_array());
+    assert_eq!(value["sessionContractVersion"], 2);
+    let names: Vec<_> = value["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["scout", "assess"]);
 }
 
 #[test]
@@ -910,6 +917,8 @@ fn tools_call_invalid_arguments_emits_single_json_object() {
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .args([
             "tools",
+            "--profile",
+            "control",
             "call",
             "issue-finder.scout",
             "--arguments",
@@ -933,6 +942,8 @@ fn tools_call_rejects_removed_scout_min_category_argument() {
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .args([
             "tools",
+            "--profile",
+            "control",
             "call",
             "issue-finder.scout",
             "--arguments",
@@ -967,6 +978,8 @@ fn tools_call_status_reports_invalid_config_as_json() {
         .env_remove("GITHUB_TOKEN")
         .args([
             "tools",
+            "--profile",
+            "control",
             "call",
             "issue-finder.status",
             "--arguments",

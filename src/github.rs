@@ -1491,6 +1491,21 @@ impl GitHubClient {
     }
 
     pub async fn fetch_issue(&self, issue_ref: &IssueRef) -> Result<GitHubIssue> {
+        self.fetch_issue_with_selection_policy(issue_ref, true)
+            .await
+    }
+
+    /// Explicit assessment keeps ownership and recommendation restrictions as evidence.
+    pub async fn fetch_issue_for_assessment(&self, issue_ref: &IssueRef) -> Result<GitHubIssue> {
+        self.fetch_issue_with_selection_policy(issue_ref, false)
+            .await
+    }
+
+    async fn fetch_issue_with_selection_policy(
+        &self,
+        issue_ref: &IssueRef,
+        filter_selection: bool,
+    ) -> Result<GitHubIssue> {
         let mut repo_cache = HashMap::new();
         let metadata = self
             .repo_metadata(&issue_ref.owner, &issue_ref.repo, &mut repo_cache)
@@ -1521,17 +1536,19 @@ impl GitHubClient {
             );
         }
 
-        if !should_include_issue(
-            false,
-            issue.locked,
-            issue.assignee.is_some(),
-            issue
-                .assignees
-                .as_ref()
-                .map(|items| !items.is_empty())
-                .unwrap_or(false),
-            &issue.labels,
-        ) {
+        if filter_selection
+            && !should_include_issue(
+                false,
+                issue.locked,
+                issue.assignee.is_some(),
+                issue
+                    .assignees
+                    .as_ref()
+                    .map(|items| !items.is_empty())
+                    .unwrap_or(false),
+                &issue.labels,
+            )
+        {
             anyhow::bail!("issue is locked, assigned, or carries a blocking label");
         }
 

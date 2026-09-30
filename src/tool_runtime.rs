@@ -343,16 +343,7 @@ impl IssueFinderToolRuntime {
         match self.profile {
             ToolProfile::Control => tool_name != TOOL_SUBMIT_RESULT,
             ToolProfile::Worker => matches!(tool_name, TOOL_READ_CONTEXT | TOOL_SUBMIT_RESULT),
-            ToolProfile::Session => matches!(
-                tool_name,
-                TOOL_STATUS
-                    | TOOL_SCOUT
-                    | TOOL_ASSESS
-                    | TOOL_PREPARE
-                    | crate::tool_specs::TOOL_TASK_STATUS
-                    | crate::tool_specs::TOOL_FINISH
-                    | crate::tool_specs::TOOL_FEEDBACK
-            ),
+            ToolProfile::Session => matches!(tool_name, TOOL_SCOUT | TOOL_ASSESS),
         }
     }
 

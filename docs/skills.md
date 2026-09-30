@@ -1,17 +1,16 @@
 # Issue Finder Skill Integration
 
-The repository provides two independent skills. Both keep user interaction,
-implementation, and validation in the current Work agent session.
+The CLI skill serves Codex through two business tools: `scout` and `assess`.
+Codex owns selection, workspace preparation, reproduction, repair, validation,
+review, and authorized PR delivery. The independent Python skill is a separate
+legacy package outside this Codex CLI contract; its commands are unchanged.
 
-| Mode | Entry | Runtime | Discovery and state |
-| --- | --- | --- | --- |
-| CLI + skill | `issue-finder-cli` | Installed Rust CLI, Git, GitHub credentials | CLI recommendation engine, bounded GitHub search tools, CLI state and task results |
-| Standalone skill | `issue-finder` | Python 3.9+, Git, authenticated `gh` | Independent coarse filtering and one workspace task JSON |
+| Package | Runtime | Role |
+| --- | --- | --- |
+| `issue-finder-cli` | Installed Rust CLI and GitHub read credentials | Codex discovery, ranking, and assessment evidence |
+| Legacy `issue-finder` | Python 3.9+, Git, authenticated `gh` | Independent helper with its own workspace task JSON |
 
-Neither mode autonomously starts dispatch, another Codex process, or project
-approval objects. Explicitly requested host subagents remain under the parent
-agent's review and delivery responsibility. The skills do not call each other
-or switch implementations on failure.
+The packages do not call each other or switch implementations on failure.
 
 ## CLI skill
 
@@ -23,87 +22,74 @@ skills/issue-finder-cli/
   agents/openai.yaml
   references/install.md
   references/tools.md
-  references/github-delivery.md
 ```
 
-Add this repository as a Codex project and invoke
-`skills/issue-finder-cli/SKILL.md` explicitly, or follow the
-[root README](../README.md#cli--skill) to register it in `.agents/skills` for
-picker discovery. User-wide installation uses `~/.agents/skills/issue-finder-cli`.
-Copy the entire directory so references remain available. The package can run
-outside its source checkout after copying; its dependency is the installed CLI.
+Invoke `skills/issue-finder-cli/SKILL.md` explicitly, or follow the
+[root README](../README.md#cli--skill) to register the entire package in
+`.agents/skills/issue-finder-cli` or `~/.agents/skills/issue-finder-cli`.
+References must travel with the main file. The skill uses
+`allow_implicit_invocation: false` to avoid competing with the independent
+package. See the [official Codex skill documentation](https://learn.chatgpt.com/docs/build-skills)
+for discovery locations and metadata.
 
-The CLI skill is explicitly invoked (`allow_implicit_invocation: false`) to
-avoid competing with the independent skill for the same request. Supported
-local discovery locations, symlink behavior, and this metadata field are defined
-in the [official Codex skill documentation](https://learn.chatgpt.com/docs/build-skills).
+Cloud environment configuration owns CLI installation, dependencies, PATH, and
+supported credentials. A local installation does not supply a cloud runtime.
+See the [installation reference](../skills/issue-finder-cli/references/install.md).
+Negotiate the installed schema with:
 
-### Prerequisites and first use
+```bash
+issue-finder tools list
+```
 
-The skill checks `issue-finder --version` and
-`issue-finder tools --profile session list`, requiring `sessionContractVersion: 1`
-and its seven tools. If absent or incompatible, it prompts for the latest
-compatible official stable CLI installation in the agent's execution environment.
-A local desktop installation does not supply a remote/cloud runtime. The
-[published release channel](https://github.com/lifuyue/issue-finder/releases/latest)
-and Cargo installation are described in the bundled
-[installation reference](../skills/issue-finder-cli/references/install.md).
-A stable package may lag this checkout: source installation is an explicit
-alternative, never a silent `cargo run` fallback.
+The default tool and MCP profiles are `session`. Require
+`sessionContractVersion: 2` and exactly `issue-finder.scout` and
+`issue-finder.assess`; `--profile session` is the explicit equivalent.
+The separate legacy control catalog requires `--profile control` and is outside
+this skill. If a stable release lacks version 2, an authorized source installation
+from this checkout is an explicit alternative.
 
-Session authentication resolves `GITHUB_TOKEN`, configured token, then a bounded,
-captured `gh auth token --hostname github.com` lookup. It never prints or saves
-the fallback token. Missing configuration is valid: defaults and per-call
-`profile` settings suffice. `init`, profile bootstrap, optional LLM configuration,
-and MCP registration are unnecessary for this path.
+Missing configuration is valid. Credentials resolve from `GITHUB_TOKEN`, optional
+configured token, then a captured host `gh` authentication lookup. Actual
+configuration, authentication, and network errors return directly from the
+business call. No separate readiness step, interactive initialization, profile
+bootstrap, model API key, or MCP registration is required.
 
-### One agent, structured tools
+### Calling and interpreting the tools
 
 ```text
-status -> scout -> assess -> prepare
-                            -> current agent implements and reviews
-                            -> finish -> current agent reports
-                   task_status resumes an existing workspace
-                   feedback records read/dismiss/restore
+scout -> assess -> Codex chooses and performs the authorized contribution
+         assess also accepts an explicit issue without discovery
 ```
 
-Use `issue-finder tools --profile session call issue-finder.TOOL --arguments JSON`.
-See [current-session tool examples](./usage.md#current-session-tools). The catalog
-is the authoritative argument schema. GitHub query, sort, pagination, and API
-budget are explicit inputs; returned warnings and evidence qualify the ranking.
-API search order controls retrieval, while the CLI separately ranks contribution
-candidates. The agent decides which issue to pursue from its body and discussion.
+Use `issue-finder tools call issue-finder.TOOL --arguments JSON`.
+See [examples and parameters](./usage.md#current-session-tools) and the
+[bundled tool reference](../skills/issue-finder-cli/references/tools.md).
+`scout` performs bounded discovery, filtering, and ranking. `assess` collects issue,
+discussion, competition, and repository evidence. Carry scout's resolved `profile`
+into assessments; overrides are per-call and omission restores configured defaults.
+GitHub API sorting controls retrieval, not final recommendation quality.
 
-An explicit issue skips discovery. Recommendation-only and assessment-only
-requests never prepare a workspace. A prepare-only request stops before edits.
-For implementation, prepare refreshes evidence and uses the shared prepare gate;
-the current session receives a workspace/task rather than a dispatch package.
-Continue using `task_status` with the absolute workspace. Finish executes the
-explicit check argument arrays selected by the agent and verifies task identity
-and changes against its base. A failed check remains recoverable; the agent fixes
-and retries. A passing finish records execution evidence, not semantic proof that
-the patch fixes the issue.
+Scores and recommendation reasons, including low popularity, inform the choice;
+they do not establish a repair authorization gate. Read relevant comments and
+current code. Partial or truncated evidence and a clear competition score do not
+prove there is no linked or unlinked competing PR. Refresh stale evidence when
+resuming or before acting on changed ownership/competition; fetch additional
+comment pages only as needed. Respect shared rate limits.
 
-The current agent follows user authorization, target repository instructions,
-and host permissions. Commit, push, PRs, and public comments are outside these
-CLI tools and need user authorization. Generated task metadata must not enter
-contribution commits.
+The CLI automatically records shown/read events for ranking unless a call opts
+out. Historical dismissed/done/prepared states are ignored by Codex rankings;
+there is no manual cross-chat ignore/restore entry. The tools do not persist
+Codex workspace tasks, run validation commands, or record PR outcomes. Local
+checks, a pushed branch, PR creation, CI, and merge are separate facts reported
+by Codex. GitHub read access does not prove publication permissions.
 
-For authorized PR delivery, the CLI skill now checks installation persistence and
-GitHub read/fork/push/upstream-PR capabilities separately. Its
-[delivery reference](../skills/issue-finder-cli/references/github-delivery.md)
-explains credential selection and cloud routing, avoiding repeated OAuth prompts,
-reviewing the complete diff, keeping requested temporary tests out of commits,
-and publishing an accurate PR in the user's preferred language. A successful
-`finish` remains a local result, not a published PR or a CI result.
+Skill instructions cover call conditions, parameters, evidence interpretation,
+and refresh rules. Generic contribution procedures follow Codex and repository
+instructions. Removed lifecycle tools are not hidden inside discovery or assessment.
+Updating the source skill does not refresh independently copied installations or
+publish a cloud environment configuration.
 
-These are agent workflow instructions, not new CLI capabilities. Competition
-score false negatives, inherited profile defaults, and shared rate-limit budgets
-still require agent scrutiny; documenting them does not fix the ranking engine.
-Updating the package in this repository also does not republish a cloud environment
-or refresh an independently copied skill installation.
-
-## Standalone skill
+## Legacy standalone skill
 
 The installable product skill lives at
 [`skills/issue-finder/SKILL.md`](../skills/issue-finder/SKILL.md). Its whole package is:
@@ -115,7 +101,7 @@ skills/issue-finder/
   agents/openai.yaml
 ```
 
-Use the [root README installation instructions](../README.md#standalone-skill)
+Use the [root README installation instructions](../README.md#legacy-standalone-skill)
 to copy or symlink this directory into `~/.agents/skills/issue-finder`, or copy it
 into a target repository's `.agents/skills/issue-finder`. Copying only `SKILL.md`
 is insufficient: the workflow needs its bundled script. The package is standalone
@@ -212,10 +198,9 @@ points. A recommendation-only invocation does not prepare or modify a workspace.
 
 ## Validation scope
 
-The two skills are separately supported modes. The standalone helper does not
-reuse CLI search, state, or result handling. CLI architecture documents describe
-its recommendation engine and the separate handoff/dispatch workflows; dispatch
-is not a prerequisite for either current-session skill.
+The independent legacy helper does not reuse CLI search, state, or result
+handling. Its validation scope is separate from the Codex CLI version 2 contract.
+Architecture documents for handoff/dispatch describe separate legacy workflows.
 
 Offline tests use mocked GitHub responses and temporary real Git repositories:
 
@@ -233,7 +218,7 @@ these tests does not establish that parity or imply parity between the two modes
 The [initial read-only smoke report](./recommendation-evals/2026-08-31-skill-native-smoke/report.md)
 records observed GitHub behavior, the failures turned into fixtures, and its limits.
 
-## Handoff generated context (not an installable entry skill)
+## Legacy handoff generated context (not an installable entry skill)
 
 The CLI writes a per-item context entry for its separate handoff workflow.
 Do not install these generated files in place of either stable package above.
