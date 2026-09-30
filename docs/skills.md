@@ -8,8 +8,10 @@ implementation, and validation in the current Work agent session.
 | CLI + skill | `issue-finder-cli` | Installed Rust CLI, Git, GitHub credentials | CLI recommendation engine, bounded GitHub search tools, CLI state and task results |
 | Standalone skill | `issue-finder` | Python 3.9+, Git, authenticated `gh` | Independent coarse filtering and one workspace task JSON |
 
-Neither mode starts dispatch, another Codex process, or project approval objects.
-The skills do not call each other or switch implementations on failure.
+Neither mode autonomously starts dispatch, another Codex process, or project
+approval objects. Explicitly requested host subagents remain under the parent
+agent's review and delivery responsibility. The skills do not call each other
+or switch implementations on failure.
 
 ## CLI skill
 
@@ -21,6 +23,7 @@ skills/issue-finder-cli/
   agents/openai.yaml
   references/install.md
   references/tools.md
+  references/github-delivery.md
 ```
 
 Add this repository as a Codex project and invoke
@@ -85,6 +88,20 @@ The current agent follows user authorization, target repository instructions,
 and host permissions. Commit, push, PRs, and public comments are outside these
 CLI tools and need user authorization. Generated task metadata must not enter
 contribution commits.
+
+For authorized PR delivery, the CLI skill now checks installation persistence and
+GitHub read/fork/push/upstream-PR capabilities separately. Its
+[delivery reference](../skills/issue-finder-cli/references/github-delivery.md)
+explains credential selection and cloud routing, avoiding repeated OAuth prompts,
+reviewing the complete diff, keeping requested temporary tests out of commits,
+and publishing an accurate PR in the user's preferred language. A successful
+`finish` remains a local result, not a published PR or a CI result.
+
+These are agent workflow instructions, not new CLI capabilities. Competition
+score false negatives, inherited profile defaults, and shared rate-limit budgets
+still require agent scrutiny; documenting them does not fix the ranking engine.
+Updating the package in this repository also does not republish a cloud environment
+or refresh an independently copied skill installation.
 
 ## Standalone skill
 

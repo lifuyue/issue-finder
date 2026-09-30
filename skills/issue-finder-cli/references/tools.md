@@ -20,6 +20,8 @@ never interpolate issue content into executable shell text.
 `assess.profile` take `techStack` and `keywords` without changing saved preferences.
 Carry the resolved scout response's `profile` into every assess and prepare call;
 omitting it reverts that invocation to configured defaults.
+An empty profile override is not necessarily neutral. Inspect and disclose the
+resolved defaults rather than attributing them to the user.
 Search ordering is not the final ranking. Preserve explicit repository scope and
 read warnings, incomplete evidence, and budget details before expanding search.
 
@@ -27,11 +29,19 @@ read warnings, incomplete evidence, and budget details before expanding search.
 when their discussion is relevant to selection or implementation. `prepare`
 rechecks fresh issue state so an earlier cached recommendation cannot authorize
 work on a changed or competing issue.
+Neither its score nor a successful gate replaces reading relevant comments and
+checking for unlinked competing PRs and current-code feasibility.
 
 `prepare.checkout`, `prepare.workspaceRoot`, `task_status.workspace`, and
 `finish.workspace` are absolute filesystem paths. Use returned paths rather than
 guessing workspace naming. The agent owns code edits; the CLI owns generated
 task/result data. Never edit task metadata to force a successful finish.
+
+`status` checks read/authentication readiness, not the full fork/push/PR chain.
+`finish` records local changes and checks; it does not create or track a PR,
+certify upstream CI, or establish that a contribution has merged. The current
+agent owns authorized GitHub publication and reports those outcomes separately.
+See [GitHub delivery](github-delivery.md).
 
 Tool data is in `structured_content`. Scout returns `candidates`,
 `diagnostics.search`, and `apiBudget`; assess returns `issue` with the complete

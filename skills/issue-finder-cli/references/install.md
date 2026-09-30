@@ -42,6 +42,33 @@ This is a source installation, not a claim about the latest public release. Run
 it only when installation from the current checkout is authorized. This skill
 never installs or updates itself, the binary, or target dependencies silently.
 
+## Cloud environment persistence
+
+`cargo build` only creates a build artifact; it does not install `issue-finder`
+on PATH. An environment installation step must install the binary, and its
+startup configuration must make that installed location available to subsequent
+agent commands. Exporting PATH inside a one-off child shell is not persistent
+environment configuration. For an authorized source install with a custom
+`CARGO_HOME`, install into that home and persist its `bin` directory in PATH.
+Use the environment's configured Rust version; do not hardcode one from a past task.
+
+Verify in a fresh command shell: `command -v issue-finder`, `issue-finder --version`,
+and `issue-finder tools --profile session list`. A successful invocation by an
+absolute `target/debug` path does not satisfy this check. After changing the
+environment template, use its supported publication workflow and verify a new
+task created from it. Repairing the current VM or a local setup script alone does
+not update the saved template or already-running tasks. If no configuration-write
+tool is available, prepare the exact setup changes and report that publication
+remains pending.
+
+Preserve the host's proxy and CA configuration. Keep TLS certificate verification
+enabled. Some tools, including Maven, need explicit proxy configuration even when
+curl works; use a task-local configuration derived from the supported environment.
+Put caches in writable locations when a default home cache is read-only. Treat
+network, TLS, cache, and GitHub authorization failures as separate diagnoses.
+
+## GitHub authentication
+
 For GitHub authentication, session tools check `GITHUB_TOKEN`, then
 `[github].token` in optional configuration, then captured `gh auth token
 --hostname github.com`. Existing credentials are never printed or persisted by
@@ -50,6 +77,11 @@ the execution environment, or configure a read-capable token through the host's
 secret mechanism. For private Git clone/fetch, Git credentials must also work;
 `gh auth setup-git` is the GitHub CLI setup option. Do not ask the user to paste
 tokens into the conversation.
+
+Read access is sufficient for discovery, not for the whole contribution workflow.
+For fork/push/PR delivery, use the separate capability checks and credential
+guidance in [GitHub delivery](github-delivery.md). CLI + skill does not inherently
+need an extra authorization round when the host already supplies a working identity.
 
 Default configuration is enough to begin. Preferences can be passed in each
 tool call. `issue-finder init` remains optional and interactive; do not drive it

@@ -1,6 +1,6 @@
 ---
 name: issue-finder-cli
-description: Use the Issue Finder CLI to discover, compare, prepare, complete, or continue GitHub issue contributions in the current Work agent session. Use when the user invokes this skill or requests CLI-backed issue discovery and ranking. The separate issue-finder skill uses its own Python helper; never switch between the two silently.
+description: Use the Issue Finder CLI to discover, assess, implement, validate, and deliver authorized GitHub issue contributions in the current agent session, including cloud readiness and fork/push/PR permission checks. The separate issue-finder skill uses its own Python helper; never switch between the two silently.
 ---
 
 # Issue Finder CLI
@@ -8,9 +8,12 @@ description: Use the Issue Finder CLI to discover, compare, prepare, complete, o
 The current agent owns the user conversation, issue selection, implementation,
 validation, self-review, and final report. Call the installed CLI as structured
 tools for GitHub discovery and evidence, workspace preparation, and task results.
-Use one current-session workflow. Do not launch another agent process, invoke
-dispatch, create project approval objects, or substitute the independent Python
-skill. MCP registration is unnecessary.
+Use one current-session workflow. Do not autonomously launch another agent
+process, invoke dispatch, create project approval objects, or substitute the
+independent Python skill. If the user explicitly requests subagents, use the
+host's available delegation tools with separate workspaces and the requested
+model/settings; the parent remains responsible for review and delivery.
+MCP registration is unnecessary.
 
 ## Scope
 
@@ -39,6 +42,9 @@ profile in the session and pass that same object to every `scout`, `assess`
 (including further comment pages), and `prepare` call. Overrides are per-call:
 omitting them restores configured defaults rather than the last search profile.
 The scout response's `profile` gives the resolved values to carry forward.
+Inspect those values: an empty override can still inherit configured language
+and keyword defaults. Do not describe inherited preferences as the user's stated
+interests or an organization-wide scan as a language-neutral audit when it is not.
 
 Check that `issue-finder` and Git are on PATH, then run:
 
@@ -75,6 +81,18 @@ configured credentials, or the current host's `gh` login. It does not require
 `init`, a model API key, or a separate Codex CLI installation. Resolve an actual
 authentication or permission failure using the returned diagnostics. Never run
 `gh auth token` as a visible tool call or put credentials in JSON arguments.
+
+For a request through PR creation, read
+[GitHub delivery and cloud authentication](references/github-delivery.md) before
+substantial implementation. Track GitHub reads, fork creation, Git push, and
+upstream PR creation separately. `status` success, a login, and push access to
+the fork do not establish upstream PR permission. Use existing authorization;
+do not insert a mandatory login or approval round into every CLI + skill task.
+
+The same named cloud environment does not establish shared task files or access
+to another chat. Check the actual workspace and available thread tools. A child
+agent is not a newly created sidebar session; report unavailable coordination
+without pretending a task was created or resumed.
 
 For continuation, call `issue-finder.task_status` with the absolute `workspace`.
 Verify its issue, branch, and base against the request, then resume from the
@@ -126,6 +144,18 @@ evidence do not prove there is no competing work. Use scores as evidence while
 judging clarity, user fit, bounded implementation scope, and realistic checks.
 For a recommendation request, report the shortlist and rationale now.
 
+Before selecting a candidate for implementation, manually check relevant comments,
+linked PRs, and a bounded list of open PRs for the same fix, including PRs that do
+not mention the issue number. A `competition: clear` score can miss explicit PR
+links. Check current default-branch code: retired features, duplicate issues,
+existing fixes, maintainer-reserved work, and unresolved product decisions can
+invalidate a high score. Recent automated SDK releases alone do not establish
+maintainer engagement. Prefer fewer defensible candidates to a padded shortlist.
+
+On a secondary rate limit, honor `Retry-After` and coordinate the budget across
+authorized parallel scans. Stop expanding search; do not fan out retries through
+other clients. Reuse available evidence and identify incomplete competition checks.
+
 If no usable recommendation remains, inspect
 `structured_content.diagnostics.search.diagnosticCandidates` when present. These
 are retrieved but not recommended issues with filtering/evidence explanations.
@@ -148,6 +178,10 @@ For a discovered candidate, choose the next viable one. Do not bypass the gate
 merely to complete a tool sequence. For an explicit issue, report the blocker;
 use an available override only when justified by the user's scope and concrete
 assessment, with an honest `bypassReason`.
+Low popularity can exclude a new repository with an otherwise reproducible bug;
+explain the reason rather than equating that gate with technical infeasibility.
+If the user authorizes investigation without preparation, label it as such and
+do not fabricate a prepared task or a successful `finish` record.
 
 Read applicable `AGENTS.md`, manifests, relevant code, nearby tests, and all
 discussion needed to assess feasibility. Implement and verify in the current
@@ -157,6 +191,15 @@ another candidate. Do not silently replace an explicitly requested issue.
 Review staged, unstaged, untracked, and committed changes against the recorded
 base. Do not stage or commit `.issue-finder-cli-task.json`. Check scope, correctness,
 error handling, and the meaningful validation required by the repository.
+
+Review the entire diff, including tests, against nearby repository code. Avoid
+unrelated cleanup, generated-code edits, broad exception swallowing, speculative
+fallbacks, and production abstractions introduced only to support tests. A small
+fix does not automatically justify a large test framework. Honor the user's
+preference for temporary verification versus committed regression tests; keep
+local probes outside staged changes when code-only delivery is requested. Still
+validate behavior and state the scope of those checks. See
+[review and validation](references/github-delivery.md#review-and-validation).
 
 ## 4. Finish and report
 
@@ -183,6 +226,23 @@ execution alone does not establish task completion. See the installed schema
 and [tool reference](references/tools.md) for the command mapping and recovery.
 
 Report the chosen issue and rationale, workspace and branch, change, actual
-checks and outcomes, and remaining limitations. Claim completion only after a
-successful finish and final diff review. Keep the full user interaction in this
-session; do not tell the user to operate a second CLI workflow themselves.
+checks and outcomes, and remaining limitations. A successful `finish` records
+local implementation and validation; it does not mean a commit was pushed or a
+PR was created. Keep the full user interaction in this session; do not tell the
+user to operate a second CLI workflow themselves.
+
+## 5. Deliver the authorized contribution
+
+When the requested endpoint includes a PR, continue through final diff review,
+commit, push, and upstream PR creation using Git/gh or the host's GitHub tools.
+Follow the [delivery checklist](references/github-delivery.md#publish-and-confirm).
+Use the user's preferred PR language unless repository requirements constrain it.
+Rewrite the description after scope changes, including whether tests are committed
+or temporary and what actually ran. Do not close an issue automatically when the
+patch addresses only part of it.
+
+Verify the resulting PR URL, base/head branches, commit, and file list; attach the
+PR through the host when supported. Report local completion, pushed branch, PR
+creation, and CI status as distinct facts. If an external permission blocks the
+last step, finish the reviewable patch and description first, then give the exact
+blocker and smallest remaining user action. A compare link is not a created PR.
