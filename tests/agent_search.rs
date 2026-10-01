@@ -18,9 +18,13 @@ use tempfile::TempDir;
 #[path = "support/env_lock.rs"]
 mod env_lock;
 
+#[path = "support/github_auth.rs"]
+mod github_auth;
+
 #[tokio::test]
 async fn agent_search_obeys_query_sort_page_and_repository_scope() {
     let _lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = MockServer::start(|request| {
         let page = query(request)["page"].parse::<usize>().unwrap();
         let mut items = if page == 2 {
@@ -74,6 +78,7 @@ async fn agent_search_obeys_query_sort_page_and_repository_scope() {
 #[tokio::test]
 async fn agent_search_cache_isolated_by_query_sort_scope_page_and_profile() {
     let _lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = MockServer::start(|_| json!({"total_count":0,"items":[]}));
     let (_dir, paths) = paths();
     let mut config = Config::default();
@@ -138,6 +143,7 @@ async fn agent_search_cache_isolated_by_query_sort_scope_page_and_profile() {
 #[tokio::test]
 async fn agent_search_retains_partial_pages_when_request_budget_is_exhausted() {
     let _lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = MockServer::start(|_| json!({"total_count":3,"items":[issue("owner/repo",1)]}));
     let (_dir, paths) = paths();
     let config = Config::default();
@@ -168,6 +174,7 @@ async fn agent_search_retains_partial_pages_when_request_budget_is_exhausted() {
 #[tokio::test]
 async fn incomplete_search_results_warn_and_are_not_cached() {
     let _lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = MockServer::start(
         |_| json!({"total_count":1,"incomplete_results":true,"items":[issue("owner/repo",1)]}),
     );
@@ -195,6 +202,7 @@ async fn incomplete_search_results_warn_and_are_not_cached() {
 #[tokio::test]
 async fn agent_search_ranking_shares_budget_without_promoting_missing_evidence() {
     let _lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = MockServer::start(|request| {
         assert!(request.starts_with("/search/issues?"));
         json!({"total_count":1,"items":[issue("owner/repo",1)]})

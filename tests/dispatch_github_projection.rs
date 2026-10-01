@@ -445,6 +445,7 @@ fn reqwest_github_comment_writer_posts_to_configured_mock_api() {
     let _file_env_lock = env_lock::EnvLock::acquire();
     let mock = start_mock_comment_server();
     let _api_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock.base_url.clone());
+    let _gh_token_guard = EnvVarGuard::remove("GH_TOKEN");
     let _token_guard = EnvVarGuard::remove("GITHUB_TOKEN");
     let mut config = Config::default();
     config.github.token = "test-token".to_string();
@@ -496,6 +497,7 @@ fn dispatch_cli_posts_without_dropping_blocking_http_runtime_inside_tokio() {
         ])
         .env("ISSUE_FINDER_HOME", dir.path())
         .env("ISSUE_FINDER_GITHUB_API_BASE", &mock.base_url)
+        .env_remove("GH_TOKEN")
         .env_remove("GITHUB_TOKEN")
         .output()
         .unwrap();

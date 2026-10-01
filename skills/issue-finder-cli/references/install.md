@@ -50,7 +50,7 @@ settings; diagnose runtime failures from the actual call.
 
 ## Credentials and optional configuration
 
-Session tools resolve `GITHUB_TOKEN`, optional `[github].token`, then a bounded,
+Session tools resolve nonempty `GH_TOKEN`, optional `[github].token`, then a bounded,
 captured `gh auth token --hostname github.com` lookup. The fallback does not print
 or save the credential. Configure read access through the host's supported secret
 or authentication mechanism; never put tokens in JSON arguments or chat.
@@ -66,3 +66,37 @@ Read access suffices for discovery and assessment. Codex handles authorized fork
 push, and PR delivery with its normal tools and the environment's credentials;
 read access, successful local checks, or a pushed fork does not prove upstream
 PR permission.
+
+## Standard Cloud credential setup
+
+Use one key, `GH_TOKEN`, for GitHub credentials. Issue Finder no longer reads
+`GITHUB_TOKEN`, including through its `gh` fallback. If the previous environment
+provided only `GITHUB_TOKEN`, configure the same credential as `GH_TOKEN` in the
+Cloud settings and publish that change. No duplicate token or alias is needed.
+
+Choose one delivery method for `GH_TOKEN`:
+
+- **Environment variables** provides the actual value directly to programs. This
+  is suitable when you control the environment and want direct credential
+  delivery. Processes in that environment can read the value.
+- **Network secrets** provides a placeholder. The proxy substitutes the real
+  value for allowed HTTPS destinations on port 443, during setup and tasks.
+  Configure `api.github.com` for API calls and `github.com` when needed.
+
+Do not configure the same key in both places. These are delivery choices for
+one credential, not two authentication identities. See
+[OpenAI's Cloud environment documentation](https://learn.chatgpt.com/docs/environments/cloud-environments).
+In either mode, the program reads `GH_TOKEN` and sends its value in the normal
+Authorization header. Preserve the configured proxy and CA trust. Do not copy
+the value into `config.toml`, `.env`, shell profiles, logs, or command arguments.
+
+Save and publish the environment, then verify a new task: confirm `GH_TOKEN` is
+present without printing it, and run a bounded `assess` with the installed
+binary. Inspect `success`, `partial`, and missing-evidence warnings. Existing
+tasks may have different bindings from the published settings. If the key is
+absent, check the task's environment/version and any Personal vault scope.
+
+Authentication success identifies the effective GitHub account, not which raw
+secret the proxy used or which other endpoints it permits. Diagnose permission
+errors from the actual response; changing the local variable name does not
+change GitHub permissions.

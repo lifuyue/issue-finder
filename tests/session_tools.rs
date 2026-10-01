@@ -279,11 +279,41 @@ fn session_assess_reports_runtime_github_auth_and_network_failures() {
     assert!(disconnected.to_string().contains("127.0.0.1:1"));
 }
 
+#[test]
+fn gh_token_only_reaches_all_assessment_clients_without_gh_or_secret_persistence() {
+    let token = "gh-only-business-fixture";
+    let server = Server::start_with_token(token);
+    let temp = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+        .env("ISSUE_FINDER_HOME", temp.path())
+        .env("ISSUE_FINDER_GITHUB_API_BASE", &server.url)
+        .env("ISSUE_FINDER_GITHUB_API_BUDGET_TOTAL", "1200")
+        .env("PATH", "")
+        .env("GH_TOKEN", token)
+        .env_remove("GITHUB_TOKEN")
+        .args([
+            "tools",
+            "call",
+            "issue-finder.assess",
+            "--arguments",
+            r#"{"issue":"owner/repo#1"}"#,
+        ])
+        .output()
+        .unwrap();
+    let assessment: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success(), "{assessment}");
+    assert!(assessment["structured_content"]["assessment"].is_object());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
+    assert!(!temp.path().join("config.toml").exists());
+}
+
 fn call(home: &Path, url: &str, tool: &str, args: Value) -> (bool, Value) {
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .env("ISSUE_FINDER_HOME", home)
         .env("ISSUE_FINDER_GITHUB_API_BASE", url)
-        .env("GITHUB_TOKEN", "fixture-token")
+        .env_remove("GITHUB_TOKEN")
+        .env("GH_TOKEN", "fixture-token")
         .env("ISSUE_FINDER_GITHUB_API_BUDGET_TOTAL", "1200")
         .args([
             "tools",
@@ -313,6 +343,11 @@ struct Server {
 }
 impl Server {
     fn start() -> Self {
+        Self::start_with_token("fixture-token")
+    }
+
+    fn start_with_token(expected_token: &str) -> Self {
+        let expected_token = expected_token.to_owned();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -322,7 +357,7 @@ impl Server {
         let thread = thread::spawn(move || {
             while !flag.load(Ordering::SeqCst) {
                 match listener.accept() {
-                    Ok((stream, _)) => respond(stream, &base),
+                    Ok((stream, _)) => respond(stream, &base, &expected_token),
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(2))
                     }
@@ -347,7 +382,7 @@ impl Drop for Server {
     }
 }
 
-fn respond(mut stream: TcpStream, base: &str) {
+fn respond(mut stream: TcpStream, base: &str, expected_token: &str) {
     stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
@@ -358,6 +393,13 @@ fn respond(mut stream: TcpStream, base: &str) {
         _ => return,
     };
     let request = String::from_utf8_lossy(&buffer[..length]);
+    assert!(
+        request
+            .lines()
+            .any(|line| line
+                .eq_ignore_ascii_case(&format!("authorization: Bearer {expected_token}"))),
+        "mock request did not use the selected fixture credential"
+    );
     let target = request.split_whitespace().nth(1).unwrap();
     let path = target.split('?').next().unwrap();
     if path == "/repos/owner/repo/issues/5" {

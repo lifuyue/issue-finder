@@ -16,12 +16,16 @@ use tempfile::tempdir;
 #[path = "support/env_lock.rs"]
 mod env_lock;
 
+#[path = "support/github_auth.rs"]
+mod github_auth;
+
 const SLOW_TOP_DELAY: Duration = Duration::from_millis(800);
 const OTHER_DETAIL_DELAY: Duration = Duration::from_millis(350);
 
 #[tokio::test]
 async fn scout_enriches_candidates_concurrently_and_keeps_feed_order() {
     let _env_lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let (base_url, server) = start_concurrent_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &base_url);
     let _env_guard = EnvGuard;

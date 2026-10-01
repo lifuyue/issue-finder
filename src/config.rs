@@ -31,7 +31,7 @@ pub struct ResolvedGitHubToken {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitHubTokenSource {
-    EnvGithubToken,
+    EnvGhToken,
     Config,
     GitHubCli,
     Missing,
@@ -40,7 +40,7 @@ pub enum GitHubTokenSource {
 impl GitHubTokenSource {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::EnvGithubToken => "env:GITHUB_TOKEN",
+            Self::EnvGhToken => "env:GH_TOKEN",
             Self::Config => "config",
             Self::GitHubCli => "gh",
             Self::Missing => "missing",
@@ -128,11 +128,11 @@ impl Config {
     }
 
     pub fn resolved_github_token(&self) -> ResolvedGitHubToken {
-        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if let Ok(token) = std::env::var("GH_TOKEN") {
             if !token.trim().is_empty() {
                 return ResolvedGitHubToken {
                     token,
-                    source: GitHubTokenSource::EnvGithubToken,
+                    source: GitHubTokenSource::EnvGhToken,
                 };
             }
         }
@@ -171,6 +171,9 @@ fn github_cli_token() -> Option<String> {
     let mut child = Command::new("gh")
         .args(["auth", "token", "--hostname", "github.com"])
         .env("GH_PROMPT_DISABLED", "1")
+        // The fallback must read stored login, never the deprecated environment alias.
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -218,10 +221,7 @@ pub fn initialize_interactive(paths: &IssueFinderPaths, force: bool) -> Result<C
     let mut config = Config::default();
 
     println!("Issue Finder config: {}", paths.config.display());
-    config.github.token = prompt(
-        "GitHub token (optional; GITHUB_TOKEN is read at runtime)",
-        "",
-    )?;
+    config.github.token = prompt("GitHub token (optional; GH_TOKEN is read at runtime)", "")?;
     config.github.username = prompt("GitHub username (optional)", &config.github.username)?;
     config.profile.tech_stack = prompt_list("Tech stack", &config.profile.tech_stack)?;
     config.profile.keywords = prompt_list("Profile keywords", &config.profile.keywords)?;

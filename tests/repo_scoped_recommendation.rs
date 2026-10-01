@@ -19,9 +19,13 @@ use tempfile::tempdir;
 #[path = "support/env_lock.rs"]
 mod env_lock;
 
+#[path = "support/github_auth.rs"]
+mod github_auth;
+
 #[tokio::test]
 async fn repo_scoped_scout_returns_same_repo_results_without_global_repo_cap() {
     let _env_lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = start_repo_scoped_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", server.base_url.clone());
     let _env_guard = EnvGuard;
@@ -107,6 +111,7 @@ async fn codex_scout_recovers_legacy_hidden_candidates_without_rewriting_feedbac
     };
 
     let _env_lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
     let server = start_repo_scoped_mock_github();
     std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &server.base_url);
     let _env_guard = EnvGuard;

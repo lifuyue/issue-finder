@@ -88,7 +88,7 @@ impl IssueFinderToolRuntime {
         let token = config.resolved_session_github_token();
         if token.source == GitHubTokenSource::Missing {
             return Err(RuntimeFailure::System(anyhow::anyhow!(
-                "GitHub authentication is unavailable; configure GITHUB_TOKEN or authenticate gh in this execution environment, then retry the business tool."
+                "GitHub authentication is unavailable; configure GH_TOKEN or authenticate gh in this execution environment, then retry the business tool."
             )));
         }
         config.github.token = token.token;

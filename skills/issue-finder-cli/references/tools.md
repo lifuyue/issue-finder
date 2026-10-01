@@ -72,6 +72,6 @@ validation result, or PR completion record. Codex owns those operations through
 its normal tools and chat context.
 
 Configuration and authentication failures are returned directly by business
-calls. Credentials resolve from `GITHUB_TOKEN`, optional `[github].token`, then
-captured host `gh` authentication; tokens are not printed or persisted by the
+calls. `GH_TOKEN` is the sole GitHub credential environment key. Session tools
+retain optional `[github].token` and captured stored `gh` login as fallbacks; tokens are not printed or persisted by the
 fallback. GitHub reads and contribution publication have distinct permissions.

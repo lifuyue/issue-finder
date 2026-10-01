@@ -19,7 +19,9 @@ fn auth_probe() {
         resolved.token,
         std::env::var("ISSUE_FINDER_TEST_EXPECTED_TOKEN").unwrap_or_default()
     );
-    if expected_source == "gh" {
+    if expected_source != "gh" {
+        assert_eq!(config.resolved_github_token(), resolved);
+    } else {
         assert_eq!(
             config.resolved_github_token().source,
             GitHubTokenSource::Missing
@@ -71,19 +73,47 @@ fn session_reuses_github_cli_without_exposing_credential_output() {
 #[test]
 fn explicit_credentials_take_precedence_without_invoking_github_cli() {
     let fixture = gh_fixture(": > \"$0.called\"\nexit 1");
-    let output = probe(fixture.path(), "env:GITHUB_TOKEN", "env-secret")
-        .env("GITHUB_TOKEN", "env-secret")
+    let output = probe(fixture.path(), "env:GH_TOKEN", "gh-env-secret")
+        .env("GH_TOKEN", "gh-env-secret")
+        .env("GITHUB_TOKEN", "github-env-secret")
         .env("ISSUE_FINDER_TEST_CONFIG_TOKEN", "config-secret")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let output = probe(fixture.path(), "config", "config-secret")
-        .env("GITHUB_TOKEN", " ")
+        .env("GH_TOKEN", " ")
+        .env("GITHUB_TOKEN", "deprecated-env-secret")
         .env("ISSUE_FINDER_TEST_CONFIG_TOKEN", "config-secret")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert!(!fixture.path().join("gh.called").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn deprecated_github_token_is_ignored_including_stored_login_fallback() {
+    let absent = TempDir::new().unwrap();
+    let output = probe(absent.path(), "missing", "")
+        .env("GITHUB_TOKEN", "deprecated-env-secret")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let fixture = gh_fixture(
+        "[ -z \"${GH_TOKEN+x}\" ] || exit 2\n\
+         [ -z \"${GITHUB_TOKEN+x}\" ] || exit 3\n\
+         printf 'stored-login-fixture-secret\\n'",
+    );
+    let output = probe(fixture.path(), "gh", "stored-login-fixture-secret")
+        .env("GH_TOKEN", " ")
+        .env("GITHUB_TOKEN", "deprecated-env-secret")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    for secret in ["deprecated-env-secret", "stored-login-fixture-secret"] {
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(secret));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(secret));
+    }
 }
 
 #[cfg(unix)]
@@ -119,11 +149,24 @@ fn github_cli_auth_timeout_does_not_block_the_agent() {
 }
 
 #[test]
+fn gh_token_only_authenticates_without_github_cli() {
+    let fixture = TempDir::new().unwrap();
+    let output = probe(fixture.path(), "env:GH_TOKEN", "gh-only-fixture-secret")
+        .env("GH_TOKEN", "gh-only-fixture-secret")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("gh-only-fixture-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("gh-only-fixture-secret"));
+}
+
+#[test]
 fn initialization_neither_prints_nor_persists_inherited_token() {
     let fixture = TempDir::new().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .arg("init")
         .env("ISSUE_FINDER_HOME", fixture.path())
+        .env("GH_TOKEN", "inherited-gh-test-secret")
         .env("GITHUB_TOKEN", "inherited-test-secret")
         .stdin(std::process::Stdio::null())
         .output()
@@ -133,4 +176,7 @@ fn initialization_neither_prints_nor_persists_inherited_token() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("inherited-test-secret"));
     let saved = fs::read_to_string(fixture.path().join("config.toml")).unwrap();
     assert!(!saved.contains("inherited-test-secret"));
+    assert!(!saved.contains("inherited-gh-test-secret"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("inherited-gh-test-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("inherited-gh-test-secret"));
 }

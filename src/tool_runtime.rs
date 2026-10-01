@@ -983,7 +983,7 @@ fn next_fix_command(
     }
 
     if token_source == GitHubTokenSource::Missing || (check_auth && !auth_ok) {
-        return Some(r#"export GITHUB_TOKEN="$(gh auth token)""#.to_string());
+        return Some(r#"export GH_TOKEN="$(gh auth token)""#.to_string());
     }
 
     if !config_exists {

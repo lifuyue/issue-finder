@@ -784,6 +784,7 @@ fn tools_call_status_reports_invalid_config_as_json() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .env("ISSUE_FINDER_HOME", &paths.home)
+        .env_remove("GH_TOKEN")
         .env_remove("GITHUB_TOKEN")
         .args([
             "tools",
@@ -872,6 +873,8 @@ async fn tool_memory_status_and_hint_update_are_structured() {
 #[tokio::test(flavor = "current_thread")]
 async fn tool_status_reports_missing_config_and_token() {
     let _env_lock = ENV_LOCK.lock().await;
+    let _file_env_lock = env_lock::EnvLock::acquire();
+    let _gh_token_guard = EnvVarGuard::unset("GH_TOKEN");
     let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -896,13 +899,15 @@ async fn tool_status_reports_missing_config_and_token() {
     assert_eq!(status.structured_content["github"]["auth"]["ok"], false);
     assert_eq!(
         status.structured_content["nextFixCommand"],
-        r#"export GITHUB_TOKEN="$(gh auth token)""#
+        r#"export GH_TOKEN="$(gh auth token)""#
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_status_reports_config_token_without_auth_check() {
     let _env_lock = ENV_LOCK.lock().await;
+    let _file_env_lock = env_lock::EnvLock::acquire();
+    let _gh_token_guard = EnvVarGuard::unset("GH_TOKEN");
     let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
     let dir = tempdir().unwrap();
     let paths = test_paths(dir.path());
@@ -937,7 +942,8 @@ async fn tool_status_reports_config_token_without_auth_check() {
 async fn tool_status_prefers_env_token_and_reports_auth_login() {
     let _env_lock = ENV_LOCK.lock().await;
     let _file_env_lock = env_lock::EnvLock::acquire();
-    let _token_guard = EnvVarGuard::set("GITHUB_TOKEN", "env-token");
+    let _gh_token_guard = EnvVarGuard::set("GH_TOKEN", "env-token");
+    let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
     let mock_github = start_mock_tool_github();
     let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
 
@@ -956,7 +962,7 @@ async fn tool_status_prefers_env_token_and_reports_auth_login() {
     assert_eq!(status.status, "ready");
     assert_eq!(
         status.structured_content["github"]["tokenSource"],
-        "env:GITHUB_TOKEN"
+        "env:GH_TOKEN"
     );
     assert_eq!(status.structured_content["github"]["auth"]["ok"], true);
     assert_eq!(
@@ -998,6 +1004,8 @@ fn daily_and_tool_prepare_gate_share_allowed_category_policy() {
 async fn assess_selected_issue_is_read_only_without_global_discovery() {
     let _env_lock = ENV_LOCK.lock().await;
     let _file_env_lock = env_lock::EnvLock::acquire();
+    let _gh_token_guard = EnvVarGuard::unset("GH_TOKEN");
+    let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
     let mock_github = start_mock_tool_github();
     let _api_env_guard = EnvVarGuard::set("ISSUE_FINDER_GITHUB_API_BASE", mock_github.base_url());
     let dir = tempdir().unwrap();
@@ -1045,6 +1053,8 @@ async fn assess_selected_issue_is_read_only_without_global_discovery() {
 async fn tool_runtime_uses_mocked_github_and_applies_prepare_gate() {
     let _env_lock = ENV_LOCK.lock().await;
     let _file_env_lock = env_lock::EnvLock::acquire();
+    let _gh_token_guard = EnvVarGuard::unset("GH_TOKEN");
+    let _token_guard = EnvVarGuard::unset("GITHUB_TOKEN");
     assert!(
         git_available(),
         "git is required for tool runtime integration tests"
