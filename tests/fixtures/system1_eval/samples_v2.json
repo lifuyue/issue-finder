@@ -1,0 +1,1426 @@
+{
+  "version": 2,
+  "labelled_at": "2026-10-01",
+  "baseline_revision": "d970c836aecf3be808206ae21e48029ea21ee418",
+  "evaluation_context": {
+    "note": "Raw public issue/comment evidence is preserved. Repository metrics and matched Rust/TypeScript CLI profile are held constant to isolate semantic policy; this is not a claim about live source-repository rank or state.",
+    "repository_stars": 10000,
+    "repository_forks": 1500,
+    "repository_language": "Rust",
+    "repository_description": "Rust and TypeScript CLI developer tools",
+    "profile": {
+      "tech_stack": [
+        "Rust",
+        "TypeScript"
+      ],
+      "keywords": [
+        "cli"
+      ]
+    }
+  },
+  "samples": [
+    {
+      "id": "7shep_context-drift_4",
+      "provenance": {
+        "kind": "real_github_snapshot",
+        "captured_at": "2026-10-01",
+        "api_url": "https://api.github.com/repos/7shep/context-drift/issues/4",
+        "issue_state_at_capture": "closed"
+      },
+      "issue": {
+        "repo_full_name": "7shep/context-drift",
+        "number": 4,
+        "url": "https://github.com/7shep/context-drift/issues/4",
+        "title": "Document --min-confidence in the README CLI options",
+        "body": "## Problem\n\nThe README examples now show:\n\n```bash\nnpx context-drift check --changed src/components/user_profile_card.tsx --min-confidence 0.9\n```\n\nBut the CLI options list documents only `--base`, `--changed`, and `--format`. The new `--min-confidence <number>` option is implemented in `src/cli.ts` but not documented in the options section.\n\n## Impact\n\nUsers can see the flag in an example without knowing its valid range, default value, or effect on finding output.\n\n## Suggested Fix\n\nAdd `--min-confidence <number>` to the README options list with the valid `0` to `1` range and the default `0.75`.\n\n## Verification\n\nREADME should make it clear that findings below the configured confidence are hidden from CLI output.\n",
+        "labels": [
+          "documentation",
+          "good first issue"
+        ],
+        "created_at": "2026-06-03T06:33:11Z",
+        "updated_at": "2026-06-11T06:54:14Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "Exact README flag, range and default identify a checkable documentation change; documentation is allowed by the evaluation profile."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "historical_task_shape": "documentation"
+    },
+    {
+      "id": "rust-lang_rust-clippy_16858",
+      "provenance": {
+        "kind": "real_github_snapshot",
+        "captured_at": "2026-10-01",
+        "api_url": "https://api.github.com/repos/rust-lang/rust-clippy/issues/16858",
+        "issue_state_at_capture": "open"
+      },
+      "issue": {
+        "repo_full_name": "rust-lang/rust-clippy",
+        "number": 16858,
+        "url": "https://github.com/rust-lang/rust-clippy/issues/16858",
+        "title": "Stylistic lint suggestion: `#[must_use]` for types",
+        "body": "### What it does\n\nSuggest to mark any type that isn't already marked as  `#[must_use]`, with that attribute.\n\n### Advantage\n\nIt is much better/easier to explicitly opt-out of a lint on case-by-case basis\nrather than manually keeping track that every type is indeed `#[must_use]`.\n\n### Drawbacks\n\nThis would be a `restrict`-type stylistic lint.\n\n### Example\n\n```rust\nstruct S(u8); // missing #[must_use]\n```\n\n\n\n### Comparison with existing lints\n\n_No response_\n\n### Additional Context\n\n_No response_\n\nX-ref:\n* https://github.com/rust-lang/rust-clippy/issues/16858\n* https://github.com/rust-lang/rust-clippy/issues/16859 \n* https://github.com/rust-lang/rust-clippy/issues/16856\n",
+        "labels": [
+          "A-lint"
+        ],
+        "created_at": "2026-04-15T21:21:13Z",
+        "updated_at": "2026-04-26T02:33:37Z"
+      },
+      "comments": [
+        {
+          "id": 4306189723,
+          "url": "https://github.com/rust-lang/rust-clippy/issues/16858#issuecomment-4306189723",
+          "author": "Kokoro2336",
+          "author_association": "CONTRIBUTOR",
+          "created_at": "2026-04-23T16:45:39Z",
+          "body": "Hi, can i work on this issue?"
+        },
+        {
+          "id": 4321094058,
+          "url": "https://github.com/rust-lang/rust-clippy/issues/16858#issuecomment-4321094058",
+          "author": "LebedevRI",
+          "author_association": "CONTRIBUTOR",
+          "created_at": "2026-04-26T02:33:37Z",
+          "body": "> Hi, can i work on this issue?\n\nAs far as i'm concerned, please feel free to. Thank you!"
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 2
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The contributor asks permission; the maintainer quotes that inquiry and invites participation. Neither reports actual work."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "interest_only",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "encouraged"
+        }
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "clap-rs_clap_5919",
+      "provenance": {
+        "kind": "real_github_snapshot",
+        "captured_at": "2026-10-01",
+        "api_url": "https://api.github.com/repos/clap-rs/clap/issues/5919",
+        "issue_state_at_capture": "open"
+      },
+      "issue": {
+        "repo_full_name": "clap-rs/clap",
+        "number": 5919,
+        "url": "https://github.com/clap-rs/clap/issues/5919",
+        "title": "`help` command is skipped when set `ignore_errors(true)` on the command.",
+        "body": "\n### Discussed in https://github.com/clap-rs/clap/discussions/5917\n\n<div type='discussions-op-text'>\n\n<sup>Originally posted by **chungquantin** February 18, 2025</sup>\n## Dependencies\n```toml\nclap = { version = \"4.5\", features = [\"derive\"] }\n```\n\n## Description\n\nHi, considering the below code: \n\n```diff\n#[derive(Args)]\n- #[command(args_conflicts_with_subcommands = true)]\n+ #[command(args_conflicts_with_subcommands = true, ignore_errors = true)]\npub struct Cli {\n\t#[command(subcommand)]\n\tpub command: Command,\n}\n\n#[derive(Subcommand)]\npub enum Command {\n\t#[clap(alias = \"p\")]\n\tSubCommand(SubCommandA),\n}\n```\n\nBy adding the `ignore_errors`, the `help` command of the `SubCommandA` is no longer working. \n\n## How to reproduce an issue? \n\nAdd `ignore_errors` to any `Command` that contains the `Subcommand` (does have `help`). </div>\n\nCC @chungquantin",
+        "labels": [
+          "C-bug",
+          "A-parsing",
+          "E-medium"
+        ],
+        "created_at": "2025-02-19T17:48:59Z",
+        "updated_at": "2025-02-20T14:06:54Z"
+      },
+      "comments": [
+        {
+          "id": 2671538309,
+          "url": "https://github.com/clap-rs/clap/issues/5919#issuecomment-2671538309",
+          "author": "imtherealnaska",
+          "author_association": "NONE",
+          "created_at": "2025-02-20T13:42:04Z",
+          "body": "Hi, is anybody working on this issue ? I would like to pick this up "
+        },
+        {
+          "id": 2671607591,
+          "url": "https://github.com/clap-rs/clap/issues/5919#issuecomment-2671607591",
+          "author": "epage",
+          "author_association": "MEMBER",
+          "created_at": "2025-02-20T14:06:53Z",
+          "body": "Go for it!"
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 2
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "Asking whether anybody is working and saying would like to pick this up express interest, not current work; Go for it is maintainer encouragement."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "interest_only",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "encouraged"
+        }
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "clap-rs_clap_3910",
+      "provenance": {
+        "kind": "real_github_snapshot",
+        "captured_at": "2026-10-01",
+        "api_url": "https://api.github.com/repos/clap-rs/clap/issues/3910",
+        "issue_state_at_capture": "open"
+      },
+      "issue": {
+        "repo_full_name": "clap-rs/clap",
+        "number": 3910,
+        "url": "https://github.com/clap-rs/clap/issues/3910",
+        "title": "clap_complete: zsh completion doesn't add conflicts for group",
+        "body": "### Please complete the following tasks\n\n- [X] I have searched the [discussions](https://github.com/clap-rs/clap/discussions)\n- [X] I have searched the [open](https://github.com/clap-rs/clap/issues) and [rejected](https://github.com/clap-rs/clap/issues?q=is%3Aissue+label%3AS-wont-fix+is%3Aclosed) issues\n\n### Rust Version\n\nrustc 1.62.0 (a8314ef7d 2022-06-27)\n\n### Clap Version\n\n3.2.6\n\n### Minimal reproducible code\n\n```rust\r\nuse clap::*;\r\nuse clap_complete::{generate, shell};\r\n\r\nfn main() {\r\n    let mut app = Command::new(\"test\")\r\n        .group(ArgGroup::new(\"gr\").args(&[\"a\", \"b\"]).conflicts_with(\"c\"))\r\n        .arg(Arg::new(\"a\").short('a'))\r\n        .arg(Arg::new(\"b\").short('b'))\r\n        .arg(Arg::new(\"c\").short('c'))\r\n        .arg(&c);\r\n    app.build();\r\n        \r\n   generate(shell::Zsh, &mut app, app.get_name(), &mut std::io::stdout());\r\n}\r\n```\r\n\n\n### Steps to reproduce the bug with the above code\n\nRun code\n\n### Actual Behaviour\n\nThe zsh completions generated don't account for the conflict between the group and option c. \n\n### Expected Behaviour\n\nThe zsh completions should specify that the options in the group conflict with option c.\n\n### Additional Context\n\n_No response_\n\n### Debug Output\n\n_No response_",
+        "labels": [
+          "C-bug",
+          "A-completion",
+          "E-easy"
+        ],
+        "created_at": "2022-07-12T07:59:15Z",
+        "updated_at": "2026-09-02T18:37:44Z"
+      },
+      "comments": [
+        {
+          "id": 2094227599,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2094227599",
+          "author": "kazuminn",
+          "author_association": "NONE",
+          "created_at": "2024-05-04T14:46:29Z",
+          "body": "Is this problem still unsolved?"
+        },
+        {
+          "id": 2094288968,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2094288968",
+          "author": "epage",
+          "author_association": "MEMBER",
+          "created_at": "2024-05-04T16:26:56Z",
+          "body": "With this being open, likely yes."
+        },
+        {
+          "id": 2094817416,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2094817416",
+          "author": "kazuminn",
+          "author_association": "NONE",
+          "created_at": "2024-05-05T13:50:33Z",
+          "body": "@epage Thanks for your replay.\r\nCould you fix this issue or tell me that how to fix this issue.\r\nThen I can write and contribute some code of the clap_complete.\r\nDo you have an idea of fixing?"
+        },
+        {
+          "id": 2095122668,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2095122668",
+          "author": "epage",
+          "author_association": "MEMBER",
+          "created_at": "2024-05-06T03:16:17Z",
+          "body": "I am  not a zsh user and do not know its completion system to be able to say how to do this.  I assume tmccombs verified that it supports conflicts but I'm not even sure.  If it doesn't, then this is more likely to just be rejected.\r\n\r\nWe are looking at changing our completion system which would make it easier to implement these rich features and do it once for all shells.  See #3166."
+        },
+        {
+          "id": 2095146111,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2095146111",
+          "author": "tmccombs",
+          "author_association": "CONTRIBUTOR",
+          "created_at": "2024-05-06T03:46:03Z",
+          "body": "zsh does support conflicts.\r\n\r\nYou can see an example of how it is done in the `fd` zsh completions (which are currently manually maintained), such as [here](https://github.com/sharkdp/fd/blob/master/contrib/completion/_fd#L91) where we declare that `--list-details`  conflicts with the `abs-path`, `null-sep`, `max-results`, and  `exec-cmds` groups. \r\n\r\nBasically, when calling `_arguments` you put a list of conflicting options or option groups in parenthesis before the name of the option. \r\n\r\nFrom [zshcompsys(1)][1]:\r\n\r\n> Each of the forms above may be preceded by a list in parentheses of option names and argument numbers.  If the given option is on the command line, the options  and  arguments  indicated  in  parentheses  will not be offered.  For example, ‘(-two -three 1)-one:...' completes the option ‘-one'; if this appears on the command line, the options -two and   -three and the first ordinary argument will not be completed after it.\r\n> ...\r\n> Options can be grouped to simplify exclusion lists. A group is introduced with ‘+' followed by a name for the group in the subsequent word. Whole groups can then be referenced in an exclusion list or a group name can be used to disambiguate between two forms of the same option.\r\n\r\n[1]: https://man.archlinux.org/man/zshcompsys.1"
+        },
+        {
+          "id": 2095255762,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-2095255762",
+          "author": "kazuminn",
+          "author_association": "NONE",
+          "created_at": "2024-05-06T06:07:34Z",
+          "body": "I have a panic with OSS hayabusa.\r\n\r\nhttps://github.com/Yamato-Security/hayabusa/pull/1340\r\n\r\n```\r\nthread 'main' panicked at .cargo/registry/src/index.crates.io-6f17d22bba15001f/clap_builder-4.5.2/src/builder/command.rs:3702:21:\r\nCommand::get_arg_conflicts_with: The passed arg conflicts with an arg unknown to the cmd\r\n```"
+        },
+        {
+          "id": 5514517810,
+          "url": "https://github.com/clap-rs/clap/issues/3910#issuecomment-5514517810",
+          "author": "pentaoa",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T18:37:44Z",
+          "body": "I’m working on this. The missing behavior is in `Command::get_arg_conflicts_with`: it expands conflicts that point to a group, but not conflicts declared by a group containing the argument. I’ll fix that query and add both builder-level and Zsh completion regression coverage. I’m using an AI coding assistant and will review and test the patch before submitting."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 7
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "The latest contributor explicitly reports current work and regression coverage; do not infer an actual open PR from a future submission."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "working",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "rust-lang_rust-clippy_17398",
+      "provenance": {
+        "kind": "real_github_snapshot",
+        "captured_at": "2026-10-01",
+        "api_url": "https://api.github.com/repos/rust-lang/rust-clippy/issues/17398",
+        "issue_state_at_capture": "open"
+      },
+      "issue": {
+        "repo_full_name": "rust-lang/rust-clippy",
+        "number": 17398,
+        "url": "https://github.com/rust-lang/rust-clippy/issues/17398",
+        "title": "`missing_asserts_for_indexing` ignores `match` for length",
+        "body": "### Summary\n\nlint ignores context of `match slice.len()`\n\n### Lint Name\n\nmissing_asserts_for_indexing\n\n### Reproducer\n\nI tried this code:\n\n```rust\n// supported: &[u8] is a function parameter, value from enum variant or provided in any other way\n// to compile this code u8 can be replaced with anything implementing Display, or Debug (in that case add `:?` to format string)\n\nmatch supported.len() {\n    0 => {}\n    1 => println!(\"{}\", supported[0]),\n    _ => println!(\"{} or {}\", supported[0], supported[1]),\n}\n```\n\nI saw this happen:\n\n```\nsupported[0]\nsupported[0], supported[1]\n\n indexing into a slice multiple times without an `assert`\n```\n\nI expected to see this happen:\nas `usize is not negative and value 0 was explicitly checked, lint should never fire.\n\n### Version\n\n```text\nrustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-apple-darwin\nrelease: 1.96.0\nLLVM version: 22.1.2\n```\n\n### Additional Labels\n\n_No response_",
+        "labels": [
+          "C-bug",
+          "I-false-positive"
+        ],
+        "created_at": "2026-07-10T13:39:44Z",
+        "updated_at": "2026-08-23T18:28:27Z"
+      },
+      "comments": [
+        {
+          "id": 4937037066,
+          "url": "https://github.com/rust-lang/rust-clippy/issues/17398#issuecomment-4937037066",
+          "author": "wasd243",
+          "author_association": "CONTRIBUTOR",
+          "created_at": "2026-07-10T15:46:11Z",
+          "body": "@rustbot claim"
+        },
+        {
+          "id": 4940804845,
+          "url": "https://github.com/rust-lang/rust-clippy/issues/17398#issuecomment-4940804845",
+          "author": "eirnym",
+          "author_association": "NONE",
+          "created_at": "2026-07-11T00:37:37Z",
+          "body": "Still claim of the assert without a fix is false positive. "
+        },
+        {
+          "id": 5387732562,
+          "url": "https://github.com/rust-lang/rust-clippy/issues/17398#issuecomment-5387732562",
+          "author": "wasd243",
+          "author_association": "CONTRIBUTOR",
+          "created_at": "2026-08-23T18:28:25Z",
+          "body": "@rustbot unclaim\n"
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 3
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The only observed claimant later unclaims. A different author uses claim about a lint assertion, not contributor ownership."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "withdrawn",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_negative_quote",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "reviewer",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "The old comment said \"I am working on this\". That referred to a different issue; nobody here has started."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 1
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "Quoted work is explicitly about another issue; the speaker denies current work."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_negated_work",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "I am not working on this. I only wanted to ask whether external contributions be welcome."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 1
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "Negation denies actual work, and the request expresses only interest."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "interest_only",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_workers_one_withdraws",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "I am working on this."
+        },
+        {
+          "id": 2,
+          "url": "https://example.invalid/comments/2",
+          "author": "bob",
+          "author_association": "NONE",
+          "created_at": "2026-09-03T00:00:00Z",
+          "body": "I am working on this too; I have a failing export test."
+        },
+        {
+          "id": 3,
+          "url": "https://example.invalid/comments/3",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-04T00:00:00Z",
+          "body": "I stopped working on this and will not submit a patch."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 3
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "Alice withdrew, but Bob still reports active work. One withdrawal cannot cancel another participant."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "working",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_all_workers_withdraw",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "I am working on this."
+        },
+        {
+          "id": 2,
+          "url": "https://example.invalid/comments/2",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-03T00:00:00Z",
+          "body": "I am no longer working on this. Please leave it available for another contributor."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 2
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The same actor explicitly ends their only active contribution; old work text must not keep the issue hidden."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "withdrawn",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_unordered_conflict",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "unknown",
+          "body": "I am working on this."
+        },
+        {
+          "id": 2,
+          "url": "https://example.invalid/comments/2",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "unknown",
+          "body": "I have stopped working on this."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 2
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "Same actor reports incompatible states without usable timestamps; this cannot establish current ownership."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "conflicting",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_fix_claim",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "I fixed this locally; I have not opened a PR and nobody has verified my change yet."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 1
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "A local fix claim needs verification and does not establish an actual PR or merge."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "fix_claimed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_open_pr_fact",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 1,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "hidden",
+        "reasons": [
+          "A confirmed open PR remains a factual competition constraint even if supplied comments show no contributor claim."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_closed_pr_not_merged",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 1
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "Closed PR status alone does not prove merge or resolution; a concrete still-open task remains reviewable."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_comments_unavailable",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": false,
+        "comments_available": 12
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "Comments were not fetched; unknown contribution is a missing-information state, not proof that nobody is working."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "unknown",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_truncated_timeline",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Export --format json currently drops fields whose values are empty strings. Preserve those fields in src/export.rs. An input {\"name\":\"\"} must export as {\"name\":\"\"}; add a regression check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [
+        {
+          "id": 1,
+          "url": "https://example.invalid/comments/1",
+          "author": "alice",
+          "author_association": "NONE",
+          "created_at": "2026-09-02T00:00:00Z",
+          "body": "I am working on this."
+        }
+      ],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": false,
+        "comments_available": 40
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "A single earlier work comment from an incomplete timeline cannot establish the latest contribution state."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "unknown",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_empty_template",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Bug report",
+        "body": "## Description\n\n## Steps to reproduce\n\n## Expected behavior\n\n## Actual behavior\n",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "reject",
+        "behavior": "visible_lower",
+        "reasons": [
+          "The empty template provides no concrete goal or check; keep it visible for triage instead of excluding by generated form."
+        ],
+        "answers": {
+          "task_type": "unclear",
+          "description_quality": "unclear",
+          "contribution_signal": "not_observed",
+          "scope": "unclear",
+          "preference_match": "matches",
+          "verification_clues": "absent",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "generated_template"
+    },
+    {
+      "id": "synthetic_long_vague",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Make the CLI better",
+        "body": "We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. We should improve quality and tests and make everything more robust, clear, useful and pleasant. This is an important change that should benefit users and make the project stronger. ",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "weak",
+        "behavior": "visible_lower",
+        "reasons": [
+          "Long prose repeatedly asks for quality, tests and improvements without naming any actual defect, change or expected result."
+        ],
+        "answers": {
+          "task_type": "unclear",
+          "description_quality": "unclear",
+          "contribution_signal": "not_observed",
+          "scope": "unclear",
+          "preference_match": "matches",
+          "verification_clues": "absent",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "synthetic_short_clear_docs",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Correct README timeout default",
+        "body": "In README.md, change the documented --timeout default from 10 seconds to 30 seconds to match src/args.rs.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "A one-sentence correction specifies the exact wrong and right default; short docs are valid concrete tasks when preferences allow them."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "documentation"
+    },
+    {
+      "id": "synthetic_truncated_body",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 1,
+        "url": "https://example.invalid/issues/1",
+        "title": "Preserve empty values in CLI export",
+        "body": "Preserve empty export fields. The expected output is ",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": true,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible_lower",
+        "reasons": [
+          "The body stops before the expected output; a missing check should remain uncertainty rather than an inferred weak task."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "partial",
+          "contribution_signal": "not_observed",
+          "scope": "unclear",
+          "preference_match": "matches",
+          "verification_clues": "unclear",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "implementation"
+    },
+    {
+      "id": "v2_concrete_content_fill",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2001,
+        "url": "https://example.invalid/org/semantic-regression/issues/2001",
+        "title": "Add missing exit-code descriptions",
+        "body": "Add the documented exit codes 2 and 3 to docs/errors.md with examples matching the CLI output.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "content_fill",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 task_shape hard filtering"
+      }
+    },
+    {
+      "id": "v2_concrete_learning_exercise",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2002,
+        "url": "https://example.invalid/org/semantic-regression/issues/2002",
+        "title": "Correct exercise failure handling",
+        "body": "The Rust CLI exercise exits 0 for malformed flags. Exit 2 and add a test asserting the malformed flag fails.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "learning_exercise",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 task_shape hard filtering"
+      }
+    },
+    {
+      "id": "v2_concrete_status_dashboard",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2003,
+        "url": "https://example.invalid/org/semantic-regression/issues/2003",
+        "title": "Repair generated status links",
+        "body": "The generated CLI status dashboard links to a removed docs path. Update the generator to use docs/cli.md and assert the generated link exists.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "status_dashboard",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 task_shape hard filtering"
+      }
+    },
+    {
+      "id": "v2_concrete_generated_template",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2004,
+        "url": "https://example.invalid/org/semantic-regression/issues/2004",
+        "title": "Fix generated CLI help example",
+        "body": "The generator emits --out in the usage example; change its template to emit --output and add a golden output check.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "generated_template",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 task_shape hard filtering"
+      }
+    },
+    {
+      "id": "v2_concrete_contribution_campaign",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2005,
+        "url": "https://example.invalid/org/semantic-regression/issues/2005",
+        "title": "Bounded event contribution",
+        "body": "For the contributor event fix the Rust CLI Unicode argument crash. Add a regression test passing emoji to --output.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "contribution_campaign",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 task_shape hard filtering"
+      }
+    },
+    {
+      "id": "v2_concrete_reward_marketplace",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "Hand-authored regression example; not a GitHub snapshot."
+      },
+      "issue": {
+        "repo_full_name": "fixture/semantic-regression",
+        "number": 2006,
+        "url": "https://example.invalid/org/semantic-regression/issues/2006",
+        "title": "Rewarded repository correction",
+        "body": "Reward available for fixing the Rust CLI Unicode argument crash. Add a regression test passing emoji to --output.",
+        "labels": [
+          "bug"
+        ],
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z"
+      },
+      "comments": [],
+      "evidence": {
+        "body_truncated": false,
+        "comments_complete": true,
+        "comments_available": 0
+      },
+      "facts": {
+        "open_pr_refs": 0,
+        "closed_pr_refs": 0
+      },
+      "expected": {
+        "quality": "good",
+        "behavior": "visible",
+        "reasons": [
+          "The requested repository change is concrete, clear and bounded. Its form does not justify exclusion."
+        ],
+        "answers": {
+          "task_type": "concrete_change",
+          "description_quality": "clear",
+          "contribution_signal": "not_observed",
+          "scope": "bounded",
+          "preference_match": "matches",
+          "verification_clues": "present",
+          "maintainer_signal": "not_observed"
+        }
+      },
+      "historical_task_shape": "reward_marketplace",
+      "historical_v1_policy": {
+        "hidden": true,
+        "reason": "v1 reward_marketplace low trust and visibility rule"
+      }
+    }
+  ],
+  "question_set_version": "scout-semantics-v2",
+  "historical_fixture": "samples.json (scout-semantics-v1; unchanged)"
+}

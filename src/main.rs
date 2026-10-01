@@ -41,6 +41,28 @@ async fn main() -> Result<()> {
     let paths = IssueFinderPaths::resolve()?;
 
     match cli.command {
+        Command::System1Check { codex_binary } => {
+            let result: Result<serde_json::Value> = async {
+                let config = Config::load_or_default(&paths)?;
+                config.system1.validate()?;
+                let binary = codex_binary.or_else(|| {
+                    (!config.system1.codex_binary.is_empty())
+                        .then(|| config.system1.codex_binary.clone())
+                });
+                issue_finder::system1::probe(binary, config.system1.timeout_seconds).await
+            }
+            .await;
+            match result {
+                Ok(result) => println!("{}", serde_json::to_string(&result)?),
+                Err(error) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"success":false,"error":error.to_string()})
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Init(args) => {
             let config = initialize_interactive(&paths, args.force)?;
             println!("Issue Finder initialized at {}", paths.home.display());
@@ -53,19 +75,19 @@ async fn main() -> Result<()> {
         Command::Scout(args) => {
             let config = Config::load(&paths)?;
             let scope = discovery_scope(args.repo)?;
-            let result = workflow::scout_with_options(
-                &paths,
-                &config,
-                args.limit,
-                args.refresh,
-                ScoutOptions {
-                    include_filtered: false,
-                    record_exposure: !args.dry_run,
-                    source: RecommendationEventSource::CliScout,
-                },
-                scope,
-            )
-            .await?;
+            let result =
+                issue_finder::recommendation::RecommendationEngine::for_codex(&paths, &config)
+                    .scout(
+                        args.limit,
+                        args.refresh,
+                        ScoutOptions {
+                            include_filtered: false,
+                            record_exposure: !args.dry_run,
+                            source: RecommendationEventSource::CliScout,
+                        },
+                        scope,
+                    )
+                    .await?;
             if args.stats_json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else if args.json {
@@ -76,15 +98,19 @@ async fn main() -> Result<()> {
         }
         Command::Assess(args) => {
             let config = Config::load(&paths)?;
-            let ranked = workflow::assess_issue_selection_with_options(
-                &paths,
-                &config,
-                workflow::IssueSelector::new(args.issue, args.url),
-                args.refresh,
-                !args.dry_run,
-                RecommendationEventSource::CliAssess,
-            )
-            .await?;
+            let reference = workflow::IssueSelector::new(args.issue, args.url).issue_ref()?;
+            let issue = issue_finder::github::GitHubClient::new(&config)?
+                .fetch_issue_for_assessment(&reference)
+                .await?;
+            let ranked =
+                issue_finder::recommendation::RecommendationEngine::for_codex(&paths, &config)
+                    .assess_issue(
+                        issue,
+                        args.refresh,
+                        !args.dry_run,
+                        RecommendationEventSource::CliAssess,
+                    )
+                    .await?;
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&ranked)?);
             } else {

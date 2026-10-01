@@ -54,8 +54,9 @@ Session tools resolve nonempty `GH_TOKEN`, optional `[github].token`, then a bou
 captured `gh auth token --hostname github.com` lookup. The fallback does not print
 or save the credential. Configure read access through the host's supported secret
 or authentication mechanism; never put tokens in JSON arguments or chat.
-`gh` is optional when another credential source is present. Python, MCP
-registration, a model API key, and a separate Codex CLI are not prerequisites.
+`gh` is optional when another credential source is present. Python and MCP
+registration are not prerequisites. Scout's System 1 requires an authenticated
+Codex CLI, configured separately from the GitHub credential.
 
 Missing configuration is valid. Defaults and per-call `profile` preferences are
 sufficient; `issue-finder init` is optional and is not a hidden questionnaire.
@@ -66,6 +67,87 @@ Read access suffices for discovery and assessment. Codex handles authorized fork
 push, and PR delivery with its normal tools and the environment's credentials;
 read access, successful local checks, or a pushed fork does not prove upstream
 PR permission.
+
+## Codex CLI: Cloud installation, local reuse
+
+System 1 uses Codex app-server with `gpt-6-luna` and `reasoning.effort=none`.
+The tested compatibility baseline is Codex CLI `0.159.3`. Version output or a
+login-status message alone does not validate model access, authentication,
+reasoning settings, or strict structured output.
+
+After installing an Issue Finder build that exposes `system1-check`, local use
+checks the existing Codex executable and login without installing or upgrading:
+
+```bash
+/path/to/issue-finder/scripts/system1-codex.sh --check-only
+# If the selected binaries are outside PATH:
+/path/to/issue-finder/scripts/system1-codex.sh --check-only \
+  --codex-binary /absolute/path/to/codex \
+  --issue-finder-binary /absolute/path/to/issue-finder
+```
+
+For an explicitly configured Cloud setup, install the pinned CLI into a private
+npm prefix and immediately run the same live acceptance check:
+
+```bash
+/path/to/issue-finder/scripts/system1-codex.sh --cloud-install \
+  --prefix /workspace/.issue-finder-runtime/codex-cli \
+  --issue-finder-binary /absolute/path/to/issue-finder
+```
+
+Cloud installation requires Node.js/npm. It installs `@openai/codex@0.159.3`
+with `npm --prefix`, checks the exact installed version, and does not change the
+global npm install, shell profile, PATH, or Codex configuration. Supply that
+prefix's `node_modules/.bin/codex` through `ISSUE_FINDER_CODEX_BIN` in the supported
+Cloud runtime settings or `[system1].codex_binary`. Persist the setting in the
+saved environment and verify a fresh task. The repository script does not
+publish or edit Cloud settings. Do not set an existing Codex override during
+`--cloud-install`; that mode explicitly chooses its private installed binary.
+
+Both paths invoke the production `issue-finder system1-check --codex-binary PATH`
+adapter. This makes a real minimal schema-constrained request in an independent
+context with no classification tools and checks protocol-confirmed model and
+reasoning settings plus typed answer validation. A successful request validates
+runtime authentication. The command returns one redacted JSON object on stdout;
+installation and diagnostic logs go to stderr. A failed check exits unsuccessfully
+and must not be interpreted as a working environment. Existing newer local CLI
+versions may be compatible; verify the actual request instead of automatically
+installing the baseline version.
+
+Local discovery supports `ISSUE_FINDER_CODEX_BIN`, configured
+`[system1].codex_binary`, and the existing CLI's discoverable installation. It
+reuses the user's available login and leaves global configuration alone.
+The check-only script discovers PATH or an explicit executable override; use
+`issue-finder system1-check` directly to exercise configured binary discovery.
+A scout provider reuses one app-server process with independent threads per issue,
+separate from the agent's working chat. Each issue sends all seven v2 questions in
+one request while retaining each question's material and criteria. Default
+`[system1].concurrency = 4` must be positive and has no additional upper cap;
+`candidate_budget = 24` limits screened issues independently. Candidate failures
+are isolated; the adapter permits at most one retry for a retryable server response
+within the original timeout. A minimal `system1-check` validates runtime access;
+it does not establish batch throughput or v2 classification quality. Historical
+single-request and eight-question reports remain historical evidence.
+Default settings and screening behavior are in the [System 1 guide](../../../docs/system1.md).
+
+### Codex authentication
+
+Provision Codex authentication through the host's supported credential mechanism;
+`GH_TOKEN` only authenticates GitHub. The script neither initializes login nor
+reads, prints, copies, or commits authentication tokens. Never pass credential
+values in command arguments, issue arguments, chat, logs, or repository files.
+
+If Cloud bootstrapping injects a Codex-managed `auth.json`, use a private writable
+`CODEX_HOME` distinct from the main agent's configuration, restrict file access,
+and avoid replacing an existing user's auth/configuration. The adapter uses the
+provisioned CLI authentication in its independent context. Do not treat a static
+injected JSON file as permanent login: CLI refreshes change the runtime copy,
+not the original injected value. Concurrent tasks initialized from the same
+refresh credential can conflict. Without refresh persistence, this is a
+transitional setup whose injected credential must be replaced after expiry.
+Long-lived cross-task credential management is a separate deployment choice.
+Acceptance requires a successful real model request, not file existence or
+`codex login status` alone.
 
 ## Standard Cloud credential setup
 

@@ -311,6 +311,7 @@ fn gh_token_only_reaches_all_assessment_clients_without_gh_or_secret_persistence
 fn call(home: &Path, url: &str, tool: &str, args: Value) -> (bool, Value) {
     let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
         .env("ISSUE_FINDER_HOME", home)
+        .env("ISSUE_FINDER_CODEX_BIN", home.join("not-installed-codex"))
         .env("ISSUE_FINDER_GITHUB_API_BASE", url)
         .env_remove("GITHUB_TOKEN")
         .env("GH_TOKEN", "fixture-token")

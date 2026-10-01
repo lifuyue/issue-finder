@@ -1,0 +1,639 @@
+{
+  "core_correct": 15,
+  "core_total": 15,
+  "false_hidden_good": 0,
+  "fixture_labels_frozen_at": "2026-10-01",
+  "provider": "codex_app_server:contract=1:adapter=1:model=gpt-6-luna:effort=none:binary=/home/agent/.local/lib/node_modules/@openai/codex/bin/codex.js:version=codex-cli 0.159.3:timeout_ms=120000",
+  "samples": [
+    {
+      "answers": {
+        "contribution_signal": "not_observed",
+        "description_quality": "clear",
+        "maintainer_signal": "not_observed",
+        "preference_match": "matches",
+        "scope": "bounded",
+        "task_shape": "documentation",
+        "task_type": "concrete_change",
+        "verification_clues": "present"
+      },
+      "id": "7shep_context-drift_4",
+      "mismatches": [],
+      "policy": {
+        "category": "high_value_ready",
+        "execution_score": 95,
+        "hidden": false,
+        "id": "7shep_context-drift_4",
+        "missing_evidence": [
+          "Available comments do not establish that nobody is working; assess must read current discussion"
+        ],
+        "penalty": 0,
+        "risk_tags": [],
+        "score": 586
+      },
+      "response": {
+        "answers": [
+          {
+            "answer": {
+              "type": "choice",
+              "value": "concrete_change"
+            },
+            "probabilities": null,
+            "question_id": "task_type",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "clear"
+            },
+            "probabilities": null,
+            "question_id": "description_quality",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "not_observed"
+            },
+            "probabilities": null,
+            "question_id": "contribution_signal",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "bounded"
+            },
+            "probabilities": null,
+            "question_id": "scope",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "matches"
+            },
+            "probabilities": null,
+            "question_id": "preference_match",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "documentation"
+            },
+            "probabilities": null,
+            "question_id": "task_shape",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "present"
+            },
+            "probabilities": null,
+            "question_id": "verification_clues",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "not_observed"
+            },
+            "probabilities": null,
+            "question_id": "maintainer_signal",
+            "status": "answered"
+          }
+        ],
+        "candidate_id": "7shep/context-drift:4",
+        "input_id": "3ffdaf690c32611580cd905414dccce01e1021770922d7460f54ec8292e56920",
+        "metadata": {
+          "duration_ms": 9690,
+          "model": "gpt-6-luna",
+          "provider": "codex_app_server",
+          "reasoning_effort": "none",
+          "usage": {
+            "cacheWriteInputTokens": 0,
+            "cachedInputTokens": 0,
+            "inputTokens": 11073,
+            "outputTokens": 238,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 11311
+          }
+        },
+        "status": "complete"
+      }
+    },
+    {
+      "answers": {
+        "contribution_signal": "interest_only",
+        "description_quality": "clear",
+        "maintainer_signal": "not_observed",
+        "preference_match": "matches",
+        "scope": "design_needed",
+        "task_shape": "implementation",
+        "task_type": "concrete_change",
+        "verification_clues": "present"
+      },
+      "id": "rust-lang_rust-clippy_16858",
+      "mismatches": [
+        {
+          "actual": "not_observed",
+          "expected": "encouraged",
+          "question": "maintainer_signal"
+        },
+        {
+          "actual": "design_needed",
+          "expected": "bounded",
+          "question": "scope"
+        }
+      ],
+      "policy": {
+        "category": "high_value_needs_scoping",
+        "execution_score": 65,
+        "hidden": false,
+        "id": "rust-lang_rust-clippy_16858",
+        "missing_evidence": [],
+        "penalty": 0,
+        "risk_tags": [
+          "scope_risk"
+        ],
+        "score": 546
+      },
+      "response": {
+        "answers": [
+          {
+            "answer": {
+              "type": "choice",
+              "value": "concrete_change"
+            },
+            "probabilities": null,
+            "question_id": "task_type",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "clear"
+            },
+            "probabilities": null,
+            "question_id": "description_quality",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "interest_only"
+            },
+            "probabilities": null,
+            "question_id": "contribution_signal",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "design_needed"
+            },
+            "probabilities": null,
+            "question_id": "scope",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "matches"
+            },
+            "probabilities": null,
+            "question_id": "preference_match",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "implementation"
+            },
+            "probabilities": null,
+            "question_id": "task_shape",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "present"
+            },
+            "probabilities": null,
+            "question_id": "verification_clues",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "not_observed"
+            },
+            "probabilities": null,
+            "question_id": "maintainer_signal",
+            "status": "answered"
+          }
+        ],
+        "candidate_id": "rust-lang/rust-clippy:16858",
+        "input_id": "97af9f7cd25b242377e872ff5109f785e0c9952445f216a07782e75d4068b665",
+        "metadata": {
+          "duration_ms": 7524,
+          "model": "gpt-6-luna",
+          "provider": "codex_app_server",
+          "reasoning_effort": "none",
+          "usage": {
+            "cacheWriteInputTokens": 0,
+            "cachedInputTokens": 0,
+            "inputTokens": 13210,
+            "outputTokens": 244,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 13454
+          }
+        },
+        "status": "complete"
+      }
+    },
+    {
+      "answers": {
+        "contribution_signal": "interest_only",
+        "description_quality": "clear",
+        "maintainer_signal": "encouraged",
+        "preference_match": "matches",
+        "scope": "bounded",
+        "task_shape": "implementation",
+        "task_type": "concrete_change",
+        "verification_clues": "present"
+      },
+      "id": "clap-rs_clap_5919",
+      "mismatches": [],
+      "policy": {
+        "category": "high_value_ready",
+        "execution_score": 95,
+        "hidden": false,
+        "id": "clap-rs_clap_5919",
+        "missing_evidence": [],
+        "penalty": 0,
+        "risk_tags": [],
+        "score": 589
+      },
+      "response": {
+        "answers": [
+          {
+            "answer": {
+              "type": "choice",
+              "value": "concrete_change"
+            },
+            "probabilities": null,
+            "question_id": "task_type",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "clear"
+            },
+            "probabilities": null,
+            "question_id": "description_quality",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "interest_only"
+            },
+            "probabilities": null,
+            "question_id": "contribution_signal",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "bounded"
+            },
+            "probabilities": null,
+            "question_id": "scope",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "matches"
+            },
+            "probabilities": null,
+            "question_id": "preference_match",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "implementation"
+            },
+            "probabilities": null,
+            "question_id": "task_shape",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "present"
+            },
+            "probabilities": null,
+            "question_id": "verification_clues",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "encouraged"
+            },
+            "probabilities": null,
+            "question_id": "maintainer_signal",
+            "status": "answered"
+          }
+        ],
+        "candidate_id": "clap-rs/clap:5919",
+        "input_id": "dde8e4ad9e8cfe24ef829106b60f4603f9993ced1b60ac2439b4a0db239caef2",
+        "metadata": {
+          "duration_ms": 6587,
+          "model": "gpt-6-luna",
+          "provider": "codex_app_server",
+          "reasoning_effort": "none",
+          "usage": {
+            "cacheWriteInputTokens": 0,
+            "cachedInputTokens": 0,
+            "inputTokens": 13740,
+            "outputTokens": 246,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 13986
+          }
+        },
+        "status": "complete"
+      }
+    },
+    {
+      "answers": {
+        "contribution_signal": "working",
+        "description_quality": "clear",
+        "maintainer_signal": "not_observed",
+        "preference_match": "matches",
+        "scope": "bounded",
+        "task_shape": "implementation",
+        "task_type": "concrete_change",
+        "verification_clues": "present"
+      },
+      "id": "clap-rs_clap_3910",
+      "mismatches": [],
+      "policy": {
+        "category": "contested_or_low_trust",
+        "execution_score": 95,
+        "hidden": false,
+        "id": "clap-rs_clap_3910",
+        "missing_evidence": [],
+        "penalty": 0,
+        "risk_tags": [
+          "competition_contested"
+        ],
+        "score": 269
+      },
+      "response": {
+        "answers": [
+          {
+            "answer": {
+              "type": "choice",
+              "value": "concrete_change"
+            },
+            "probabilities": null,
+            "question_id": "task_type",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "clear"
+            },
+            "probabilities": null,
+            "question_id": "description_quality",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "working"
+            },
+            "probabilities": null,
+            "question_id": "contribution_signal",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "bounded"
+            },
+            "probabilities": null,
+            "question_id": "scope",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "matches"
+            },
+            "probabilities": null,
+            "question_id": "preference_match",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "implementation"
+            },
+            "probabilities": null,
+            "question_id": "task_shape",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "present"
+            },
+            "probabilities": null,
+            "question_id": "verification_clues",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "not_observed"
+            },
+            "probabilities": null,
+            "question_id": "maintainer_signal",
+            "status": "answered"
+          }
+        ],
+        "candidate_id": "clap-rs/clap:3910",
+        "input_id": "51d53d0b4689d47a5cc87bded54d00189b9a2955f5bd89e317ed647e0c719124",
+        "metadata": {
+          "duration_ms": 6664,
+          "model": "gpt-6-luna",
+          "provider": "codex_app_server",
+          "reasoning_effort": "none",
+          "usage": {
+            "cacheWriteInputTokens": 0,
+            "cachedInputTokens": 0,
+            "inputTokens": 21360,
+            "outputTokens": 245,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 21605
+          }
+        },
+        "status": "complete"
+      }
+    },
+    {
+      "answers": {
+        "contribution_signal": "withdrawn",
+        "description_quality": "clear",
+        "maintainer_signal": "not_observed",
+        "preference_match": "matches",
+        "scope": "bounded",
+        "task_shape": "implementation",
+        "task_type": "concrete_change",
+        "verification_clues": "present"
+      },
+      "id": "rust-lang_rust-clippy_17398",
+      "mismatches": [],
+      "policy": {
+        "category": "high_value_ready",
+        "execution_score": 95,
+        "hidden": false,
+        "id": "rust-lang_rust-clippy_17398",
+        "missing_evidence": [],
+        "penalty": 0,
+        "risk_tags": [],
+        "score": 587
+      },
+      "response": {
+        "answers": [
+          {
+            "answer": {
+              "type": "choice",
+              "value": "concrete_change"
+            },
+            "probabilities": null,
+            "question_id": "task_type",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "clear"
+            },
+            "probabilities": null,
+            "question_id": "description_quality",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "withdrawn"
+            },
+            "probabilities": null,
+            "question_id": "contribution_signal",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "bounded"
+            },
+            "probabilities": null,
+            "question_id": "scope",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "matches"
+            },
+            "probabilities": null,
+            "question_id": "preference_match",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "implementation"
+            },
+            "probabilities": null,
+            "question_id": "task_shape",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "present"
+            },
+            "probabilities": null,
+            "question_id": "verification_clues",
+            "status": "answered"
+          },
+          {
+            "answer": {
+              "type": "choice",
+              "value": "not_observed"
+            },
+            "probabilities": null,
+            "question_id": "maintainer_signal",
+            "status": "answered"
+          }
+        ],
+        "candidate_id": "rust-lang/rust-clippy:17398",
+        "input_id": "789d05a05561a89d0f98589b0a2f08cddbd6d196c772bedb6a291f03534a03e9",
+        "metadata": {
+          "duration_ms": 6440,
+          "model": "gpt-6-luna",
+          "provider": "codex_app_server",
+          "reasoning_effort": "none",
+          "usage": {
+            "cacheWriteInputTokens": 0,
+            "cachedInputTokens": 0,
+            "inputTokens": 14633,
+            "outputTokens": 247,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 14880
+          }
+        },
+        "status": "complete"
+      }
+    }
+  ],
+  "evidence_manifest": {
+    "fixture": "tests/fixtures/system1_eval/samples.json",
+    "fixture_sha256": "5d2d604482890adf5187743da991537bc061b0d48f8ea13bec8c472fc16b75cb",
+    "baseline": "tests/fixtures/system1_eval/legacy_baseline.json",
+    "baseline_sha256": "4a2532706d43576206a66561787bfcc6e29c41fbbcfbe560e5fd4b35d41df14c",
+    "baseline_revision": "d970c836aecf3be808206ae21e48029ea21ee418",
+    "question_set_version": "scout-semantics-v1",
+    "real_snapshot_count": 5,
+    "synthetic_example_count": 14,
+    "offline_baseline_false_hidden_good": 11,
+    "offline_gold_snapshot_false_hidden_good": 0,
+    "offline_top_five_appropriate": 5,
+    "all_answers_correct": 38,
+    "all_answers_total": 40,
+    "labels_unchanged_after_model_run": true
+  },
+  "source_snapshot": {
+    "note": "Post-run source snapshot at report save. Model response input_ids identify the actual request material/question content. The adapter subsequently received stderr log suppression; gold labels were not changed.",
+    "sha256": {
+      "src/system1/questions.rs": "3c79a941bd1b40596efd77278a0c1cd44aa88fcea54595b6376549526a453d1b",
+      "src/system1/evidence.rs": "f79e82242dcac06ce1b0252c7347709ef07073c9d14d8cfbfb2f0b15e5768aee",
+      "src/system1/contract.rs": "2f95fa0abb2fdaa410f666756e159d8ddaf9dc051e03aa67a3f19d656e8303c8",
+      "src/system1/codex.rs": "5d4d7795880feed76b8872bfbc881614d8340c1e158c468ebd47801d367cbb68",
+      "src/system1/policy.rs": "31f08fd4987aea1749779edb8a8895c21dcf3f6b0ed5fa6aefceb228741373d8",
+      "tests/system1_evaluation.rs": "39de2789a26a49055634e48b38640dde18e50d95c15b01bdd3a07ba1ba5a2998"
+    }
+  },
+  "live_command": "ISSUE_FINDER_CODEX_BIN=/home/agent/.local/bin/codex ISSUE_FINDER_SYSTEM1_LIVE_EVAL=1 ISSUE_FINDER_SYSTEM1_EVAL_REPORT=/workspace/system1-live-eval.json cargo test --test system1_evaluation live_luna_classifies_frozen_github_material_and_reports_quality -- --ignored --nocapture"
+}

@@ -13,9 +13,12 @@ reviews it, and delivers the PR.
 The primary CLI integration is
 [`skills/issue-finder-cli/SKILL.md`](./skills/issue-finder-cli/SKILL.md). Its
 current-session tool profile exposes only `scout` and `assess` for discovery,
-GitHub search controls, ranking, and evidence.
-It needs no MCP server, dispatch setup, second agent session, or interactive
-Issue Finder configuration.
+GitHub search controls, ranking, and evidence. `scout` uses a bounded System 1
+step through Codex app-server (`gpt-6-luna`, reasoning disabled) to answer
+seven fixed semantic questions (`scout-semantics-v2`) before final selection. Fresh GitHub
+availability checks run before screening and again before display, with backfill
+within the bounded pool and API budget. The main agent owns the repair.
+It needs no MCP server, dispatch setup, or interactive Issue Finder configuration.
 
 Add this checkout as a Codex project and invoke the source skill directly:
 
@@ -48,8 +51,9 @@ $issue-finder-cli Find and complete one suitable issue in owner/repo.
 $issue-finder-cli Complete https://github.com/owner/repo/issues/123.
 ```
 
-Git and a compatible `issue-finder` binary must be available in the agent's
-execution environment. Install the published crate with Cargo:
+Git, a compatible `issue-finder` binary, and an authenticated Codex CLI for
+System 1 must be available in the agent's execution environment. Install the
+published crate with Cargo:
 
 ```bash
 cargo install issue-finder --locked
@@ -65,8 +69,15 @@ compatibility; the catalog must include `sessionContractVersion: 2`:
 
 ```bash
 issue-finder tools --profile session list
+issue-finder system1-check
 issue-finder tools call issue-finder.scout --arguments '{"limit":5}'
 ```
+
+Cloud setup explicitly installs the tested Codex CLI `0.159.3` in a private npm
+prefix; local use discovers and reuses the existing CLI/login. The repository
+[setup script](./scripts/system1-codex.sh) supports `--cloud-install` and
+`--check-only`, both followed by a real schema/model/reasoning/auth check. See the
+[installation guide](./skills/issue-finder-cli/references/install.md).
 
 Use `GH_TOKEN` as the single GitHub credential environment variable. Session
 tools fall back to optional configured credentials and then the host's stored
@@ -81,7 +92,22 @@ GitHub search sort, query, pagination, and API budget are explicit tool inputs.
 The CLI ranks the retrieved candidates; the agent reads their issue evidence
 and chooses work that fits the request. Recommendation-only requests stop before
 workspace preparation. All user interaction stays in the current agent session.
-See the [reference](./docs/README.md) for tool behavior and local state.
+Scout defaults to four concurrent candidates, using one app-server process with
+independent issue threads and one seven-question request per issue; each question
+retains its criteria and material. Concurrency must be positive with no extra upper
+cap. A failed candidate is isolated, with at most one retry for a retryable server
+response within its original timeout. Scout exposes scoped semantic answers,
+incomplete material, failures, availability facts and saved snapshots. Failed or
+budget-skipped screening stays identifiable; it never silently restores semantic keyword filtering. `assess` reads fresh evidence and
+runs fresh final-depth availability checks without a model request. The six-hour
+semantic cache never replaces fresh GitHub facts. Discussion claims provide soft
+reminders to check evidence; verified PR identities and resolution relationships
+matter, while mentions, search leads and incomplete coverage retain uncertainty.
+Concrete documentation, generated, event and rewarded tasks are evaluated by their
+goal, scope, clarity and explicit preferences. Original eight-question snapshots and
+reports remain historical; v1 replays preserve their captured outcome. See
+[System 1](./docs/system1.md) and the
+[reference](./docs/README.md) for tool behavior and local state.
 
 `tools` and `mcp` default to the two-tool session profile. Recommendation scores
 are advisory, not permission gates. Codex ranking ignores historical

@@ -8,10 +8,19 @@ use crate::recommendation::RecommendationEngine;
 struct ProfileArgs {
     tech_stack: Option<Vec<String>>,
     keywords: Option<Vec<String>>,
+    task_preferences: Option<String>,
 }
 
 impl ProfileArgs {
     fn apply(self, config: &mut Config) -> RuntimeResult<()> {
+        if let Some(preferences) = self.task_preferences {
+            if preferences.chars().count() > 4_000 {
+                return Err(invalid(
+                    "profile.taskPreferences accepts at most 4000 characters",
+                ));
+            }
+            config.system1.task_preferences = preferences;
+        }
         for (value, target) in [
             (self.tech_stack, &mut config.profile.tech_stack),
             (self.keywords, &mut config.profile.keywords),
@@ -92,9 +101,11 @@ impl IssueFinderToolRuntime {
             )));
         }
         config.github.token = token.token;
-        // Codex owns semantic review; discovery never invokes a second LLM.
+        // The legacy free-form LLM reviewer stays off. Scout's independent
+        // System 1 provider answers fixed screening questions inside discovery.
         config.llm.enabled = false;
         profile.apply(&mut config)?;
+        config.system1.validate().map_err(RuntimeFailure::System)?;
         Ok(config)
     }
 
@@ -136,15 +147,31 @@ impl IssueFinderToolRuntime {
                     json!(candidate.issue.body.chars().take(700).collect::<String>());
                 value["bodyTruncated"] = json!(candidate.issue.body.chars().count() > 700);
                 value["warnings"] = json!(candidate.enriched_issue.warnings);
+                value["availability"] = json!(candidate.enriched_issue.availability);
+                value["system1"] = candidate
+                    .enriched_issue
+                    .system1
+                    .as_ref()
+                    .map(|s| s.summary())
+                    .unwrap_or(Value::Null);
                 value
             })
             .collect::<Vec<_>>();
         let partial = !result.diagnostics.stage_errors.is_empty()
             || !result.api_budget.budget_exhausted.is_empty()
-            || result
-                .ranked
-                .iter()
-                .any(|candidate| !candidate.enriched_issue.warnings.is_empty());
+            || result.ranked.iter().any(|candidate| {
+                !candidate.enriched_issue.warnings.is_empty()
+                    || candidate
+                        .enriched_issue
+                        .availability
+                        .as_ref()
+                        .is_some_and(|facts| !facts.checks_complete())
+                    || candidate
+                        .enriched_issue
+                        .system1
+                        .as_ref()
+                        .is_some_and(|s| s.incomplete())
+            });
         let status = if partial {
             "partial"
         } else if candidates.is_empty() {
@@ -158,7 +185,7 @@ impl IssueFinderToolRuntime {
             json!({
                 "candidates":candidates,"discoveryCount":result.discovery_count,"filteredCount":result.filtered_count,
                 "diagnostics":result.diagnostics,"apiBudget":result.api_budget,
-                "profile":{"techStack":config.profile.tech_stack,"keywords":config.profile.keywords},
+                "profile":{"techStack":config.profile.tech_stack,"keywords":config.profile.keywords,"taskPreferences":config.system1.task_preferences},
                 "nextAction":"Inspect candidates with assess. If insufficient, refine search/profile or use diagnostics.search.nextPage; do not infer no competition from partial evidence."
             }),
             true,
@@ -219,7 +246,12 @@ impl IssueFinderToolRuntime {
                 ))
             }
         };
-        let partial = !ranked.enriched_issue.warnings.is_empty();
+        let partial = !ranked.enriched_issue.warnings.is_empty()
+            || ranked
+                .enriched_issue
+                .availability
+                .as_ref()
+                .is_some_and(|facts| !facts.checks_complete());
         Ok(output(
             invocation,
             if partial { "partial" } else { "ok" },
@@ -228,7 +260,9 @@ impl IssueFinderToolRuntime {
                 "warnings":ranked.enriched_issue.warnings,"competition":ranked.enriched_issue.competition,
                 "repository":ranked.enriched_issue.repository,"activity":ranked.enriched_issue.activity,
                 "assessmentFetchedAt":ranked.enriched_issue.source_fetched_at,
-                "nextAction":"Read all relevant comment pages and assess feasibility. Scores and recommendation factors inform selection; Codex owns reproduction, repair, verification and PR delivery."
+                "system1":ranked.enriched_issue.system1.as_ref().map(|s|s.summary()),
+                "availability":ranked.enriched_issue.availability,
+                "nextAction":"Inspect current availability, linked PRs and search leads, then relevant comment pages and existing code before investing in reproduction. A merged PR is evidence to investigate, not proof of a fix. Codex owns repair, verification and authorized delivery."
             }),
             true,
         ))

@@ -1,5 +1,6 @@
 pub mod agent_loop_eval;
 pub mod agent_policy;
+pub mod availability;
 pub mod candidate_board;
 pub mod cli;
 pub mod codex_runtime_eval;
@@ -33,6 +34,7 @@ pub mod recovery_eval;
 pub mod repo_scan;
 pub mod report;
 pub mod scoring;
+pub mod system1;
 pub mod tool_adapters;
 pub mod tool_context;
 pub mod tool_outputs;

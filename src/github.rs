@@ -544,6 +544,17 @@ impl GitHubClient {
         refresh: bool,
         profile: &ProfileConfig,
     ) -> Result<Vec<DiscoveryCandidate>> {
+        self.discover_trusted_fallback_candidates_with_factual_order(paths, refresh, profile, false)
+            .await
+    }
+
+    pub async fn discover_trusted_fallback_candidates_with_factual_order(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        profile: &ProfileConfig,
+        factual_order: bool,
+    ) -> Result<Vec<DiscoveryCandidate>> {
         let profile_repositories =
             profile_trusted_repositories(profile, FALLBACK_TRUSTED_REPO_REQUEST_LIMIT)?;
         let mut repositories = profile_repositories.clone();
@@ -566,7 +577,7 @@ impl GitHubClient {
         .await;
 
         let candidates = collect_fallback_lane_candidates(lane_results);
-        let candidates = merge_candidates(candidates, profile);
+        let candidates = merge_fallback_candidates(candidates, profile, factual_order);
         Ok(cap_candidates_per_repo(
             candidates,
             FALLBACK_TRUSTED_REPO_CANDIDATE_LIMIT,
@@ -578,6 +589,17 @@ impl GitHubClient {
         paths: &IssueFinderPaths,
         refresh: bool,
         profile: &ProfileConfig,
+    ) -> Result<Vec<DiscoveryCandidate>> {
+        self.discover_global_fallback_candidates_with_factual_order(paths, refresh, profile, false)
+            .await
+    }
+
+    pub async fn discover_global_fallback_candidates_with_factual_order(
+        &self,
+        paths: &IssueFinderPaths,
+        refresh: bool,
+        profile: &ProfileConfig,
+        factual_order: bool,
     ) -> Result<Vec<DiscoveryCandidate>> {
         let lanes = fallback_global_search_lanes(profile)
             .into_iter()
@@ -610,7 +632,7 @@ impl GitHubClient {
         }
 
         let candidates = collect_fallback_lane_candidates(lane_results);
-        let mut candidates = merge_candidates(candidates, profile);
+        let mut candidates = merge_fallback_candidates(candidates, profile, factual_order);
         candidates.truncate(30);
         Ok(candidates)
     }
@@ -2107,6 +2129,22 @@ fn push_fallback_trusted_request(
     }
 }
 
+fn merge_fallback_candidates(
+    candidates: Vec<DiscoveryCandidate>,
+    profile: &ProfileConfig,
+    factual_order: bool,
+) -> Vec<DiscoveryCandidate> {
+    let mut candidates = merge_candidates(candidates, profile);
+    if factual_order {
+        // These caps precede System 1. Only facts may choose which material reaches it.
+        for candidate in &mut candidates {
+            candidate.rough_score = candidate.issue.repo_stars.checked_ilog10().unwrap_or(0) as i32;
+        }
+        crate::discovery::sort_candidates(&mut candidates);
+    }
+    candidates
+}
+
 fn cap_candidates_per_repo(
     candidates: Vec<DiscoveryCandidate>,
     per_repo_limit: usize,
@@ -2314,11 +2352,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        build_search_query, collect_lane_candidates, fallback_global_search_lanes,
-        fallback_trusted_repository_requests, has_beginner_label, load_cached_candidates,
-        primary_trusted_repository_lanes, DiscoveryCachePayload, FallbackTrustedRequest,
-        GitHubIssue, GitHubLabel, IssueRef, FALLBACK_DISCOVERY_CACHE_TTL_MINUTES,
-        SEARCH_CACHE_TTL_MINUTES,
+        build_search_query, cap_candidates_per_repo, collect_lane_candidates,
+        fallback_global_search_lanes, fallback_trusted_repository_requests, has_beginner_label,
+        load_cached_candidates, merge_fallback_candidates, primary_trusted_repository_lanes,
+        DiscoveryCachePayload, FallbackTrustedRequest, GitHubIssue, GitHubLabel, IssueRef,
+        FALLBACK_DISCOVERY_CACHE_TTL_MINUTES, SEARCH_CACHE_TTL_MINUTES,
     };
     use crate::config::ProfileConfig;
     use crate::discovery::{DiscoveryCandidate, RepoTrustTier, TrustedRepository};
@@ -2332,6 +2370,76 @@ mod tests {
         assert_eq!(parsed.owner, "owner");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.number, 123);
+    }
+
+    fn fallback_selection_fixture(
+        count: u64,
+        title: &str,
+        body: &str,
+    ) -> (ProfileConfig, Vec<DiscoveryCandidate>) {
+        let profile = ProfileConfig {
+            tech_stack: vec!["Rust".into()],
+            keywords: vec!["cli".into()],
+        };
+        let mut candidates = Vec::new();
+        for number in 1..=count {
+            let mut issue = discovery_candidate().issue;
+            issue.id = number;
+            issue.number = number;
+            issue.updated_at = "2026-09-01T00:00:00Z".into();
+            candidates.push(DiscoveryCandidate::new(
+                issue,
+                "fallback:normal",
+                RepoTrustTier::Global,
+                &profile,
+            ));
+        }
+        let mut issue = discovery_candidate().issue;
+        issue.id = 100;
+        issue.number = 100;
+        issue.title = title.into();
+        issue.body = body.into();
+        issue.updated_at = "2026-09-02T00:00:00Z".into();
+        candidates.push(DiscoveryCandidate::new(
+            issue,
+            "fallback:precise",
+            RepoTrustTier::Global,
+            &profile,
+        ));
+        (profile, candidates)
+    }
+
+    #[test]
+    fn factual_trusted_fallback_cap_keeps_precise_documentation_changes_for_semantic_review() {
+        let (profile, candidates) =
+            fallback_selection_fixture(3, "Fix README typo", "Line 9: replace teh with the.");
+        let legacy = cap_candidates_per_repo(
+            merge_fallback_candidates(candidates.clone(), &profile, false),
+            3,
+        );
+        assert!(!legacy.iter().any(|candidate| candidate.issue.number == 100));
+        let factual =
+            cap_candidates_per_repo(merge_fallback_candidates(candidates, &profile, true), 3);
+        assert!(factual
+            .iter()
+            .any(|candidate| candidate.issue.number == 100));
+    }
+
+    #[test]
+    fn factual_global_fallback_cap_does_not_prejudge_bounty_work() {
+        let (profile, candidates) = fallback_selection_fixture(
+            30,
+            "Scoped bounty: fix parser",
+            "src/parser.rs rejects empty input. Expected: accept an empty document.",
+        );
+        let mut legacy = merge_fallback_candidates(candidates.clone(), &profile, false);
+        legacy.truncate(30);
+        assert!(!legacy.iter().any(|candidate| candidate.issue.number == 100));
+        let mut factual = merge_fallback_candidates(candidates, &profile, true);
+        factual.truncate(30);
+        assert!(factual
+            .iter()
+            .any(|candidate| candidate.issue.number == 100));
     }
 
     #[test]

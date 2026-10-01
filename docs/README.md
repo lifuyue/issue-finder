@@ -16,8 +16,8 @@ two business tools:
 
 | Tool | Result |
 | --- | --- |
-| `issue-finder.scout` | Filtered and ranked candidates, search diagnostics, and request budget information |
-| `issue-finder.assess` | Issue body, one discussion page, competition and repository evidence, and assessment warnings |
+| `issue-finder.scout` | Ranked candidates, seven v2 System 1 answers, fresh availability facts, material snapshots, diagnostics and budgets |
+| `issue-finder.assess` | Issue body, one discussion page, fresh final-depth availability and repository evidence, warnings; no model request |
 
 ```bash
 issue-finder tools list
@@ -29,6 +29,13 @@ The installed catalog defines argument bounds and defaults. Calls return a JSON
 envelope with `success`, `status`, and `structured_content`. Parameter and output
 semantics are documented in the [tool reference](../skills/issue-finder-cli/references/tools.md).
 
+The [System 1 guide](system1.md) describes finite semantic questions, the
+provider boundary, independent issue threads, default concurrency 4, material-scoped
+caching, failure isolation and runtime verification. One request per issue carries
+all seven questions and their own material. Concurrency must be positive, with no
+additional upper cap; the adapter retries at most once for a retryable server
+response within its original timeout.
+
 ## Evidence and state
 
 An explicit `repo` limits discovery to that repository. `search` selects bounded
@@ -37,12 +44,23 @@ override configured preferences. Ranking scores express recommendation factors,
 not authorization to repair an issue.
 
 Assessment reads the requested issue and discussion page on each call.
-`refresh: true` also refreshes cached assessment evidence. Pagination, warnings,
+`refresh: true` also refreshes cached assessment evidence. Scout screening is
+scoped to its material snapshot; assess does not reuse it as a fresh fact. Scout
+checks fresh availability before semantic screening and refreshes provisional results
+before display, backfilling within the bounded pool and existing API budget. A
+six-hour semantic cache hit never replaces fresh GitHub facts. Discussion claims
+provide soft reminders; concrete task forms do not incur automatic exclusions.
+Actual PR evidence distinguishes repository identity, open/closed state, merges,
+base branch and explicit resolution relationships. Mentions, search leads and
+incomplete coverage remain uncertain. Pagination, warnings,
 and `partial` results describe evidence limits; no matching PR in the returned
-evidence does not establish that no competing PR exists.
+evidence does not establish that no competing PR exists. Original schema 1
+replays with eight v1 questions retain captured scores, visibility and order after
+original-contract validation. Schema 2 identifies current v2; old reports do not
+establish v2 acceptance.
 
 State defaults to `~/.issue-finder`; `ISSUE_FINDER_HOME` overrides that directory.
-Configuration is optional. `GH_TOKEN` is the only credential environment key
+Configuration is optional. `GH_TOKEN` is the only GitHub credential environment key
 read by Issue Finder; `GITHUB_TOKEN` is ignored. Session tools retain configured
 `[github].token` and the host's stored `gh` login as compatibility fallbacks.
 Configuration, authentication, and network errors are returned by business calls.

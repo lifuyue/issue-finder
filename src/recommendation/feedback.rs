@@ -43,7 +43,9 @@ pub fn assess_feedback(
         };
     }
 
-    let mut penalty = shown_penalty(state) + read_penalty(state) + prepared_penalty(state);
+    let now = crate::system1::ranking_time(enriched);
+    let mut penalty =
+        shown_penalty(state, now) + read_penalty(state, now) + prepared_penalty(state, now);
     let mut reactivation_boost = 0;
     let mut reasons = Vec::new();
 
@@ -101,26 +103,26 @@ pub fn assess_feedback(
     }
 }
 
-fn shown_penalty(state: &RecommendationIssueState) -> f64 {
-    55.0 * decay(state.last_shown_at.as_deref()) * state.shown_count.min(5) as f64
+fn shown_penalty(state: &RecommendationIssueState, now: DateTime<Utc>) -> f64 {
+    55.0 * decay(state.last_shown_at.as_deref(), now) * state.shown_count.min(5) as f64
 }
 
-fn read_penalty(state: &RecommendationIssueState) -> f64 {
-    170.0 * decay(state.last_read_at.as_deref()) * state.read_count.min(3) as f64
+fn read_penalty(state: &RecommendationIssueState, now: DateTime<Utc>) -> f64 {
+    170.0 * decay(state.last_read_at.as_deref(), now) * state.read_count.min(3) as f64
 }
 
-fn prepared_penalty(state: &RecommendationIssueState) -> f64 {
-    260.0 * decay(state.last_prepared_at.as_deref()) * state.prepared_count.min(2) as f64
+fn prepared_penalty(state: &RecommendationIssueState, now: DateTime<Utc>) -> f64 {
+    260.0 * decay(state.last_prepared_at.as_deref(), now) * state.prepared_count.min(2) as f64
 }
 
-fn decay(timestamp: Option<&str>) -> f64 {
+fn decay(timestamp: Option<&str>, now: DateTime<Utc>) -> f64 {
     let Some(timestamp) = timestamp else {
         return 0.0;
     };
     let Ok(timestamp) = DateTime::parse_from_rfc3339(timestamp) else {
         return 0.0;
     };
-    let age_days = (Utc::now() - timestamp.with_timezone(&Utc)).num_days();
+    let age_days = (now - timestamp.with_timezone(&Utc)).num_days();
     match age_days {
         value if value <= 1 => 1.0,
         value if value <= 3 => 0.75,

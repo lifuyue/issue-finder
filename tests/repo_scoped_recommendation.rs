@@ -138,7 +138,8 @@ async fn codex_scout_recovers_legacy_hidden_candidates_without_rewriting_feedbac
         .unwrap();
     }
     let original_events = load_events(&paths).unwrap();
-    let config = Config::default();
+    let mut config = Config::default();
+    config.system1.codex_binary = dir.path().join("missing-codex").display().to_string();
     let scope = DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap());
     let options = ScoutOptions {
         include_filtered: true,
@@ -310,25 +311,13 @@ fn response_body(request: &str, base_url: &str) -> String {
         return r#"{"items":[]}"#.to_string();
     }
 
-    if request.contains("/repos/owner/repo/issues/1/comments")
-        || request.contains("/repos/owner/repo/issues/2/comments")
-        || request.contains("/repos/owner/repo/issues/3/comments")
-    {
+    if request.contains("/repos/owner/repo/issues/") && request.contains("/comments") {
         return "[]".to_string();
     }
-    if request.contains("/repos/owner/repo/issues/1/timeline")
-        || request.contains("/repos/owner/repo/issues/2/timeline")
-        || request.contains("/repos/owner/repo/issues/3/timeline")
-    {
+    if request.contains("/repos/owner/repo/issues/") && request.contains("/timeline") {
         return "[]".to_string();
     }
-    if request.contains("/repos/owner/repo/issues/1") {
-        return issue_detail_body();
-    }
-    if request.contains("/repos/owner/repo/issues/2") {
-        return issue_detail_body();
-    }
-    if request.contains("/repos/owner/repo/issues/3") {
+    if request.contains("/repos/owner/repo/issues/") {
         return issue_detail_body();
     }
 
@@ -386,6 +375,7 @@ fn issue_list_item(base_url: &str, number: u64) -> String {
 
 fn issue_detail_body() -> String {
     r#"{
+  "state": "open", "locked": false, "assignees": [],
   "comments": 0,
   "author_association": "CONTRIBUTOR",
   "user": {"login": "issue-author"}
@@ -422,4 +412,650 @@ fn write_response(stream: &mut std::net::TcpStream, body: &str) {
         body
     );
     stream.write_all(response.as_bytes()).unwrap();
+}
+
+struct InspectableSystem1Provider {
+    requests: Mutex<Vec<issue_finder::system1::contract::DecisionRequest>>,
+    fail: bool,
+    version: &'static str,
+}
+
+impl issue_finder::system1::contract::Provider for InspectableSystem1Provider {
+    fn fingerprint(&self) -> String {
+        format!(
+            "offline-alternate-provider:semantic-integration-{}",
+            self.version
+        )
+    }
+
+    fn decide<'a>(
+        &'a self,
+        request: &'a issue_finder::system1::contract::DecisionRequest,
+    ) -> issue_finder::system1::contract::DecisionFuture<'a> {
+        use issue_finder::system1::contract::*;
+        Box::pin(async move {
+            self.requests.lock().unwrap().push(request.clone());
+            if self.fail {
+                return Err(ProviderError::new(
+                    "authentication_failed",
+                    "offline expired login",
+                ));
+            }
+            let precise_correction = request.candidate_id.ends_with(":3");
+            let answers = request
+                .questions
+                .iter()
+                .map(|question| {
+                    let choice = match question.id.as_str() {
+                        "task_type" if precise_correction => "concrete_change",
+                        "task_type" => "support_question",
+                        "description_quality" if precise_correction => "clear",
+                        "description_quality" => "unclear",
+                        "contribution_signal" if precise_correction => "interest_only",
+                        "contribution_signal" => "not_observed",
+                        "scope" => "bounded",
+                        "preference_match" => "matches",
+                        "task_shape" if precise_correction => "documentation",
+                        "task_shape" => "implementation",
+                        "verification_clues" => "present",
+                        "maintainer_signal" => "not_observed",
+                        _ => panic!("unexpected semantic question {}", question.id),
+                    };
+                    QuestionResponse {
+                        question_id: question.id.clone(),
+                        status: AnswerStatus::Answered,
+                        answer: Some(Answer::Choice(choice.into())),
+                        probabilities: None,
+                    }
+                })
+                .collect();
+            Ok(DecisionResponse {
+                candidate_id: request.candidate_id.clone(),
+                input_id: request.input_id.clone(),
+                status: ResponseStatus::Complete,
+                answers,
+                metadata: ProviderMetadata {
+                    provider: "offline_alternate".into(),
+                    model: "finite-fixture".into(),
+                    reasoning_effort: "none".into(),
+                    ..ProviderMetadata::default()
+                },
+            })
+        })
+    }
+}
+
+fn semantic_test_paths(directory: &std::path::Path) -> IssueFinderPaths {
+    IssueFinderPaths {
+        home: directory.into(),
+        config: directory.join("config.toml"),
+        cache_dir: directory.join("cache"),
+        workspaces_dir: directory.join("workspaces"),
+        inbox_dir: directory.join("inbox"),
+        reports_dir: directory.join("reports"),
+    }
+}
+
+/// Extend the existing GitHub fixture with a short precise correction and a
+/// participation question which the legacy PR keyword policy hides.
+fn start_semantic_mock_github() -> MockGithubServer {
+    start_semantic_mock_github_with(3, Arc::new(AtomicBool::new(false)))
+}
+
+fn start_semantic_mock_github_with(count: usize, close_first: Arc<AtomicBool>) -> MockGithubServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let mut listing: serde_json::Value =
+        serde_json::from_str(&repo_issue_list_body(&base_url)).unwrap();
+    for number in 4..=count {
+        listing
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::from_str(&issue_list_item(&base_url, number as u64)).unwrap());
+    }
+    let frozen_time = Utc::now().to_rfc3339();
+    for item in listing.as_array_mut().unwrap() {
+        item["created_at"] = serde_json::json!(frozen_time);
+        item["updated_at"] = serde_json::json!(frozen_time);
+    }
+    listing[2]["title"] = serde_json::json!("Correct CLI documentation spelling");
+    listing[2]["body"] = serde_json::json!(
+        "In docs/cli.md, replace `adress` with `address` in the --output example."
+    );
+    let listing = listing.to_string();
+    let base_url_for_thread = base_url.clone();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let requests_for_thread = Arc::clone(&requests);
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_for_thread = Arc::clone(&shutdown);
+    let handle = thread::spawn(move || {
+        while !shutdown_for_thread.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let listing = listing.clone();
+                    let base_url = base_url_for_thread.clone();
+                    let requests = Arc::clone(&requests_for_thread);
+                    let close_first = close_first.clone();
+                    thread::spawn(move || {
+                        let mut buffer = [0u8; 4096];
+                        let bytes_read = stream.read(&mut buffer).unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                        requests
+                            .lock()
+                            .unwrap()
+                            .push(request.lines().next().unwrap_or_default().into());
+                        let body = if request.contains("/search/issues") {
+                            r#"{"items":[],"total_count":0,"incomplete_results":false}"#.into()
+                        } else if request
+                            .lines()
+                            .next()
+                            .is_some_and(|line| line == "GET /repos/owner/repo/issues/1 HTTP/1.1")
+                            && close_first.load(Ordering::SeqCst)
+                        {
+                            r#"{"state":"closed","locked":false,"assignees":[],"comments":0}"#
+                                .into()
+                        } else if request.contains("/repos/owner/repo/issues/3/comments") {
+                            r#"[{"id":303,"html_url":"https://github.com/owner/repo/issues/3#issuecomment-303","user":{"login":"interested-contributor"},"author_association":"CONTRIBUTOR","created_at":"2026-09-30T00:00:00Z","updated_at":"2026-09-30T00:00:00Z","body":"I am not working on this. Should I make a PR if I take it later?"}]"#.into()
+                        } else if request.contains("/repos/owner/repo/issues/3")
+                            && !request.contains("/timeline")
+                        {
+                            r#"{"comments":1,"state":"open","locked":false,"assignees":[],"author_association":"CONTRIBUTOR","user":{"login":"issue-author"}}"#.into()
+                        } else if request.contains("/repos/owner/repo/issues")
+                            && (request.contains("labels=good%20first%20issue")
+                                || request.contains("labels=good+first+issue"))
+                        {
+                            listing
+                        } else {
+                            response_body(&request, &base_url)
+                        };
+                        write_response(&mut stream, &body);
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10))
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    MockGithubServer {
+        base_url,
+        requests,
+        shutdown,
+        handle,
+    }
+}
+
+#[tokio::test]
+async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_identical_input() {
+    use issue_finder::recommendation::engine::RecommendationEngine;
+    use issue_finder::system1::contract::Provider;
+    use issue_finder::system1::questions::ContributionSignal;
+    use issue_finder::system1::{JudgmentSnapshot, JudgmentStatus};
+
+    let _env_lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
+    let server = start_semantic_mock_github();
+    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &server.base_url);
+    let _env_guard = EnvGuard;
+    let directory = tempdir().unwrap();
+    let paths = semantic_test_paths(directory.path());
+    let mut config = Config::default();
+    config.system1.candidate_budget = 3;
+    let provider = Arc::new(InspectableSystem1Provider {
+        requests: Mutex::new(Vec::new()),
+        fail: false,
+        version: "v1",
+    });
+    let options = ScoutOptions {
+        include_filtered: false,
+        record_exposure: false,
+        source: RecommendationEventSource::ToolScout,
+    };
+    let scope = DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap());
+    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let selected = engine
+        .scout(1, false, options, scope.clone())
+        .await
+        .unwrap();
+    assert_eq!(selected.ranked.len(), 1);
+    assert_eq!(
+        selected.ranked[0].issue.number, 3,
+        "a good candidate beyond the presentation cutoff must reach System 1"
+    );
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        3,
+        "the bounded pool must be classified before one result is selected"
+    );
+    let correction = &selected.ranked[0];
+    assert_eq!(
+        correction.enriched_issue.competition.fix_submitted_comments,
+        0
+    );
+    assert_eq!(correction.enriched_issue.competition.working_comments, 0);
+    assert!(!correction
+        .recommendation
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("open PR") || reason.contains("thin task")));
+    let snapshot = correction.enriched_issue.system1.as_ref().unwrap();
+    assert_eq!(snapshot.status, JudgmentStatus::Completed);
+    let answers = snapshot.answers.as_ref().unwrap();
+    assert_eq!(
+        answers.contribution_signal,
+        Some(ContributionSignal::InterestOnly)
+    );
+    assert_eq!(answers.task_shape, None);
+    let evidence = snapshot.evidence.as_ref().unwrap();
+    assert!(evidence.comments.comments[0]
+        .body
+        .text
+        .contains("Should I make a PR"));
+    assert_eq!(
+        evidence.comments.comments[0].author_association,
+        "CONTRIBUTOR"
+    );
+    let saved: JudgmentSnapshot =
+        serde_json::from_slice(&std::fs::read(snapshot.snapshot_path.as_ref().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(saved.input_id, snapshot.input_id);
+    assert_eq!(
+        saved.provider_fingerprint.as_deref(),
+        Some(provider.fingerprint().as_str())
+    );
+    assert_eq!(saved.response, snapshot.response);
+    let requests = provider.requests.lock().unwrap().clone();
+    let first = requests
+        .iter()
+        .find(|request| request.candidate_id.ends_with(":3"))
+        .unwrap();
+    assert!(!serde_json::to_string(first)
+        .unwrap()
+        .contains("claim_comments"));
+    let cached = engine
+        .scout(1, false, options, scope.clone())
+        .await
+        .unwrap();
+    assert_eq!(cached.ranked[0].issue.number, 3);
+    assert!(
+        cached.ranked[0]
+            .enriched_issue
+            .system1
+            .as_ref()
+            .unwrap()
+            .cache_hit
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
+
+    let mut changed = config.clone();
+    changed
+        .profile
+        .keywords
+        .push("explicit-new-user-interest".into());
+    let changed_engine =
+        RecommendationEngine::with_system1_provider(&paths, &changed, provider.clone());
+    let changed_result = changed_engine
+        .scout(1, false, options, scope.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        6,
+        "changed user preferences must invalidate all input-dependent judgments"
+    );
+    let changed_snapshot = changed_result.ranked[0]
+        .enriched_issue
+        .system1
+        .as_ref()
+        .unwrap();
+    assert!(!changed_snapshot.cache_hit);
+    assert_ne!(changed_snapshot.input_id, snapshot.input_id);
+    assert_eq!(
+        changed_snapshot.evidence.as_ref().unwrap().material_hash(),
+        evidence.material_hash(),
+        "only question context changed, not the GitHub material"
+    );
+    let replaced_provider = Arc::new(InspectableSystem1Provider {
+        requests: Mutex::new(Vec::new()),
+        fail: false,
+        version: "v2",
+    });
+    let replaced_engine =
+        RecommendationEngine::with_system1_provider(&paths, &changed, replaced_provider.clone());
+    let replaced = replaced_engine
+        .scout(1, false, options, scope)
+        .await
+        .unwrap();
+    let replaced_snapshot = replaced.ranked[0].enriched_issue.system1.as_ref().unwrap();
+    assert_eq!(
+        replaced_provider.requests.lock().unwrap().len(),
+        3,
+        "changed provider configuration must invalidate stored judgments"
+    );
+    assert!(!replaced_snapshot.cache_hit);
+    assert_eq!(replaced_snapshot.input_id, changed_snapshot.input_id);
+    assert_ne!(
+        replaced_snapshot.provider_fingerprint,
+        changed_snapshot.provider_fingerprint
+    );
+
+    let mut changed_material = replaced_snapshot.evidence.clone().unwrap();
+    changed_material.body = issue_finder::system1::evidence::EvidenceText::bounded(
+        "In docs/cli.md replace `adress` with `address`; also correct the corresponding heading.",
+        12_000,
+    );
+    let rejudged = issue_finder::system1::judge(
+        &paths,
+        replaced_provider.as_ref(),
+        changed_material.clone(),
+        &changed.profile,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(!rejudged.cache_hit);
+    assert_ne!(rejudged.input_id, replaced_snapshot.input_id);
+    assert_eq!(
+        replaced_provider.requests.lock().unwrap().len(),
+        4,
+        "changed material must reach the provider even without a refresh flag"
+    );
+    let same_material = issue_finder::system1::judge(
+        &paths,
+        replaced_provider.as_ref(),
+        changed_material,
+        &changed.profile,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(same_material.cache_hit);
+    assert_eq!(replaced_provider.requests.lock().unwrap().len(), 4);
+    server.join();
+}
+
+#[tokio::test]
+async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback() {
+    use issue_finder::recommendation::engine::RecommendationEngine;
+    use issue_finder::system1::JudgmentStatus;
+
+    let _env_lock = env_lock::EnvLock::acquire();
+    let _auth_guard = github_auth::GitHubAuthGuard::clear();
+    let server = start_semantic_mock_github();
+    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &server.base_url);
+    let _env_guard = EnvGuard;
+    let directory = tempdir().unwrap();
+    let paths = semantic_test_paths(directory.path());
+    let mut config = Config::default();
+    config.system1.candidate_budget = 2;
+    let provider = Arc::new(InspectableSystem1Provider {
+        requests: Mutex::new(Vec::new()),
+        fail: true,
+        version: "v1",
+    });
+    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let result = engine
+        .scout(
+            3,
+            false,
+            ScoutOptions {
+                include_filtered: false,
+                record_exposure: false,
+                source: RecommendationEventSource::ToolScout,
+            },
+            DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result.ranked.len(),
+        3,
+        "failed semantics must not imply low issue quality or revive keyword hiding"
+    );
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        2,
+        "each selected issue fails explicitly without retrying or cancelling other slots"
+    );
+    let statuses: Vec<_> = result
+        .ranked
+        .iter()
+        .map(|candidate| candidate.enriched_issue.system1.as_ref().unwrap().status)
+        .collect();
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == JudgmentStatus::Failed)
+            .count(),
+        2
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == JudgmentStatus::SkippedBudget)
+            .count(),
+        1
+    );
+    assert!(result
+        .diagnostics
+        .stage_errors
+        .iter()
+        .any(|error| error.contains("authentication_failed")));
+    assert!(result.ranked.iter().all(|candidate| candidate
+        .enriched_issue
+        .system1
+        .as_ref()
+        .unwrap()
+        .answers
+        .is_none()));
+    server.join();
+}
+
+#[test]
+fn system1_concurrency_defaults_to_four_and_has_no_product_upper_limit() {
+    use issue_finder::config::System1Config;
+    assert_eq!(System1Config::default().concurrency, 4);
+    for value in [1, 4, 9, 1024, 100_000] {
+        let config: System1Config = toml::from_str(&format!("concurrency = {value}")).unwrap();
+        assert!(config.validate().is_ok());
+    }
+    let config: System1Config = toml::from_str("concurrency = 0").unwrap();
+    assert!(config.validate().is_err());
+    assert!(toml::from_str::<System1Config>("concurrency = -1").is_err());
+}
+
+struct ConcurrentSemanticProvider {
+    active: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+    events: Mutex<Vec<(String, bool)>>,
+    close_first: Arc<AtomicBool>,
+}
+
+impl issue_finder::system1::contract::Provider for ConcurrentSemanticProvider {
+    fn fingerprint(&self) -> String {
+        "offline-concurrent-v2".into()
+    }
+    fn decide<'a>(
+        &'a self,
+        request: &'a issue_finder::system1::contract::DecisionRequest,
+    ) -> issue_finder::system1::contract::DecisionFuture<'a> {
+        use issue_finder::system1::contract::*;
+        Box::pin(async move {
+            assert_eq!(request.questions.len(), 7);
+            assert!(!request
+                .questions
+                .iter()
+                .any(|question| question.id == "task_shape"));
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
+            self.events
+                .lock()
+                .unwrap()
+                .push((request.candidate_id.clone(), true));
+            let number: u64 = request
+                .candidate_id
+                .rsplit(':')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(120 + (6 - number) * 10)).await;
+            if number == 1 {
+                self.close_first.store(true, Ordering::SeqCst);
+            }
+            self.events
+                .lock()
+                .unwrap()
+                .push((request.candidate_id.clone(), false));
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            Ok(DecisionResponse {
+                candidate_id: request.candidate_id.clone(),
+                input_id: request.input_id.clone(),
+                status: ResponseStatus::Complete,
+                answers: request
+                    .questions
+                    .iter()
+                    .map(|question| QuestionResponse {
+                        question_id: question.id.clone(),
+                        status: AnswerStatus::Answered,
+                        answer: Some(Answer::Choice(
+                            match question.id.as_str() {
+                                "task_type" => "concrete_change",
+                                "description_quality" => "clear",
+                                "contribution_signal" => "not_observed",
+                                "scope" => "bounded",
+                                "preference_match" => "matches",
+                                "verification_clues" => "present",
+                                "maintainer_signal" => "not_observed",
+                                _ => panic!("unexpected question"),
+                            }
+                            .into(),
+                        )),
+                        probabilities: None,
+                    })
+                    .collect(),
+                metadata: ProviderMetadata {
+                    provider: "offline".into(),
+                    model: "fixture".into(),
+                    reasoning_effort: "none".into(),
+                    duration_ms: Some(150),
+                    usage: None,
+                },
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn system1_runs_four_slots_refills_and_rechecks_facts_before_returning_recommendations() {
+    use issue_finder::recommendation::engine::RecommendationEngine;
+    use issue_finder::system1::replay::ScoutReplay;
+    let _lock = env_lock::EnvLock::acquire();
+    let _auth = github_auth::GitHubAuthGuard::clear();
+    let close_first = Arc::new(AtomicBool::new(false));
+    let server = start_semantic_mock_github_with(5, close_first.clone());
+    std::env::set_var("ISSUE_FINDER_GITHUB_API_BASE", &server.base_url);
+    let _guard = EnvGuard;
+    let directory = tempdir().unwrap();
+    let paths = semantic_test_paths(directory.path());
+    let mut config = Config::default();
+    config.system1.candidate_budget = 5;
+    let provider = Arc::new(ConcurrentSemanticProvider {
+        active: 0.into(),
+        peak: 0.into(),
+        events: Mutex::new(Vec::new()),
+        close_first,
+    });
+    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let result = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.scout(
+            3,
+            false,
+            ScoutOptions {
+                include_filtered: false,
+                record_exposure: false,
+                source: RecommendationEventSource::ToolScout,
+            },
+            DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap()),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(provider.peak.load(Ordering::SeqCst), 4);
+    let events = provider.events.lock().unwrap();
+    assert_eq!(events.iter().filter(|(_, started)| *started).count(), 5);
+    let fifth_start = events
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, start))| *start)
+        .nth(4)
+        .unwrap()
+        .0;
+    assert!(events[..fifth_start].iter().any(|(_, start)| !start));
+    assert_eq!(result.ranked.len(), 3);
+    assert!(
+        result.ranked.iter().all(|item| item.issue.number != 1),
+        "issue closed while screening must be replaced before the user sees recommendations"
+    );
+    assert!(result.ranked.iter().all(|item| item
+        .enriched_issue
+        .availability
+        .as_ref()
+        .unwrap()
+        .depth
+        == issue_finder::availability::AvailabilityDepth::Final));
+    let execution = result.diagnostics.system1_execution.as_ref().unwrap();
+    assert_eq!(execution.peak_in_flight, 4);
+    assert_eq!(execution.tasks.len(), 5);
+    assert!(execution.tasks.iter().any(|task| task.queue_wait_ms >= 100));
+    let replay = ScoutReplay::load(std::path::Path::new(
+        result.diagnostics.system1_replay_path.as_ref().unwrap(),
+    ))
+    .unwrap();
+    let closed = replay
+        .ranked
+        .iter()
+        .find(|item| item.issue.number == 1)
+        .unwrap();
+    assert_eq!(
+        closed
+            .enriched_issue
+            .availability
+            .as_ref()
+            .unwrap()
+            .issue_state
+            .as_deref(),
+        Some("closed")
+    );
+    let reranked = replay.replay().unwrap();
+    assert_eq!(
+        reranked
+            .iter()
+            .map(|item| (
+                &item.issue.repo_full_name,
+                item.issue.number,
+                item.score,
+                item.recommendation.visibility
+            ))
+            .collect::<Vec<_>>(),
+        replay
+            .ranked
+            .iter()
+            .map(|item| (
+                &item.issue.repo_full_name,
+                item.issue.number,
+                item.score,
+                item.recommendation.visibility
+            ))
+            .collect::<Vec<_>>()
+    );
+    server.join();
 }

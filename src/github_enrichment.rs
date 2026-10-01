@@ -7,6 +7,10 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::availability::{
+    AvailabilityDepth, AvailabilitySnapshot, CoverageStatus, PullRequestEvidence,
+    PullRequestRelation,
+};
 use crate::competition::{
     assess_competition, is_issue_finder_projection_comment, CompetitionFacts,
     TimelineIssueReference,
@@ -15,6 +19,9 @@ use crate::config::Config;
 use crate::github::GitHubIssue;
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
 use crate::paths::{atomic_write, IssueFinderPaths};
+use crate::system1::evidence::{
+    CommentEvidence, CommentsEvidence, EvidenceSnapshot, EvidenceText, COMMENT_SAMPLE_LIMIT,
+};
 
 const ENRICHMENT_CACHE_TTL_MINUTES: i64 = 360;
 const COMPETITION_COMPLETION_CACHE_TTL_MINUTES: i64 = 360;
@@ -36,6 +43,10 @@ pub struct EnrichedIssue {
     pub growth: EnrichedGrowthFacts,
     pub warnings: Vec<String>,
     pub source_fetched_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system1: Option<crate::system1::JudgmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability: Option<AvailabilitySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -130,15 +141,21 @@ struct RepoApiResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct IssueApiResponse {
     comments: Option<u64>,
+    state: Option<String>,
+    locked: Option<bool>,
+    assignees: Option<Vec<UserApiResponse>>,
     author_association: Option<String>,
     user: Option<UserApiResponse>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommentApiResponse {
+    id: Option<u64>,
+    html_url: Option<String>,
     body: Option<String>,
     author_association: Option<String>,
     created_at: Option<String>,
+    updated_at: Option<String>,
     user: Option<UserApiResponse>,
 }
 
@@ -240,6 +257,510 @@ impl GitHubEnrichmentClient {
 
     pub fn request_stats(&self) -> GitHubApiBudgetReport {
         self.budget.report()
+    }
+
+    /// Fresh read-only checks, independent of model calls and enrichment cache age.
+    /// Every request uses this client's existing authentication and shared API budget.
+    pub async fn availability(
+        &self,
+        _paths: &IssueFinderPaths,
+        issue: &GitHubIssue,
+        depth: AvailabilityDepth,
+    ) -> AvailabilitySnapshot {
+        let mut snapshot = AvailabilitySnapshot::new(depth);
+        snapshot.repo_full_name = issue.repo_full_name.clone();
+        let Some((owner, repo)) = split_repo_full_name(&issue.repo_full_name) else {
+            snapshot
+                .uncertainties
+                .push("Availability repository identity is invalid".into());
+            return snapshot;
+        };
+        match self.fetch_issue_details(&owner, &repo, issue.number).await {
+            Ok(details) => {
+                snapshot.issue_state = details.state;
+                snapshot.locked = details.locked;
+                snapshot.assignees = details.assignees.and_then(|users| {
+                    users
+                        .into_iter()
+                        .map(|user| user.login)
+                        .collect::<Option<Vec<_>>>()
+                });
+            }
+            Err(error) => snapshot
+                .uncertainties
+                .push(format!("Fresh issue status unavailable: {error}")),
+        }
+        match self
+            .availability_json(
+                &format!("/repos/{owner}/{repo}"),
+                &[],
+                GitHubRequestSource::EnrichmentRepoMetadata,
+            )
+            .await
+        {
+            Ok((value, _)) => {
+                snapshot.archived = value.get("archived").and_then(serde_json::Value::as_bool);
+                snapshot.default_branch = value
+                    .get("default_branch")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+            }
+            Err(error) => snapshot
+                .uncertainties
+                .push(format!("Fresh repository status unavailable: {error}")),
+        }
+        if snapshot.issue_state.is_none()
+            || snapshot.assignees.is_none()
+            || snapshot.locked.is_none()
+            || snapshot.archived.is_none()
+        {
+            snapshot
+                .uncertainties
+                .push("GitHub issue/repository response omitted availability fields".into());
+        }
+
+        let max_pages = if depth == AvailabilityDepth::Final {
+            3
+        } else {
+            2
+        };
+        let mut leads: Vec<(String, u64, PullRequestRelation, String)> = Vec::new();
+        for page in 1..=max_pages {
+            let result = self
+                .availability_json(
+                    &format!("/repos/{owner}/{repo}/issues/{}/timeline", issue.number),
+                    &[("per_page", "100".into()), ("page", page.to_string())],
+                    GitHubRequestSource::EnrichmentTimeline,
+                )
+                .await;
+            match result {
+                Ok((value, has_more)) => {
+                    let Some(events) = value.as_array() else {
+                        snapshot
+                            .linked_coverage
+                            .errors
+                            .push("Timeline response was not an array".into());
+                        break;
+                    };
+                    snapshot.linked_coverage.pages_fetched += 1;
+                    snapshot.linked_coverage.items_fetched += events.len();
+                    // A full page without a Link header cannot establish completeness.
+                    let has_more = has_more.or((events.len() < 100).then_some(false));
+                    snapshot.linked_coverage.has_more = has_more;
+                    for (index, event) in events.iter().enumerate() {
+                        if let Some(source) = event.pointer("/source/issue") {
+                            if source.get("pull_request").is_some_and(|pr| !pr.is_null()) {
+                                if let Some((full_name, number)) = pr_identity(source, &issue.url) {
+                                    push_pr_lead(
+                                        &mut leads,
+                                        full_name,
+                                        number,
+                                        if event
+                                            .get("will_close_target")
+                                            .and_then(serde_json::Value::as_bool)
+                                            == Some(true)
+                                        {
+                                            PullRequestRelation::ExplicitResolution
+                                        } else {
+                                            PullRequestRelation::Mention
+                                        },
+                                        format!("issue:timeline.page{page}.{index}"),
+                                    );
+                                } else {
+                                    snapshot.uncertainties.push(
+                                        "Timeline PR reference omitted a verifiable identity"
+                                            .into(),
+                                    );
+                                    snapshot
+                                        .linked_coverage
+                                        .errors
+                                        .push("Unverifiable timeline PR identity".into());
+                                }
+                            }
+                        }
+                    }
+                    if has_more == Some(false) {
+                        snapshot.linked_coverage.status = CoverageStatus::Complete;
+                        break;
+                    }
+                    snapshot.linked_coverage.status = CoverageStatus::Partial;
+                    if has_more.is_none() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    snapshot.linked_coverage.errors.push(error.to_string());
+                    break;
+                }
+            }
+        }
+        if !snapshot.linked_coverage.errors.is_empty() {
+            snapshot.linked_coverage.status = if snapshot.linked_coverage.pages_fetched == 0 {
+                CoverageStatus::Unavailable
+            } else {
+                CoverageStatus::Partial
+            };
+        }
+
+        if depth == AvailabilityDepth::Final {
+            let mut queries = vec![format!(
+                "repo:{} is:pr \"#{}\" in:body",
+                issue.repo_full_name, issue.number
+            )];
+            let terms = search_title_terms(&issue.title);
+            if !terms.is_empty() {
+                queries.push(format!(
+                    "repo:{} is:pr {} in:title,body",
+                    issue.repo_full_name,
+                    terms.join(" ")
+                ));
+            }
+            snapshot.search_coverage.status = CoverageStatus::Complete;
+            for query in queries {
+                snapshot.search_coverage.queries.push(query.clone());
+                match self
+                    .availability_json(
+                        "/search/issues",
+                        &[
+                            ("q", query),
+                            ("per_page", "10".into()),
+                            ("page", "1".into()),
+                        ],
+                        GitHubRequestSource::EnrichmentTimeline,
+                    )
+                    .await
+                {
+                    Ok((value, has_more)) => {
+                        let Some(items) = value.get("items").and_then(serde_json::Value::as_array)
+                        else {
+                            snapshot
+                                .search_coverage
+                                .errors
+                                .push("PR search omitted items".into());
+                            continue;
+                        };
+                        snapshot.search_coverage.pages_fetched += 1;
+                        snapshot.search_coverage.items_fetched += items.len();
+                        let total = value.get("total_count").and_then(serde_json::Value::as_u64);
+                        let incomplete = value
+                            .get("incomplete_results")
+                            .and_then(serde_json::Value::as_bool);
+                        let more = has_more.unwrap_or(false)
+                            || total.is_none_or(|total| total > items.len() as u64)
+                            || incomplete != Some(false);
+                        snapshot.search_coverage.has_more =
+                            Some(snapshot.search_coverage.has_more.unwrap_or(false) || more);
+                        if more {
+                            snapshot.search_coverage.status = CoverageStatus::Partial;
+                        }
+                        for item in items {
+                            if item.get("pull_request").is_some() {
+                                if let Some((full_name, number)) = pr_identity(item, &issue.url) {
+                                    push_pr_lead(
+                                        &mut leads,
+                                        full_name,
+                                        number,
+                                        PullRequestRelation::SearchLead,
+                                        "github:targeted_pr_search".into(),
+                                    );
+                                } else {
+                                    snapshot
+                                        .search_coverage
+                                        .errors
+                                        .push("Unverifiable search PR identity".into());
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => snapshot.search_coverage.errors.push(error.to_string()),
+                }
+            }
+            if !snapshot.search_coverage.errors.is_empty() {
+                snapshot.search_coverage.status = if snapshot.search_coverage.pages_fetched == 0 {
+                    CoverageStatus::Unavailable
+                } else {
+                    CoverageStatus::Partial
+                };
+            }
+            snapshot.uncertainties.push("Targeted PR searches cover only the recorded queries; unrelated wording or unindexed work may be absent".into());
+        }
+        let pr_limit = if depth == AvailabilityDepth::Final {
+            12
+        } else {
+            6
+        };
+        if leads.len() > pr_limit {
+            snapshot.linked_coverage.status = CoverageStatus::Partial;
+            snapshot
+                .uncertainties
+                .push(format!("PR detail checks limited to {pr_limit} references"));
+        }
+        for (full_name, number, relation, source) in leads.into_iter().take(pr_limit) {
+            let mut evidence = PullRequestEvidence {
+                repo_full_name: full_name.clone(),
+                number,
+                url: None,
+                state: None,
+                draft: None,
+                merged: None,
+                merged_at: None,
+                base_branch: None,
+                relation,
+                sources: vec![source],
+                verified: false,
+                errors: Vec::new(),
+            };
+            match self
+                .availability_json(
+                    &format!("/repos/{full_name}/pulls/{number}"),
+                    &[],
+                    GitHubRequestSource::EnrichmentTimeline,
+                )
+                .await
+            {
+                Ok((value, _)) => {
+                    evidence.url = value
+                        .get("html_url")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    evidence.state = value
+                        .get("state")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    evidence.draft = value.get("draft").and_then(serde_json::Value::as_bool);
+                    evidence.merged = value.get("merged").and_then(serde_json::Value::as_bool);
+                    evidence.merged_at = value
+                        .get("merged_at")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    evidence.base_branch = value
+                        .pointer("/base/ref")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    evidence.verified = pr_identity(&value, &issue.url)
+                        == Some((full_name.clone(), number))
+                        && value
+                            .pointer("/base/repo/full_name")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|name| name.eq_ignore_ascii_case(&full_name));
+                    if !evidence.verified {
+                        evidence
+                            .errors
+                            .push("PR API response identity did not match the requested PR".into());
+                    }
+                    if evidence.state.is_none()
+                        || evidence.draft.is_none()
+                        || evidence.merged.is_none()
+                        || evidence.base_branch.is_none()
+                        || (evidence.merged == Some(true) && evidence.merged_at.is_none())
+                    {
+                        evidence.errors.push(
+                            "PR API response omitted state, draft, merge or base-branch evidence"
+                                .into(),
+                        );
+                    }
+                    if evidence.verified
+                        && value
+                            .get("body")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|body| explicitly_resolves(body, &full_name, issue))
+                    {
+                        evidence.relation = PullRequestRelation::ExplicitResolution;
+                    }
+                    if matches!(
+                        evidence.relation,
+                        PullRequestRelation::SearchLead | PullRequestRelation::Mention
+                    ) {
+                        snapshot.uncertainties.push(format!("PR lead {full_name}#{number} has no verified resolving relationship; mentions, title or keyword overlap do not establish competition"));
+                    }
+                    if evidence.merged == Some(true)
+                        && evidence.relation == PullRequestRelation::ExplicitResolution
+                        && (!full_name.eq_ignore_ascii_case(&snapshot.repo_full_name)
+                            || evidence.base_branch != snapshot.default_branch
+                            || snapshot.default_branch.is_none())
+                    {
+                        snapshot.uncertainties.push(format!("Merged resolving PR {full_name}#{number} does not establish a merge into this repository's default branch"));
+                    }
+                }
+                Err(error) => evidence
+                    .errors
+                    .push(format!("Fresh PR details unavailable: {error}")),
+            }
+            snapshot.uncertainties.extend(
+                evidence
+                    .errors
+                    .iter()
+                    .map(|error| format!("{full_name}#{number}: {error}")),
+            );
+            snapshot.pull_requests.push(evidence);
+        }
+        for (name, coverage) in [
+            ("Linked timeline", &snapshot.linked_coverage),
+            ("PR search", &snapshot.search_coverage),
+        ] {
+            snapshot.uncertainties.extend(
+                coverage
+                    .errors
+                    .iter()
+                    .map(|error| format!("{name}: {error}")),
+            );
+            if coverage.status == CoverageStatus::Partial {
+                snapshot
+                    .uncertainties
+                    .push(format!("{name} coverage is incomplete"));
+            }
+        }
+        snapshot
+    }
+
+    async fn availability_json(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        source: GitHubRequestSource,
+    ) -> Result<(serde_json::Value, Option<bool>)> {
+        self.record_request(source, path)?;
+        let response = self
+            .authorized(self.http.get(self.api_url(path)).query(query))
+            .send()
+            .await?;
+        let response = require_success(response).await?;
+        let has_more = match response.headers().get(reqwest::header::LINK) {
+            Some(link) => Some(
+                link.to_str()
+                    .context("Invalid GitHub pagination Link header")?
+                    .split(',')
+                    .any(|part| {
+                        part.split(';')
+                            .skip(1)
+                            .any(|param| param.trim() == "rel=\"next\"")
+                    }),
+            ),
+            None => None,
+        };
+        Ok((response.json().await?, has_more))
+    }
+
+    /// Acquire full bodies independently from the legacy 500-character comment excerpts.
+    /// Network requests share the client's authentication, timeout and GitHub request budget.
+    pub async fn system1_evidence(
+        &self,
+        paths: &IssueFinderPaths,
+        issue: &GitHubIssue,
+        enriched: &EnrichedIssue,
+        refresh: bool,
+    ) -> Result<EvidenceSnapshot> {
+        let mut snapshot = EvidenceSnapshot::from_issue(issue, enriched);
+        let (owner, repo) = split_repo_full_name(&snapshot.repo_full_name)
+            .context("Unable to split repository full name for System 1 evidence")?;
+        let details = self
+            .fetch_issue_details_cached(paths, &owner, &repo, issue.number, refresh)
+            .await;
+        let total_count = match details {
+            Ok(details) => {
+                snapshot.github_status.issue_state = details.state;
+                snapshot.issue_author = details.user.and_then(|user| user.login);
+                snapshot.issue_author_association = details
+                    .author_association
+                    .unwrap_or_else(|| "unknown".to_string());
+                snapshot.github_status.assignees = details
+                    .assignees
+                    .map(|users| users.into_iter().filter_map(|user| user.login).collect());
+                details.comments
+            }
+            Err(error) => {
+                snapshot
+                    .warnings
+                    .push(format!("System 1 issue details unavailable: {error}"));
+                None
+            }
+        };
+        snapshot.comments = CommentsEvidence::unavailable(total_count);
+        let key = snapshot.material_hash();
+        let cache_path = paths.enrichment_source_cache_path("system1_comments_v1", &key);
+        let cached: Option<Vec<CommentApiResponse>> = if refresh {
+            None
+        } else {
+            match load_source_cache(&cache_path, ENRICHMENT_CACHE_TTL_MINUTES) {
+                Ok(cached) => cached,
+                Err(error) => {
+                    snapshot
+                        .warnings
+                        .push(format!("System 1 comment cache unavailable: {error}"));
+                    None
+                }
+            }
+        };
+        let raw_comments = if let Some(cached) = cached {
+            self.budget
+                .record_cache_hit(GitHubRequestSource::EnrichmentComments);
+            Some(cached)
+        } else {
+            let pages = match total_count {
+                Some(0) => Vec::new(),
+                Some(count) => trailing_sample_pages(count, COMMENT_SAMPLE_LIMIT),
+                None => vec![1],
+            };
+            let mut comments = Vec::new();
+            let mut fetched = true;
+            for page in pages.into_iter().take(2) {
+                match self
+                    .fetch_comments_page(
+                        &owner,
+                        &repo,
+                        issue.number,
+                        page,
+                        GitHubRequestSource::EnrichmentComments,
+                    )
+                    .await
+                {
+                    Ok(page_comments) => comments.extend(page_comments),
+                    Err(error) => {
+                        fetched = false;
+                        snapshot
+                            .warnings
+                            .push(format!("System 1 comments unavailable: {error}"));
+                        break;
+                    }
+                }
+            }
+            if fetched {
+                let comments = tail_limited(comments, COMMENT_SAMPLE_LIMIT);
+                if let Err(error) = save_source_cache(&cache_path, &comments) {
+                    snapshot
+                        .warnings
+                        .push(format!("System 1 comment cache write failed: {error}"));
+                }
+                Some(comments)
+            } else {
+                None
+            }
+        };
+        snapshot.comments = match raw_comments {
+            Some(comments) => CommentsEvidence::from_comments(
+                total_count,
+                comments
+                    .into_iter()
+                    .map(|comment| CommentEvidence {
+                        id: comment.id,
+                        url: comment.html_url,
+                        author: comment.user.and_then(|user| user.login),
+                        author_association: comment
+                            .author_association
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        created_at: comment.created_at,
+                        updated_at: comment.updated_at,
+                        body: comment
+                            .body
+                            .as_deref()
+                            .map(|body| EvidenceText::bounded(body, usize::MAX))
+                            .unwrap_or_else(EvidenceText::unavailable),
+                    })
+                    .collect(),
+            ),
+            None => CommentsEvidence::unavailable(total_count),
+        };
+        Ok(snapshot)
     }
 
     pub async fn enrich_issue(
@@ -1024,6 +1545,8 @@ impl EnrichedIssue {
             },
             warnings: Vec::new(),
             source_fetched_at: Utc::now().to_rfc3339(),
+            system1: None,
+            availability: None,
         }
     }
 
@@ -1214,6 +1737,140 @@ fn split_repo_full_name(repo_full_name: &str) -> Option<(String, String)> {
     Some((owner.to_string(), repo.to_string()))
 }
 
+fn push_pr_lead(
+    leads: &mut Vec<(String, u64, PullRequestRelation, String)>,
+    repo: String,
+    number: u64,
+    relation: PullRequestRelation,
+    source: String,
+) {
+    if let Some((_, _, existing_relation, _)) = leads
+        .iter_mut()
+        .find(|(existing, n, _, _)| existing.eq_ignore_ascii_case(&repo) && *n == number)
+    {
+        if relation == PullRequestRelation::ExplicitResolution {
+            *existing_relation = relation;
+        }
+    } else {
+        leads.push((repo, number, relation, source));
+    }
+}
+
+fn pr_identity(value: &serde_json::Value, issue_url: &str) -> Option<(String, u64)> {
+    let url = url::Url::parse(value.get("html_url")?.as_str()?).ok()?;
+    let target = url::Url::parse(issue_url).ok()?;
+    if url.host_str() != target.host_str() {
+        return None;
+    }
+    let parts = url.path_segments()?.collect::<Vec<_>>();
+    if parts.len() != 4 || !matches!(parts[2], "pull" | "issues") {
+        return None;
+    }
+    let number = parts[3].parse::<u64>().ok()?;
+    if value.get("number").and_then(serde_json::Value::as_u64) != Some(number) {
+        return None;
+    }
+    Some((format!("{}/{}", parts[0], parts[1]), number))
+}
+
+fn search_title_terms(title: &str) -> Vec<String> {
+    title
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|term| {
+            term.len() > 3
+                && !matches!(
+                    term.as_str(),
+                    "issue"
+                        | "error"
+                        | "with"
+                        | "this"
+                        | "that"
+                        | "when"
+                        | "from"
+                        | "does"
+                        | "should"
+                        | "cannot"
+                        | "support"
+                        | "please"
+                )
+        })
+        .take(3)
+        .collect()
+}
+
+fn explicitly_resolves(body: &str, pr_repo: &str, issue: &GitHubIssue) -> bool {
+    let mut in_code = false;
+    for line in body.lines() {
+        let line = line.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code || line.starts_with('>') || line.contains('`') || line.contains("<!--") {
+            continue;
+        }
+        let words = line.split_whitespace().collect::<Vec<_>>();
+        for (index, pair) in words.windows(2).enumerate() {
+            let keyword = pair[0]
+                .trim_matches(|c: char| !c.is_ascii_alphabetic())
+                .to_ascii_lowercase();
+            if !matches!(
+                keyword.as_str(),
+                "close"
+                    | "closes"
+                    | "closed"
+                    | "fix"
+                    | "fixes"
+                    | "fixed"
+                    | "resolve"
+                    | "resolves"
+                    | "resolved"
+            ) {
+                continue;
+            }
+            if index > 0
+                && matches!(
+                    words[index - 1].to_ascii_lowercase().as_str(),
+                    "not" | "never" | "doesn't" | "don't"
+                )
+            {
+                continue;
+            }
+            let reference = pair[1]
+                .trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | '.' | ';'));
+            if let Some(number) = reference
+                .strip_prefix('#')
+                .and_then(|number| number.parse::<u64>().ok())
+            {
+                if number == issue.number && pr_repo.eq_ignore_ascii_case(&issue.repo_full_name) {
+                    return true;
+                }
+            }
+            if let Some((repo, number)) = reference.rsplit_once('#') {
+                if repo.eq_ignore_ascii_case(&issue.repo_full_name)
+                    && number.parse::<u64>().ok() == Some(issue.number)
+                {
+                    return true;
+                }
+            }
+            if let (Ok(reference), Ok(target)) =
+                (url::Url::parse(reference), url::Url::parse(&issue.url))
+            {
+                if reference.host_str() == target.host_str()
+                    && reference
+                        .path()
+                        .trim_end_matches('/')
+                        .eq_ignore_ascii_case(target.path().trim_end_matches('/'))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn trailing_sample_pages(total_count: u64, page_size: usize) -> Vec<u64> {
     if total_count == 0 {
         return vec![1];
@@ -1265,6 +1922,465 @@ fn unique_nonempty(values: Vec<String>) -> Vec<String> {
 
 fn excerpt(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
+}
+
+#[cfg(test)]
+mod availability_http_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn issue() -> GitHubIssue {
+        GitHubIssue {
+            id: 3,
+            number: 3,
+            title: "Fix bug".into(),
+            body: "Wrong behavior".into(),
+            labels: vec![],
+            url: "https://github.com/o/r/issues/3".into(),
+            repo_full_name: "o/r".into(),
+            repo_name: "r".into(),
+            repo_description: String::new(),
+            repo_stars: 1,
+            created_at: "2026-09-01T00:00:00Z".into(),
+            updated_at: "2026-09-01T00:00:00Z".into(),
+        }
+    }
+
+    fn pr(body: &str, state: Option<&str>, merged: bool) -> Value {
+        json!({"number": 9, "html_url":"https://github.com/o/r/pull/9", "state":state,
+            "draft": false, "merged":merged, "merged_at": if merged { Some("2026-09-30T00:00:00Z") } else { None },
+            "base":{"ref":"main", "repo":{"full_name":"o/r"}}, "body":body})
+    }
+
+    fn linked() -> Value {
+        json!([{"event":"cross-referenced", "source":{"issue":{"number":9, "html_url":"https://github.com/o/r/pull/9", "state":"closed", "pull_request":{}}}}])
+    }
+
+    fn status() -> Value {
+        json!({"state":"open", "assignees":[], "locked":false})
+    }
+
+    fn repo() -> Value {
+        json!({"archived":false, "default_branch":"main"})
+    }
+
+    async fn run(
+        responses: Vec<(Value, Option<&str>)>,
+        budget: usize,
+        depth: AvailabilityDepth,
+        candidate: GitHubIssue,
+    ) -> (AvailabilitySnapshot, Vec<String>, GitHubApiBudgetReport) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let api_base_url = format!("http://{}", listener.local_addr().unwrap());
+        let responses = responses
+            .into_iter()
+            .map(|(body, header)| (body, header.map(str::to_owned)))
+            .collect::<Vec<_>>();
+        let handle = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (body, link) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(StdDuration::from_secs(3)))
+                    .unwrap();
+                let mut bytes = [0; 8192];
+                let count = stream.read(&mut bytes).unwrap();
+                requests.push(
+                    String::from_utf8_lossy(&bytes[..count])
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .to_owned(),
+                );
+                let status = body
+                    .get("_http_status")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(200);
+                let body = body.to_string();
+                let link = link
+                    .map(|value| format!("Link: {value}\r\n"))
+                    .unwrap_or_default();
+                write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\n{link}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let client = GitHubEnrichmentClient {
+            http: reqwest::Client::builder()
+                .timeout(StdDuration::from_secs(3))
+                .build()
+                .unwrap(),
+            token: "fixture-token".into(),
+            api_base_url,
+            budget: GitHubApiBudget::with_total_budget(Some(budget)),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let paths = IssueFinderPaths {
+            home: dir.path().to_owned(),
+            config: dir.path().join("config"),
+            cache_dir: dir.path().join("cache"),
+            workspaces_dir: dir.path().join("workspaces"),
+            inbox_dir: dir.path().join("inbox"),
+            reports_dir: dir.path().join("reports"),
+        };
+        let snapshot = client.availability(&paths, &candidate, depth).await;
+        (snapshot, handle.join().unwrap(), client.request_stats())
+    }
+
+    #[tokio::test]
+    async fn verifies_actual_merge_instead_of_timeline_closed_state() {
+        for (body, state, merged, strong, repair) in [
+            ("Fixes #3", Some("open"), false, true, false),
+            ("Fixes #3", Some("closed"), true, false, true),
+            ("Fixes #3", Some("closed"), false, false, false),
+            ("Mentions #3", Some("open"), false, false, false),
+        ] {
+            let (facts, requests, _) = run(
+                vec![
+                    (status(), None),
+                    (repo(), None),
+                    (linked(), None),
+                    (pr(body, state, merged), None),
+                ],
+                8,
+                AvailabilityDepth::Initial,
+                issue(),
+            )
+            .await;
+            assert_eq!(requests.len(), 4);
+            assert!(requests[3].starts_with("GET /repos/o/r/pulls/9 "));
+            assert_eq!(facts.has_strong_open_competition(), strong);
+            assert_eq!(facts.has_merged_resolution_evidence(), repair);
+            assert!(facts.checks_complete());
+        }
+    }
+
+    #[tokio::test]
+    async fn follows_timeline_pagination_and_reports_bound_or_missing_link() {
+        let (facts, requests, _) = run(
+            vec![
+                (status(), None),
+                (repo(), None),
+                (
+                    json!([]),
+                    Some("<https://api.github.com/page2>; rel=\"next\""),
+                ),
+                (linked(), None),
+                (pr("Fixes #3", Some("open"), false), None),
+            ],
+            8,
+            AvailabilityDepth::Initial,
+            issue(),
+        )
+        .await;
+        assert!(facts.has_strong_open_competition());
+        assert_eq!(facts.linked_coverage.pages_fetched, 2);
+        assert_eq!(facts.linked_coverage.status, CoverageStatus::Complete);
+        assert!(requests[3].contains("page=2"));
+        for responses in [
+            vec![
+                (status(), None),
+                (repo(), None),
+                (json!([]), Some("<ignored>; rel=\"next\"")),
+                (json!([]), Some("<ignored>; rel=\"next\"")),
+            ],
+            vec![
+                (status(), None),
+                (repo(), None),
+                (json!(vec![json!({"event":"commented"}); 100]), None),
+            ],
+        ] {
+            let (facts, _, _) = run(responses, 8, AvailabilityDepth::Initial, issue()).await;
+            assert_eq!(facts.linked_coverage.status, CoverageStatus::Partial);
+            assert!(!facts.fresh_fix_available());
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_pr_state_and_exhausted_budget_remain_unknown() {
+        let (facts, _, _) = run(
+            vec![
+                (status(), None),
+                (repo(), None),
+                (linked(), None),
+                (pr("Fixes #3", None, false), None),
+            ],
+            8,
+            AvailabilityDepth::Initial,
+            issue(),
+        )
+        .await;
+        assert!(!facts.checks_complete());
+        assert!(!facts.has_strong_open_competition());
+        assert!(!facts.uncertainties.is_empty());
+        let (facts, requests, report) = run(
+            vec![(status(), None), (repo(), None)],
+            2,
+            AvailabilityDepth::Final,
+            issue(),
+        )
+        .await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(report.total_network_requests, 2);
+        assert_eq!(facts.linked_coverage.status, CoverageStatus::Unavailable);
+        assert_eq!(facts.search_coverage.status, CoverageStatus::Unavailable);
+        assert!(facts
+            .uncertainties
+            .iter()
+            .any(|error| error.contains("budget exhausted")));
+    }
+
+    #[tokio::test]
+    async fn http_failures_are_preserved_in_snapshot_instead_of_becoming_empty_evidence() {
+        let (facts, _, _) = run(
+            vec![
+                (status(), None),
+                (json!({"_http_status": 503}), None),
+                (json!({"_http_status": 503}), None),
+            ],
+            8,
+            AvailabilityDepth::Initial,
+            issue(),
+        )
+        .await;
+        assert_eq!(facts.issue_state.as_deref(), Some("open"));
+        assert_eq!(facts.archived, None);
+        assert_eq!(facts.linked_coverage.status, CoverageStatus::Unavailable);
+        assert!(facts
+            .uncertainties
+            .iter()
+            .any(|error| error.contains("503")));
+        assert!(!facts.fresh_fix_available());
+    }
+
+    #[tokio::test]
+    async fn unlinked_search_matches_are_uncertain_until_actual_resolution_verified() {
+        let result = json!({"total_count":1,"incomplete_results":false,"items":[{"number":9,"html_url":"https://github.com/o/r/pull/9","pull_request":{},"title":"Fix bug"}]});
+        let (facts, requests, _) = run(
+            vec![
+                (status(), None),
+                (repo(), None),
+                (json!([]), None),
+                (result, None),
+                (
+                    pr("Another change for related symptoms", Some("open"), false),
+                    None,
+                ),
+            ],
+            8,
+            AvailabilityDepth::Final,
+            issue(),
+        )
+        .await;
+        assert!(requests[3].starts_with("GET /search/issues?"));
+        assert_eq!(
+            facts.pull_requests[0].relation,
+            PullRequestRelation::SearchLead
+        );
+        assert!(!facts.has_strong_open_competition());
+        assert!(!facts.fresh_fix_available());
+        assert!(facts
+            .uncertainties
+            .iter()
+            .any(|warning| warning.contains("no verified resolving relationship")));
+    }
+
+    #[test]
+    fn resolving_references_require_exact_issue_and_repository_without_quoted_examples() {
+        let candidate = issue();
+        assert!(explicitly_resolves(
+            "Resolves o/r#3",
+            "other/repo",
+            &candidate
+        ));
+        assert!(explicitly_resolves(
+            "Fixes https://github.com/o/r/issues/3.",
+            "o/r",
+            &candidate
+        ));
+        for body in [
+            "Mentions #3",
+            "Fixes #30",
+            "Fixes other/r#3",
+            "> Fixes #3",
+            "```\nFixes #3\n```",
+            "Does not fix #3",
+        ] {
+            assert!(!explicitly_resolves(body, "o/r", &candidate), "{body}");
+        }
+        assert!(!explicitly_resolves("Fixes #3", "other/repo", &candidate));
+    }
+}
+
+#[cfg(test)]
+mod system1_evidence_http_tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use serde_json::{json, Value};
+
+    use super::*;
+    use crate::system1::evidence::CommentFetchStatus;
+
+    fn issue() -> GitHubIssue {
+        GitHubIssue {
+            id: 3,
+            number: 3,
+            title: "Fix this typo".into(),
+            body: "Correct a typo in README.".into(),
+            labels: Vec::new(),
+            url: "https://github.com/o/r/issues/3".into(),
+            repo_full_name: "o/r".into(),
+            repo_name: "r".into(),
+            repo_description: String::new(),
+            repo_stars: 1,
+            created_at: "2026-09-01T00:00:00Z".into(),
+            updated_at: "2026-09-01T00:00:00Z".into(),
+        }
+    }
+
+    fn paths(dir: &std::path::Path) -> IssueFinderPaths {
+        IssueFinderPaths {
+            home: dir.to_owned(),
+            config: dir.join("config.toml"),
+            cache_dir: dir.join("cache"),
+            workspaces_dir: dir.join("workspaces"),
+            inbox_dir: dir.join("inbox"),
+            reports_dir: dir.join("reports"),
+        }
+    }
+
+    fn server(
+        responses: Vec<(u16, Value)>,
+    ) -> (GitHubEnrichmentClient, thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let api_base_url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "missing mock GitHub request");
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("mock GitHub accept failed: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = [0; 8_192];
+                let count = stream.read(&mut bytes).unwrap();
+                requests.push(String::from_utf8_lossy(&bytes[..count]).into_owned());
+                let body = body.to_string();
+                write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        // Construct directly so offline tests never resolve or forward real developer credentials.
+        let client = GitHubEnrichmentClient {
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap(),
+            token: "fixture-token".into(),
+            api_base_url,
+            budget: GitHubApiBudget::with_total_budget(Some(5)),
+        };
+        (client, handle)
+    }
+
+    #[tokio::test]
+    async fn preserves_full_comment_identity_and_reuses_versioned_evidence_cache() {
+        let complete_body = format!(
+            "{} I am no longer working on this.",
+            "background ".repeat(100)
+        );
+        let (client, handle) = server(vec![
+            (
+                200,
+                json!({"comments": 1, "state": "open", "assignees": [{"login": "assigned-person"}]}),
+            ),
+            (
+                200,
+                json!([{"id": 42, "html_url": "https://github.com/o/r/issues/3#issuecomment-42",
+                "body": complete_body, "user": {"login": "participant"}, "author_association": "MEMBER",
+                "created_at": "2026-09-01T01:00:00Z", "updated_at": "2026-09-02T01:00:00Z"}]),
+            ),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(dir.path());
+        let issue = issue();
+        let enriched = EnrichedIssue::from_issue(&issue);
+        let snapshot = client
+            .system1_evidence(&paths, &issue, &enriched, false)
+            .await
+            .unwrap();
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("per_page=30&page=1"));
+        assert_eq!(snapshot.comments.status, CommentFetchStatus::Complete);
+        let comment = &snapshot.comments.comments[0];
+        assert_eq!(comment.body.text, complete_body);
+        assert_eq!(comment.id, Some(42));
+        assert_eq!(comment.author_association, "MEMBER");
+        assert_eq!(comment.updated_at.as_deref(), Some("2026-09-02T01:00:00Z"));
+        assert_eq!(
+            snapshot.github_status.assignees,
+            Some(vec!["assigned-person".into()])
+        );
+        assert_eq!(snapshot.github_status.linked_merged_pr_count, None);
+        let cached = client
+            .system1_evidence(&paths, &issue, &enriched, false)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.material_hash(), cached.material_hash());
+        assert_eq!(client.request_stats().total_network_requests, 2);
+        let mut changed = issue.clone();
+        changed.updated_at = "2026-09-03T01:00:00Z".into();
+        let changed_enrichment = EnrichedIssue::from_issue(&changed);
+        let unavailable = client
+            .system1_evidence(&paths, &changed, &changed_enrichment, false)
+            .await
+            .unwrap();
+        assert_eq!(unavailable.comments.status, CommentFetchStatus::Unavailable);
+        assert_ne!(snapshot.material_hash(), unavailable.material_hash());
+    }
+
+    #[tokio::test]
+    async fn comment_failure_and_missing_count_do_not_claim_an_empty_complete_timeline() {
+        for (details, comment_status, expected) in [
+            (json!({"comments": 1}), 503, CommentFetchStatus::Unavailable),
+            (json!({}), 200, CommentFetchStatus::Sampled),
+        ] {
+            let (client, handle) =
+                server(vec![(200, details.clone()), (comment_status, json!([]))]);
+            let dir = tempfile::tempdir().unwrap();
+            let issue = issue();
+            let snapshot = client
+                .system1_evidence(
+                    &paths(dir.path()),
+                    &issue,
+                    &EnrichedIssue::from_issue(&issue),
+                    false,
+                )
+                .await
+                .unwrap();
+            handle.join().unwrap();
+            assert_eq!(snapshot.comments.status, expected);
+            assert_eq!(snapshot.comments.total_count, details["comments"].as_u64());
+            assert!(snapshot.comments.comments.is_empty());
+            assert_eq!(snapshot.github_status.assignees, None);
+        }
+    }
 }
 
 #[cfg(test)]

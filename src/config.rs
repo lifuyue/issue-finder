@@ -15,6 +15,50 @@ pub struct Config {
     pub profile: ProfileConfig,
     pub daily: DailyConfig,
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub system1: System1Config,
+}
+
+/// Screening is independent of the legacy optional LLM reviewer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct System1Config {
+    pub concurrency: usize,
+    pub codex_binary: String,
+    pub timeout_seconds: u64,
+    pub candidate_budget: usize,
+    pub task_preferences: String,
+}
+
+impl Default for System1Config {
+    fn default() -> Self {
+        Self {
+            concurrency: 4,
+            codex_binary: String::new(),
+            timeout_seconds: 45,
+            candidate_budget: 24,
+            task_preferences: String::new(),
+        }
+    }
+}
+
+impl System1Config {
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(self.concurrency > 0, "system1.concurrency must be positive");
+        anyhow::ensure!(
+            (1..=300).contains(&self.timeout_seconds),
+            "system1.timeout_seconds must be between 1 and 300"
+        );
+        anyhow::ensure!(
+            self.candidate_budget <= 100,
+            "system1.candidate_budget must be between 0 and 100"
+        );
+        anyhow::ensure!(
+            self.task_preferences.chars().count() <= 4_000,
+            "system1.task_preferences must not exceed 4000 characters"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,6 +131,7 @@ impl Default for Config {
                 api_key_env: String::new(),
                 model: "gpt-4o-mini".to_string(),
             },
+            system1: System1Config::default(),
         }
     }
 }

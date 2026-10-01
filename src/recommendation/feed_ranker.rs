@@ -45,6 +45,8 @@ pub fn sort_by_feed(ranked: &mut [RankedValueIssue]) {
                     .cmp(&left.recommendation.base_rank_score)
             })
             .then_with(|| right.issue.updated_at.cmp(&left.issue.updated_at))
+            .then_with(|| left.issue.repo_full_name.cmp(&right.issue.repo_full_name))
+            .then_with(|| left.issue.number.cmp(&right.issue.number))
     });
 }
 
@@ -55,14 +57,22 @@ pub fn recommendation_assessment(
     let value = &item.value_assessment;
     let freshness = assess_freshness(&item.enriched_issue);
     let feedback = assess_feedback(state, &item.enriched_issue);
-    let quality = assess_quality_policy(value, &item.enriched_issue);
+    let quality = match &item.enriched_issue.system1 {
+        Some(snapshot) => {
+            crate::system1::policy::quality(&item.enriched_issue, snapshot.answers.as_ref())
+        }
+        None => assess_quality_policy(value, &item.enriched_issue),
+    };
     let mut visibility = feedback.visibility;
     if visibility == RecommendationVisibility::Visible
         && value.recommendation_category == RecommendationCategory::FilteredLowDepth
     {
         visibility = RecommendationVisibility::HiddenFiltered;
     }
-    if visibility == RecommendationVisibility::Visible {
+    if visibility == RecommendationVisibility::Visible
+        || (item.enriched_issue.system1.is_some()
+            && visibility == RecommendationVisibility::HiddenFiltered)
+    {
         if let Some(quality_visibility) = quality.visibility {
             visibility = quality_visibility;
         }

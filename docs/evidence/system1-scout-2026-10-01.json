@@ -1,0 +1,153 @@
+{
+  "checked_at_utc": "2026-10-01T07:37:59.486298920+00:00",
+  "command": "issue-finder tools call issue-finder.scout",
+  "cli_version": "0.159.3",
+  "arguments": {
+    "repo": "rust-lang/rust-clippy",
+    "search": {
+      "query": "is:open no:assignee",
+      "perPage": 1,
+      "maxPages": 1,
+      "apiBudget": 35
+    },
+    "limit": 1,
+    "recordExposure": false,
+    "refresh": true,
+    "includeFiltered": true
+  },
+  "single_json_stdout": true,
+  "stderr_bytes": 0,
+  "status": "partial",
+  "sessionContractVersion": 2,
+  "tools": [
+    "scout",
+    "assess"
+  ],
+  "warnings": [
+    "Recent stargazer sample failed: GitHub rate limit or secondary throttle while enriching issue"
+  ],
+  "input_id": "9ca237f7010235be5783e721246820c01c7da106c61406d3d6c8ac3d32f4ffe3",
+  "materials": {
+    "bodyTruncated": false,
+    "chronologyComplete": true,
+    "commentSources": [
+      {
+        "id": 5920453806,
+        "updatedAt": "2026-09-30T21:59:08Z",
+        "url": "https://github.com/rust-lang/rust-clippy/issues/17824#issuecomment-5920453806"
+      },
+      {
+        "id": 5920916496,
+        "updatedAt": "2026-09-30T22:36:26Z",
+        "url": "https://github.com/rust-lang/rust-clippy/issues/17824#issuecomment-5920916496"
+      }
+    ],
+    "commentStatus": "complete",
+    "commentsIncluded": 2,
+    "commentsOmitted": 0,
+    "commentsTotal": 2,
+    "commentsTruncated": false,
+    "githubStatus": {
+      "assignees": [],
+      "issue_state": "open",
+      "linked_closed_pr_count": 0,
+      "linked_merged_pr_count": null,
+      "linked_open_pr_count": 0,
+      "linked_pr_timeline_available": true
+    },
+    "issueUpdatedAt": "2026-09-30T22:36:29Z",
+    "issueUrl": "https://github.com/rust-lang/rust-clippy/issues/17824",
+    "materialHash": "aa98eae6786e3f3712b9577776435f0bb2951d1e89922adb118f9f9e37cfdb90",
+    "selection": "latest_comments",
+    "warnings": []
+  },
+  "system1_status": "completed",
+  "answers": {
+    "contribution_signal": "not_observed",
+    "description_quality": "clear",
+    "maintainer_signal": "not_observed",
+    "preference_match": "matches",
+    "scope": "bounded",
+    "task_shape": "implementation",
+    "task_type": "concrete_change",
+    "verification_clues": "present"
+  },
+  "provider": {
+    "duration_ms": 7159,
+    "model": "gpt-6-luna",
+    "provider": "codex_app_server",
+    "reasoning_effort": "none",
+    "usage": {
+      "cacheWriteInputTokens": 0,
+      "cachedInputTokens": 0,
+      "inputTokens": 18956,
+      "outputTokens": 248,
+      "reasoningOutputTokens": 0,
+      "totalTokens": 19204
+    }
+  },
+  "probabilities": [
+    {
+      "probabilities": null,
+      "questionId": "task_type",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "description_quality",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "contribution_signal",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "scope",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "preference_match",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "task_shape",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "verification_clues",
+      "status": "answered"
+    },
+    {
+      "probabilities": null,
+      "questionId": "maintainer_signal",
+      "status": "answered"
+    }
+  ],
+  "api_budget": {
+    "budgetExhausted": {},
+    "cacheHits": {},
+    "events": [],
+    "networkRequests": {
+      "discovery_repository": 1,
+      "enrichment_comments": 2,
+      "enrichment_growth": 2,
+      "enrichment_issue_details": 2,
+      "enrichment_repo_metadata": 1,
+      "enrichment_timeline": 1
+    },
+    "totalBudget": 35,
+    "totalNetworkRequests": 9
+  },
+  "full_replay_record": {
+    "schema_version": 1,
+    "candidate_count": 1,
+    "feedback_policy": "codex_exposure",
+    "stored_facts_and_judgments": true
+  },
+  "note": "Live integration smoke check, not a manually scored quality benchmark. GitHub stargazer throttling correctly causes partial status while semantic screening completes."
+}

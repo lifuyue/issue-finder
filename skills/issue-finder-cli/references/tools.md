@@ -27,7 +27,9 @@ search is bounded GitHub retrieval followed by Issue Finder ranking. `sort` is
 `updated`, `created`, `comments`, or `best_match`; `order` is `asc` or `desc`.
 The explicit `repo` scope cannot be redirected by query qualifiers.
 
-`profile.techStack` and `profile.keywords` override preferences for one call.
+`profile.techStack`, `profile.keywords`, and optional `profile.taskPreferences`
+override preferences for one call. `taskPreferences` is at most 4000 characters
+and records explicit task preferences such as "avoid documentation polishing".
 Carry scout's resolved `profile` into assessment and discussion pagination.
 Omitting a field can inherit configured preferences; explicit empty arrays clear
 that preference for the call. No profile bootstrap or unrelated chat scan is
@@ -38,14 +40,35 @@ required.
 retrieved but unrecommended issues. Assess plausible entries to fill evidence
 gaps; do not present them as vetted recommendations.
 
+Scout checks fresh initial GitHub availability, screens eligible candidates with
+seven `scout-semantics-v2` questions, then freshly rechecks provisional results and
+backfills from the bounded pool within the existing API budget. Codex app-server
+uses `gpt-6-luna` with reasoning disabled: one process, independent issue threads,
+one seven-question request per issue with each question's criteria and material.
+Default configuration concurrency is 4 and must be positive; there is no extra
+upper cap. Single-candidate failures are isolated, with at most one retry for a
+retryable server response within the original timeout. GitHub facts and semantic
+interpretations remain distinct; deterministic policy consumes the answers.
+`working`, `fix_claimed` and `conflicting` are soft evidence-check reminders, not
+automatic contested categories. Task form does not exclude concrete documentation,
+content, generated, event or rewarded changes; goal, clarity, scope and explicit
+preferences determine their fit. Failed, unable-to-answer, and budget-skipped candidates remain
+identifiable. There is no fallback to replaced semantic keyword hiding. See the
+[System 1 guide](../../../docs/system1.md) for configuration and the provider contract.
+
 ## Outputs and freshness
 
 Inspect the full JSON envelope: `success`, `status`, warnings, and error details.
 Tool data is in `structured_content`:
 
 - Scout: `candidates`, `diagnostics.search`, `apiBudget`, and resolved `profile`.
+  Each candidate's `system1` exposes semantic status/answers, input hash, material
+  scope, question version and saved snapshot path; `availability` contains fresh
+  issue/repository/PR facts and coverage. Diagnostics disclose failures, skips,
+  concurrency, peak in-flight work and per-candidate timing/cache hits.
 - Assess: `issue` with body and one discussion page, `assessment`, `competition`,
-  `repository`, `activity`, `assessmentFetchedAt`, and warnings when available.
+  `repository`, `activity`, `assessmentFetchedAt`, fresh final-depth `availability`,
+  and warnings when available. Assess makes no model request.
   `issueWarnings` identifies a locked discussion or existing assignee.
 - Discussion pagination: `issue.comments`, `nextCommentsPage`,
   `commentsTruncated`, and `totalComments`.
@@ -56,12 +79,25 @@ reason and context. Locked or assigned open issues remain assessable; inspect
 `issueWarnings` before proceeding. `partial` discloses missing evidence or failed
 assessment work. Neither
 partial evidence nor a competition score establishes the absence of competing
-PRs. Assessment reasons, including popularity, are advisory information rather
+PRs. `availability.pull_requests` preserves repository/number, verified API state,
+merge facts, base branch, relation and sources. Closed does not mean merged.
+Explicit closing directives targeting the issue establish resolution relationships;
+mentions and search matches remain leads. Merged resolution evidence for this
+repository's default branch requires inspecting current code, not declaring a fix.
+Incomplete coverage and unresolved relationships remain unknown. Assessment
+reasons, including popularity, are advisory information rather
 than repair authorization gates.
 
 Use `refresh: true` to bypass cached discovery/assessment evidence when stale
 information affects a decision. Assess retrieves the selected issue/discussion
 page on each call; refresh additionally updates cached assessment evidence.
+Assess marks semantic judgment as not evaluated for its new context; an old scout
+answer is historical screening, not freshly verified evidence. Scout cache reuse
+is tied to materials, questions, resolved preferences, and provider/model/reasoning
+configuration, with a six-hour freshness limit. Semantic reuse never replaces fresh
+initial/final GitHub availability checks. Old schema 1 eight-question replays validate
+v1 and preserve their captured outcome without v2 recomputation; current schema 2
+captures explicitly identify v2. Historical reports do not establish v2 acceptance.
 Read further pages only when needed. Honor rate limits rather than retrying
 through parallel clients.
 

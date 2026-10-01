@@ -135,6 +135,7 @@ pub struct RecommendationEngine<'a> {
     paths: &'a IssueFinderPaths,
     config: &'a Config,
     feedback_policy: FeedbackPolicy,
+    system1_provider: Option<std::sync::Arc<dyn crate::system1::contract::Provider>>,
 }
 
 impl<'a> RecommendationEngine<'a> {
@@ -143,6 +144,7 @@ impl<'a> RecommendationEngine<'a> {
             paths,
             config,
             feedback_policy: FeedbackPolicy::LegacyLifecycle,
+            system1_provider: None,
         }
     }
 
@@ -151,7 +153,19 @@ impl<'a> RecommendationEngine<'a> {
             paths,
             config,
             feedback_policy: FeedbackPolicy::CodexExposure,
+            system1_provider: None,
         }
+    }
+
+    /// Same material engineering and policy for any provider, including offline replay fakes.
+    pub fn with_system1_provider(
+        paths: &'a IssueFinderPaths,
+        config: &'a Config,
+        provider: std::sync::Arc<dyn crate::system1::contract::Provider>,
+    ) -> Self {
+        let mut engine = Self::for_codex(paths, config);
+        engine.system1_provider = Some(provider);
+        engine
     }
 
     pub async fn scout(
@@ -170,7 +184,12 @@ impl<'a> RecommendationEngine<'a> {
             options.include_filtered,
             self.feedback_policy,
         );
-        if !refresh && !options.record_exposure {
+        // Session screening must revalidate material versions; only per-material
+        // judgments are cached. A cached final list can hide newly eligible items.
+        if !refresh
+            && !options.record_exposure
+            && self.feedback_policy != FeedbackPolicy::CodexExposure
+        {
             if let Some(cached) = load_cached_scout_result(self.paths, &scout_cache_key)? {
                 api_budget.record_cache_hit(GitHubRequestSource::ScoutResult);
                 let mut ranked = cached.ranked;
@@ -219,7 +238,7 @@ impl<'a> RecommendationEngine<'a> {
 
         if options.record_exposure {
             self.record_exposure(&run.ranked, options.source, &scope)?;
-        } else {
+        } else if self.feedback_policy != FeedbackPolicy::CodexExposure {
             save_cached_scout_result(
                 self.paths,
                 &scout_cache_key,
@@ -232,7 +251,9 @@ impl<'a> RecommendationEngine<'a> {
                 },
             )?;
         }
-        let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
+        if self.feedback_policy != FeedbackPolicy::CodexExposure {
+            let _ = apply_ranking_hints_to_ranked(self.paths, &mut run.ranked);
+        }
         sort_by_feed(&mut run.ranked);
 
         Ok(ScoutResult {
@@ -286,7 +307,18 @@ impl<'a> RecommendationEngine<'a> {
         let completion_statuses = self
             .complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
             .await;
-        self.apply_feed_ranking(&mut ranked);
+        self.apply_system1(&enrichment, &mut ranked, refresh, &mut diagnostics)
+            .await;
+        self.recheck_shortlist(
+            &enrichment,
+            &mut ranked,
+            limit,
+            options.include_filtered,
+            display_mode,
+            &mut diagnostics,
+        )
+        .await;
+        self.apply_final_feed_ranking(&mut ranked, &mut diagnostics)?;
         append_discovery_reasons(&mut ranked, &mut discovery_by_key);
         competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
         if let Some(details) = &mut diagnostics.search {
@@ -358,7 +390,12 @@ impl<'a> RecommendationEngine<'a> {
             let trusted_budget =
                 TRUSTED_FALLBACK_ENRICHMENT_CANDIDATE_LIMIT.min(fallback_enrichment_budget);
             let fallback = github
-                .discover_trusted_fallback_candidates(self.paths, refresh, &self.config.profile)
+                .discover_trusted_fallback_candidates_with_factual_order(
+                    self.paths,
+                    refresh,
+                    &self.config.profile,
+                    self.feedback_policy == FeedbackPolicy::CodexExposure,
+                )
                 .await?;
             let consumed = self
                 .rank_additional_candidates(AdditionalRankingRequest {
@@ -379,7 +416,12 @@ impl<'a> RecommendationEngine<'a> {
                 && fallback_enrichment_budget > 0
             {
                 let fallback = github
-                    .discover_global_fallback_candidates(self.paths, refresh, &self.config.profile)
+                    .discover_global_fallback_candidates_with_factual_order(
+                        self.paths,
+                        refresh,
+                        &self.config.profile,
+                        self.feedback_policy == FeedbackPolicy::CodexExposure,
+                    )
                     .await?;
                 self.rank_additional_candidates(AdditionalRankingRequest {
                     enrichment,
@@ -406,7 +448,12 @@ impl<'a> RecommendationEngine<'a> {
         if competition_limited_display_count(&ranked, limit, false, DisplayMode::Global) < hard_pass
         {
             let fallback = github
-                .discover_trusted_fallback_candidates(self.paths, refresh, &self.config.profile)
+                .discover_trusted_fallback_candidates_with_factual_order(
+                    self.paths,
+                    refresh,
+                    &self.config.profile,
+                    self.feedback_policy == FeedbackPolicy::CodexExposure,
+                )
                 .await?;
             self.rank_additional_candidates(AdditionalRankingRequest {
                 enrichment,
@@ -435,7 +482,12 @@ impl<'a> RecommendationEngine<'a> {
                 < hard_pass
             {
                 let fallback = github
-                    .discover_global_fallback_candidates(self.paths, refresh, &self.config.profile)
+                    .discover_global_fallback_candidates_with_factual_order(
+                        self.paths,
+                        refresh,
+                        &self.config.profile,
+                        self.feedback_policy == FeedbackPolicy::CodexExposure,
+                    )
                     .await?;
                 self.rank_additional_candidates(AdditionalRankingRequest {
                     enrichment,
@@ -462,6 +514,20 @@ impl<'a> RecommendationEngine<'a> {
             }
         }
 
+        self.apply_system1(enrichment, &mut ranked, refresh, &mut diagnostics)
+            .await;
+        self.recheck_shortlist(
+            enrichment,
+            &mut ranked,
+            limit,
+            include_filtered,
+            DisplayMode::Global,
+            &mut diagnostics,
+        )
+        .await;
+        self.apply_final_feed_ranking(&mut ranked, &mut diagnostics)?;
+        append_discovery_reasons(&mut ranked, &mut discovery_by_key);
+        competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
         let filtered_count = ranked
             .iter()
             .filter(|item| !displayable(item, include_filtered))
@@ -605,7 +671,18 @@ impl<'a> RecommendationEngine<'a> {
 
         diagnostics.fallback_exhausted =
             display_count(&ranked, limit, include_filtered, DisplayMode::Repository) < limit;
-        self.apply_feed_ranking(&mut ranked);
+        self.apply_system1(enrichment, &mut ranked, refresh, &mut diagnostics)
+            .await;
+        self.recheck_shortlist(
+            enrichment,
+            &mut ranked,
+            limit,
+            include_filtered,
+            DisplayMode::Repository,
+            &mut diagnostics,
+        )
+        .await;
+        self.apply_final_feed_ranking(&mut ranked, &mut diagnostics)?;
         append_discovery_reasons(&mut ranked, &mut discovery_by_key);
         competition_completion::append_completion_explanations(&mut ranked, &completion_statuses);
 
@@ -711,9 +788,26 @@ impl<'a> RecommendationEngine<'a> {
     ) -> Result<RankedValueIssue> {
         self.paths.ensure_layout()?;
         let enrichment = GitHubEnrichmentClient::new(self.config)?;
-        let ranked = self
+        let mut ranked = self
             .rank_single_issue(&enrichment, issue, refresh, true)
             .await?;
+        if self.feedback_policy == FeedbackPolicy::CodexExposure {
+            ranked.enriched_issue.availability = Some(
+                enrichment
+                    .availability(
+                        self.paths,
+                        &ranked.issue,
+                        crate::availability::AvailabilityDepth::Final,
+                    )
+                    .await,
+            );
+        }
+        if let Some(snapshot) = &mut ranked.enriched_issue.system1 {
+            snapshot.status = crate::system1::JudgmentStatus::NotEvaluated;
+            snapshot.error = Some("assess fetched current GitHub evidence; any prior scout judgment applies only to its saved material and has not been revalidated here".to_string());
+            ranked.value_assessment = assess_issue(&ranked.enriched_issue, &self.config.profile);
+            self.apply_feed_ranking(std::slice::from_mut(&mut ranked));
+        }
         if record_read {
             record_event_for_issue(
                 self.paths,
@@ -759,7 +853,7 @@ impl<'a> RecommendationEngine<'a> {
         refresh: bool,
         display_mode: DisplayMode,
     ) -> (Vec<RankedValueIssue>, HashMap<String, DiscoveryCandidate>) {
-        let selected = select_enrichment_candidates_for_mode(
+        let selected = self.select_enrichment_candidates(
             candidates,
             ENRICHED_SCOUT_CANDIDATE_LIMIT,
             display_mode,
@@ -831,7 +925,7 @@ impl<'a> RecommendationEngine<'a> {
             .into_iter()
             .filter(|candidate| !existing.contains(&candidate.key()))
             .collect::<Vec<_>>();
-        let selected = select_enrichment_candidates_for_mode(candidates, max_budget, display_mode);
+        let selected = self.select_enrichment_candidates(candidates, max_budget, display_mode);
         if selected.is_empty() {
             return Ok(0);
         }
@@ -937,6 +1031,9 @@ impl<'a> RecommendationEngine<'a> {
                 continue;
             };
             item.enriched_issue = enriched.clone();
+            if self.feedback_policy == FeedbackPolicy::CodexExposure {
+                crate::system1::factual_competition_only(&mut item.enriched_issue);
+            }
             canonicalize_ranked_issue(item);
             item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
             item.score = item.value_assessment.final_rank_score;
@@ -953,10 +1050,44 @@ impl<'a> RecommendationEngine<'a> {
         refresh: bool,
         include_competition_timeline: bool,
     ) -> Result<RankedValueIssue> {
-        let mut enriched = enrichment
-            .enrich_issue_with_options(self.paths, &issue, refresh, include_competition_timeline)
-            .await;
+        let availability = if self.feedback_policy == FeedbackPolicy::CodexExposure {
+            Some(
+                enrichment
+                    .availability(
+                        self.paths,
+                        &issue,
+                        crate::availability::AvailabilityDepth::Initial,
+                    )
+                    .await,
+            )
+        } else {
+            None
+        };
+        let excluded = availability
+            .as_ref()
+            .is_some_and(availability_blocks_new_work);
+        let mut enriched = if excluded {
+            EnrichedIssue::from_issue(&issue)
+        } else {
+            enrichment
+                .enrich_issue_with_options(
+                    self.paths,
+                    &issue,
+                    refresh,
+                    include_competition_timeline,
+                )
+                .await
+        };
+        enriched.availability = availability;
         canonicalize_enriched_issue_repo(&mut enriched);
+        if self.feedback_policy == FeedbackPolicy::CodexExposure {
+            // Tag before the first assessment, so legacy semantics cannot hide
+            // candidates before they reach the bounded model pool.
+            enriched.system1 = Some(crate::system1::JudgmentSnapshot::pending(
+                "Semantic screening has not run for this material",
+            ));
+            crate::system1::factual_competition_only(&mut enriched);
+        }
         let value_assessment = assess_issue(&enriched, &self.config.profile);
         let mut ranked = RankedValueIssue {
             issue,
@@ -976,9 +1107,331 @@ impl<'a> RecommendationEngine<'a> {
         let states =
             load_state_map_with_policy(self.paths, self.feedback_policy).unwrap_or_default();
         apply_recommendation_assessments(ranked, &states);
-        let _ = apply_ranking_hints_to_ranked(self.paths, ranked);
+        // Historical issue-type hints classify text with keywords. They belong
+        // to the legacy workflow, not the semantic screening policy.
+        if self.feedback_policy != FeedbackPolicy::CodexExposure {
+            let _ = apply_ranking_hints_to_ranked(self.paths, ranked);
+        }
         sort_by_feed(ranked);
     }
+
+    fn apply_final_feed_ranking(
+        &self,
+        ranked: &mut [RankedValueIssue],
+        diagnostics: &mut DiscoveryDiagnostics,
+    ) -> Result<()> {
+        if self.feedback_policy != FeedbackPolicy::CodexExposure {
+            self.apply_feed_ranking(ranked);
+            return Ok(());
+        }
+        let states = load_state_map_with_policy(self.paths, self.feedback_policy)?;
+        apply_recommendation_assessments(ranked, &states);
+        sort_by_feed(ranked);
+        let replay = crate::system1::replay::ScoutReplay::capture(
+            &self.config.profile,
+            ranked,
+            &states,
+            self.feedback_policy,
+        )?;
+        diagnostics.system1_replay_path = Some(replay.save(self.paths)?.display().to_string());
+        Ok(())
+    }
+
+    /// Refresh provisional recommendations, then backfill from the already
+    /// bounded pool. Rechecking never adds discovery pages or model calls.
+    async fn recheck_shortlist(
+        &self,
+        enrichment: &GitHubEnrichmentClient,
+        ranked: &mut [RankedValueIssue],
+        limit: usize,
+        include_filtered: bool,
+        mode: DisplayMode,
+        diagnostics: &mut DiscoveryDiagnostics,
+    ) {
+        if self.feedback_policy != FeedbackPolicy::CodexExposure {
+            return;
+        }
+        let mut checked = HashSet::new();
+        loop {
+            self.apply_feed_ranking(ranked);
+            let provisional = competition_completion::select_display_candidates(
+                ranked.to_vec(),
+                limit,
+                include_filtered,
+                mode.completed_per_repo_limit(limit),
+            );
+            let next = provisional
+                .iter()
+                .find(|item| !checked.contains(&candidate_key(&item.issue)));
+            let Some(next) = next else {
+                break;
+            };
+            let key = candidate_key(&next.issue);
+            let facts = enrichment
+                .availability(
+                    self.paths,
+                    &next.issue,
+                    crate::availability::AvailabilityDepth::Final,
+                )
+                .await;
+            if !facts.checks_complete() {
+                diagnostics.stage_errors.push(format!("Availability: {key} has incomplete current evidence; absence of a competing PR or existing fix is not established"));
+            }
+            checked.insert(key.clone());
+            if let Some(item) = ranked
+                .iter_mut()
+                .find(|item| candidate_key(&item.issue) == key)
+            {
+                item.enriched_issue.availability = Some(facts);
+                item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
+            }
+        }
+    }
+
+    fn select_enrichment_candidates(
+        &self,
+        mut candidates: Vec<DiscoveryCandidate>,
+        budget: usize,
+        mode: DisplayMode,
+    ) -> Vec<DiscoveryCandidate> {
+        if self.feedback_policy == FeedbackPolicy::CodexExposure {
+            // Discovery source quotas are product policy; textual rough scores
+            // are not allowed to consume the semantic call budget first.
+            for candidate in &mut candidates {
+                candidate.rough_score =
+                    candidate.issue.repo_stars.checked_ilog10().unwrap_or(0) as i32;
+            }
+        }
+        select_enrichment_candidates_for_mode(candidates, budget, mode)
+    }
+
+    async fn apply_system1(
+        &self,
+        enrichment: &GitHubEnrichmentClient,
+        ranked: &mut [RankedValueIssue],
+        refresh: bool,
+        diagnostics: &mut DiscoveryDiagnostics,
+    ) {
+        use crate::system1::{self, JudgmentSnapshot, JudgmentStatus};
+        if self.feedback_policy != FeedbackPolicy::CodexExposure || ranked.is_empty() {
+            return;
+        }
+        if let Err(error) = self.config.system1.validate() {
+            diagnostics.stage_errors.push(error.to_string());
+            for item in ranked.iter_mut() {
+                let mut snapshot = JudgmentSnapshot::pending(&error.to_string());
+                snapshot.status = JudgmentStatus::Failed;
+                item.enriched_issue.system1 = Some(snapshot);
+                item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
+            }
+            return;
+        }
+        let eligible = ranked
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| (!facts_block_new_work(item)).then_some(index))
+            .collect::<Vec<_>>();
+        let budget = self.config.system1.candidate_budget.min(eligible.len());
+        // Include a deterministic spread beyond the top segment. No legacy
+        // semantic tags, counters or text keywords enter pool selection.
+        let indices = semantic_pool_indices(eligible.len(), budget)
+            .into_iter()
+            .map(|index| eligible[index])
+            .collect::<Vec<_>>();
+        for item in ranked.iter_mut() {
+            let mut snapshot = JudgmentSnapshot::pending(
+                "System 1 candidate budget did not cover this item; semantic state is unknown",
+            );
+            if facts_block_new_work(item) {
+                snapshot.status = JudgmentStatus::SkippedFacts;
+                snapshot.error = Some("Current GitHub facts exclude this candidate from default new-fix recommendations; semantic screening was not needed".to_string());
+            } else {
+                snapshot.status = JudgmentStatus::SkippedBudget;
+            }
+            item.enriched_issue.system1 = Some(snapshot);
+        }
+        let owned = if self.system1_provider.is_none() && budget > 0 {
+            let binary = (!self.config.system1.codex_binary.trim().is_empty())
+                .then(|| self.config.system1.codex_binary.clone());
+            Some(crate::system1::codex::CodexProvider::new(
+                binary,
+                std::time::Duration::from_secs(self.config.system1.timeout_seconds),
+            ))
+        } else {
+            None
+        };
+        let provider: Option<&dyn crate::system1::contract::Provider> =
+            self.system1_provider.as_deref().or_else(|| {
+                owned
+                    .as_ref()
+                    .and_then(|p| p.as_ref().ok())
+                    .map(|p| p as &dyn crate::system1::contract::Provider)
+            });
+        let initialization_error = owned
+            .as_ref()
+            .and_then(|p| p.as_ref().err())
+            .map(ToString::to_string);
+        let queued_at = std::time::Instant::now();
+        let active = std::sync::atomic::AtomicUsize::new(0);
+        let peak = std::sync::atomic::AtomicUsize::new(0);
+        // Material gathering and the complete model turn share one issue slot.
+        // The provider deadline starts only after this future obtains its slot.
+        let jobs = indices
+            .into_iter()
+            .map(|index| (index, ranked[index].clone()))
+            .collect::<Vec<_>>();
+        let results = stream::iter(jobs.into_iter().map(|(index, item)| {
+            let initialization_error = initialization_error.as_deref();
+            let active = &active;
+            let peak = &peak;
+            async move {
+                let queue_wait_ms = queued_at.elapsed().as_millis() as u64;
+                let started = std::time::Instant::now();
+                let in_flight = active.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                peak.fetch_max(in_flight, std::sync::atomic::Ordering::SeqCst);
+                let snapshot = if let Some(reason) = initialization_error {
+                    let mut snapshot = JudgmentSnapshot::pending(reason);
+                    snapshot.status = JudgmentStatus::Failed;
+                    snapshot
+                } else {
+                    let result = async {
+                        let evidence = enrichment
+                            .system1_evidence(
+                                self.paths,
+                                &item.issue,
+                                &item.enriched_issue,
+                                refresh,
+                            )
+                            .await?
+                            .with_user_requirements(&self.config.system1.task_preferences);
+                        system1::judge(
+                            self.paths,
+                            provider.context("System 1 provider unavailable")?,
+                            evidence,
+                            &self.config.profile,
+                            refresh,
+                        )
+                        .await
+                    }
+                    .await;
+                    match result {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            let mut snapshot = JudgmentSnapshot::pending(&error.to_string());
+                            snapshot.status = JudgmentStatus::Failed;
+                            snapshot
+                        }
+                    }
+                };
+                active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                let timing = system1::TaskTiming {
+                    candidate: candidate_key(&item.issue),
+                    queue_wait_ms,
+                    execution_ms: started.elapsed().as_millis() as u64,
+                    model_duration_ms: if snapshot.cache_hit {
+                        None
+                    } else {
+                        snapshot
+                            .response
+                            .as_ref()
+                            .and_then(|response| response.metadata.duration_ms)
+                    },
+                    cache_hit: snapshot.cache_hit,
+                };
+                (index, snapshot, timing)
+            }
+        }))
+        .buffer_unordered(self.config.system1.concurrency)
+        .collect::<Vec<_>>()
+        .await;
+        let mut results = results;
+        results.sort_by_key(|(index, _, _)| *index);
+        let mut timings = Vec::new();
+        let mut failures = 0;
+        for (index, mut snapshot, timing) in results {
+            let item = &mut ranked[index];
+            if snapshot.status == JudgmentStatus::Failed {
+                failures += 1;
+                diagnostics.stage_errors.push(format!(
+                    "System 1 {}: {}",
+                    candidate_key(&item.issue),
+                    snapshot.error.as_deref().unwrap_or("provider failed")
+                ));
+            }
+            timings.push(timing);
+            if let Some(evidence) = &snapshot.evidence {
+                item.enriched_issue.source_fetched_at = evidence.source_fetched_at.clone();
+            }
+            if snapshot.status == JudgmentStatus::Pending {
+                snapshot.status = JudgmentStatus::Failed;
+            }
+            item.enriched_issue.system1 = Some(snapshot);
+        }
+        diagnostics.system1_execution = Some(system1::ExecutionReport {
+            concurrency: self.config.system1.concurrency,
+            peak_in_flight: peak.load(std::sync::atomic::Ordering::SeqCst),
+            tasks: timings,
+        });
+        // Refresh every assessment, including budget-skipped entries, so saved
+        // inputs replay the same uncertainty notes and frozen ranking clock.
+        for item in ranked.iter_mut() {
+            system1::factual_competition_only(&mut item.enriched_issue);
+            item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
+        }
+        if let Some(Ok(provider)) = owned.as_ref() {
+            provider.close().await;
+        }
+        if failures > 0 {
+            diagnostics.stage_errors.push(format!("System 1: {failures} candidates failed semantic screening; failures are isolated and no keyword fallback was used. {}", initialization_error.unwrap_or_default()));
+        }
+        if budget < eligible.len() {
+            diagnostics.stage_errors.push(format!("System 1: {} candidates were outside the {budget}-candidate budget and remain explicitly unassessed", eligible.len() - budget));
+        }
+        let partial = ranked
+            .iter()
+            .filter(|item| {
+                item.enriched_issue
+                    .system1
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.status == JudgmentStatus::Partial)
+            })
+            .count();
+        if partial > 0 {
+            diagnostics.stage_errors.push(format!(
+                "System 1: {partial} candidates have unanswered semantic questions"
+            ));
+        }
+    }
+}
+
+fn availability_blocks_new_work(facts: &crate::availability::AvailabilitySnapshot) -> bool {
+    facts.is_known_unavailable()
+        || facts.has_strong_open_competition()
+        || facts.has_merged_resolution_evidence()
+}
+
+fn facts_block_new_work(item: &RankedValueIssue) -> bool {
+    item.enriched_issue
+        .availability
+        .as_ref()
+        .is_some_and(availability_blocks_new_work)
+}
+
+fn semantic_pool_indices(pool: usize, budget: usize) -> Vec<usize> {
+    let budget = budget.min(pool);
+    if budget == 0 {
+        return Vec::new();
+    }
+    if budget == pool {
+        return (0..pool).collect();
+    }
+    let leading = (budget * 3 / 4).max(1);
+    let mut selected = (0..leading).collect::<Vec<_>>();
+    let rest = budget - leading;
+    for index in 0..rest {
+        selected.push(leading + (index + 1) * (pool - leading) / (rest + 1));
+    }
+    selected
 }
 
 fn append_discovery_reasons(

@@ -1,0 +1,122 @@
+{
+  "concurrency": 4,
+  "provider": "Codex CLI 0.159.3 app-server; gpt-6-luna; reasoning effort none; adapter 2",
+  "purpose": "five-request transport acceptance, not a quality or speedup benchmark",
+  "question_set_version": "scout-semantics-v2",
+  "requests": [
+    {
+      "candidate": "clap-rs/clap:5919",
+      "completed_ms": 7179,
+      "execution_ms": 7179,
+      "queue_wait_ms": 0,
+      "success": true,
+      "model_duration_ms": 7179,
+      "validated_question_count": 7
+    },
+    {
+      "candidate": "clap-rs/clap:3910",
+      "completed_ms": 7422,
+      "execution_ms": 7422,
+      "queue_wait_ms": 0,
+      "success": true,
+      "model_duration_ms": 7422,
+      "validated_question_count": 7
+    },
+    {
+      "candidate": "rust-lang/rust-clippy:16858",
+      "completed_ms": 7609,
+      "execution_ms": 7609,
+      "queue_wait_ms": 0,
+      "success": true,
+      "model_duration_ms": 7609,
+      "validated_question_count": 7
+    },
+    {
+      "candidate": "7shep/context-drift:4",
+      "completed_ms": 9005,
+      "execution_ms": 9005,
+      "queue_wait_ms": 0,
+      "success": true,
+      "model_duration_ms": 9005,
+      "validated_question_count": 7
+    },
+    {
+      "candidate": "rust-lang/rust-clippy:17398",
+      "completed_ms": 13136,
+      "execution_ms": 5957,
+      "queue_wait_ms": 7179,
+      "success": true,
+      "model_duration_ms": 5956,
+      "validated_question_count": 7
+    }
+  ],
+  "wall_ms": 13139,
+  "protocol": {
+    "process_count": 1,
+    "distinct_thread_count": 5,
+    "peak_acknowledged_active_turns": 4,
+    "starts": [
+      {
+        "thread_id": "01a0f6b8-134b-7631-96c5-753139154d58",
+        "turn_id": "01a0f6b8-179a-7052-9f65-22965e6bc9c5",
+        "accepted_ms": 1264.677
+      },
+      {
+        "thread_id": "01a0f6b8-134c-7da2-b4cd-60f3a976c913",
+        "turn_id": "01a0f6b8-17a5-7743-9088-9eb5d6b949c7",
+        "accepted_ms": 1282.28
+      },
+      {
+        "thread_id": "01a0f6b8-134f-71d3-8f1f-b0212d860b08",
+        "turn_id": "01a0f6b8-17cb-7a12-b777-dafd2f728dd3",
+        "accepted_ms": 1308.796
+      },
+      {
+        "thread_id": "01a0f6b8-134b-7631-96c5-755ba22cf43b",
+        "turn_id": "01a0f6b8-17df-7410-b6f7-1ec346d5fe18",
+        "accepted_ms": 1333.707
+      },
+      {
+        "thread_id": "01a0f6b8-2eae-7940-bdd4-816df8473896",
+        "turn_id": "01a0f6b8-2ed5-7200-8230-20c8e9ce0df1",
+        "accepted_ms": 7212.283
+      }
+    ],
+    "completions": [
+      {
+        "thread_id": "01a0f6b8-134c-7da2-b4cd-60f3a976c913",
+        "turn_id": "01a0f6b8-17a5-7743-9088-9eb5d6b949c7",
+        "completed_ms": 7149.563,
+        "status": "completed"
+      },
+      {
+        "thread_id": "01a0f6b8-134b-7631-96c5-755ba22cf43b",
+        "turn_id": "01a0f6b8-17df-7410-b6f7-1ec346d5fe18",
+        "completed_ms": 7392.557,
+        "status": "completed"
+      },
+      {
+        "thread_id": "01a0f6b8-134f-71d3-8f1f-b0212d860b08",
+        "turn_id": "01a0f6b8-17cb-7a12-b777-dafd2f728dd3",
+        "completed_ms": 7579.68,
+        "status": "completed"
+      },
+      {
+        "thread_id": "01a0f6b8-134b-7631-96c5-753139154d58",
+        "turn_id": "01a0f6b8-179a-7052-9f65-22965e6bc9c5",
+        "completed_ms": 8975.234,
+        "status": "completed"
+      },
+      {
+        "thread_id": "01a0f6b8-2eae-7940-bdd4-816df8473896",
+        "turn_id": "01a0f6b8-2ed5-7200-8230-20c8e9ce0df1",
+        "completed_ms": 13106.606,
+        "status": "completed"
+      }
+    ],
+    "remaining_active": 0,
+    "metadata_only_trace": true,
+    "refilled_after_first_completion": true
+  },
+  "checked_at": "2026-10-01"
+}

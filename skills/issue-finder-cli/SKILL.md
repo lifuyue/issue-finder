@@ -9,7 +9,7 @@ Use this skill for GitHub issue discovery and assessment in Codex. The business
 contract contains only `issue-finder.scout` and `issue-finder.assess`. Codex owns
 selection, workspace preparation, reproduction, repair, validation, review, and
 PR delivery according to the user's scope and repository instructions. The CLI
-provides evidence; its ranking never grants or withdraws repair authorization.
+provides evidence and bounded System 1 screening inside scout; its ranking never grants or withdraws repair authorization.
 
 ## Call conditions
 
@@ -61,7 +61,10 @@ retrieval; Issue Finder ranks the retrieved issues separately. Read pagination,
 filter reasons, warnings, and API budget before expanding one search dimension.
 
 Pass only established preferences. Carry the resolved scout `profile` into
-subsequent `assess` calls, including comment pages: overrides are per-call and
+subsequent `assess` calls, including comment pages. Optional
+`profile.taskPreferences` carries explicit task inclusion/exclusion preferences
+(up to 4000 characters), for example "avoid documentation polishing"; do not
+invent preferences. All profile overrides are per-call;
 omission restores configured defaults. Inspect inherited defaults rather than
 attributing them to the user's stated interests. See [parameters and outputs](references/tools.md).
 
@@ -70,6 +73,26 @@ issue-finder tools call issue-finder.assess --arguments '{"issue":"owner/repo#12
 ```
 
 ## Interpret evidence
+
+Scout uses Codex app-server (`gpt-6-luna`, reasoning disabled) for seven semantic
+questions (`scout-semantics-v2`). Default `[system1].concurrency = 4` is positive
+with no additional upper cap. One app-server process serves independent issue
+threads; each issue receives one request with all seven questions and their own
+criteria/material. Candidate failures are isolated, with at most one retry for a
+retryable server response within the original timeout. Inspect each candidate's
+`system1` status, question version, answers, material scope, input hash and snapshot
+path, plus execution diagnostics. Failure and budget-skipped screening remain visible; there is no semantic keyword fallback.
+These answers describe supplied material, not verified fixes or ownership.
+`working`, `fix_claimed` and `conflicting` are soft reminders to check current
+GitHub evidence, not automatic competition exclusions. Evaluate documentation,
+content, generated, event and rewarded tasks by their concrete change, clarity,
+scope and established preferences; do not invent task-form exclusions.
+
+Scout checks fresh availability before screening and rechecks provisional results
+before display, backfilling from its bounded pool within the existing API budget.
+Inspect each candidate's `availability`: issue state, assignees, archive/lock state,
+checked time, coverage, verified PR identities/relations and uncertainties.
+Assess performs fresh final-depth availability checks without a model request.
 
 Read the issue body, relevant discussion, competition, repository activity,
 assessment reasons, and warnings. Follow `issue.nextCommentsPage` as needed and
@@ -80,8 +103,14 @@ recommendation.
 
 `partial`, failed requests, truncated discussions, or a clear competition score
 do not prove that no competing PR exists. Check relevant linked and unlinked PRs
-and current repository code when the choice depends on them. Repository evidence
-can reveal an existing fix, retired feature, or unresolved product decision.
+and current repository code when the choice depends on them. A PR number belongs
+to its repository; closed is distinct from merged. Explicit
+closing directives targeting this issue carry more weight than mentions or search
+matches. A verified merged resolution PR into this repository's default branch
+requires reading current code; it does not prove the reported behavior is fixed.
+Branch-specific or cross-repository merges retain their scope. Unresolved search
+leads and incomplete evidence remain unknown. Repository evidence can reveal an
+existing fix, retired feature or unresolved product decision.
 Tool success concerns discovery or assessment only. GitHub read access does not
 establish fork, push, or upstream PR permissions; local checks do not establish
 PR creation, CI success, or merge status.
@@ -91,8 +120,15 @@ PR creation, CI success, or merge status.
 Use `refresh: true` when cached assessment evidence may be stale, on resuming an
 old investigation, or before acting on an issue whose ownership or competing
 work may have changed. `assess` reads the requested issue/discussion page at call
-time; `refresh` also refreshes its cached assessment evidence. Request additional
-comment pages only when relevant. Avoid repeatedly refreshing the whole shortlist.
+time; `refresh` also refreshes its cached assessment evidence. Availability checks
+always fetch fresh GitHub facts, independent of the six-hour semantic cache.
+Scout judgments remain tied to their earlier material snapshot. Assess reports
+semantic judgment
+as not evaluated for its fresh context; do not present scout answers as newly
+verified facts. Schema 1 eight-question replay files preserve historical scores,
+visibility and order after original-contract validation; they are not current v2
+screening or cache entries. Request additional comment pages only when relevant.
+Avoid repeatedly refreshing the whole shortlist.
 
 Honor rate-limit and retry information. On a secondary limit, stop expanding
 search and share the budget across authorized parallel work. Retry only after a

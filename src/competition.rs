@@ -73,7 +73,13 @@ pub fn assess_competition(
         .count();
     let closed_pr_refs = timeline_refs
         .iter()
-        .filter(|item| item.is_pull_request && !is_open(item.state.as_deref()))
+        .filter(|item| {
+            item.is_pull_request
+                && item
+                    .state
+                    .as_deref()
+                    .is_some_and(|state| state.eq_ignore_ascii_case("closed"))
+        })
         .count();
 
     let mut attempt_comments = 0usize;
@@ -301,6 +307,19 @@ mod tests {
         assess_competition, detect_comment_competition_markers, CommentCompetitionMarkers,
         CompetitionBand, TimelineIssueReference,
     };
+
+    #[test]
+    fn unknown_linked_pr_state_is_neither_open_nor_closed() {
+        let timeline = vec![TimelineIssueReference {
+            source_ref: "timeline:unknown-pr".to_string(),
+            state: None,
+            is_pull_request: true,
+            created_at: Some("2026-09-01T00:00:00Z".to_string()),
+        }];
+        let facts = assess_competition(&timeline, &[], Vec::new());
+        assert_eq!(facts.open_pr_refs, 0);
+        assert_eq!(facts.closed_pr_refs, 0);
+    }
 
     #[test]
     fn bands_competition_points() {

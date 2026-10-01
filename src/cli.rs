@@ -51,6 +51,11 @@ pub enum Command {
     Supervise(SuperviseArgs),
     /// Check local readiness.
     Doctor,
+    /// Verify the System 1 CLI, model, structured output and authentication with a real request.
+    System1Check {
+        #[arg(long)]
+        codex_binary: Option<String>,
+    },
 }
 
 #[derive(Debug, Args)]

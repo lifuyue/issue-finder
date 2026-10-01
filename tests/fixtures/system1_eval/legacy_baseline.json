@@ -1,0 +1,486 @@
+{
+  "capture_method": "Isolated git archive of recorded revision; original assess_issue + assess_quality_policy over frozen evidence with stated controlled repository context.",
+  "revision": "d970c836aecf3be808206ae21e48029ea21ee418",
+  "samples": [
+    {
+      "category": "high_value_needs_scoping",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 59,
+      "hidden": false,
+      "id": "7shep_context-drift_4",
+      "quality_reasons": [],
+      "rank_score": 64,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 2,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 20,
+      "hidden": true,
+      "id": "rust-lang_rust-clippy_16858",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor",
+        "Quality policy: scope remains ambiguous and needs scoping first"
+      ],
+      "rank_score": 37,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "scope_risk",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "high_value_needs_scoping",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 1,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 1
+      },
+      "execution_score": 57,
+      "hidden": true,
+      "id": "clap-rs_clap_5919",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 65,
+      "risk_tags": [
+        "missing_maintainer_signal"
+      ]
+    },
+    {
+      "category": "high_value_needs_scoping",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 1,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 1
+      },
+      "execution_score": 72,
+      "hidden": true,
+      "id": "clap-rs_clap_3910",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor",
+        "Quality policy: scope remains ambiguous and needs scoping first"
+      ],
+      "rank_score": 68,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "scope_risk"
+      ]
+    },
+    {
+      "category": "high_value_ready",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 2,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 72,
+      "hidden": true,
+      "id": "rust-lang_rust-clippy_17398",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 70,
+      "risk_tags": [
+        "missing_maintainer_signal"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 1,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 1
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_negative_quote",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 1,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 1
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_negated_work",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 3,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 3
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_workers_one_withdraws",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 2
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_all_workers_withdraw",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "light",
+        "competition_points": 2,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 2
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_unordered_conflict",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 1,
+        "fix_submitted_comments": 1,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_fix_claim",
+      "quality_reasons": [
+        "Quality policy: issue appears to have PR or resolution-verification evidence"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 1,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_open_pr_fact",
+      "quality_reasons": [
+        "Quality policy: issue appears to have PR or resolution-verification evidence"
+      ],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 1,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 30,
+      "hidden": false,
+      "id": "synthetic_closed_pr_not_merged",
+      "quality_reasons": [],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 30,
+      "hidden": false,
+      "id": "synthetic_comments_unavailable",
+      "quality_reasons": [],
+      "rank_score": 45,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 1,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 1
+      },
+      "execution_score": 30,
+      "hidden": true,
+      "id": "synthetic_truncated_timeline",
+      "quality_reasons": [
+        "Quality policy: issue appears claimed or already guided to a contributor"
+      ],
+      "rank_score": 40,
+      "risk_tags": [
+        "high_triage_load",
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 47,
+      "hidden": false,
+      "id": "synthetic_empty_template",
+      "quality_reasons": [],
+      "rank_score": 50,
+      "risk_tags": [
+        "missing_maintainer_signal"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 37,
+      "hidden": false,
+      "id": "synthetic_long_vague",
+      "quality_reasons": [],
+      "rank_score": 48,
+      "risk_tags": [
+        "missing_maintainer_signal"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 16,
+      "hidden": false,
+      "id": "synthetic_short_clear_docs",
+      "quality_reasons": [],
+      "rank_score": 41,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    },
+    {
+      "category": "needs_triage",
+      "competition": {
+        "attempt_comments": 0,
+        "claim_comments": 0,
+        "closed_pr_refs": 0,
+        "competition_band": "clear",
+        "competition_points": 0,
+        "fix_submitted_comments": 0,
+        "latest_competition_at": null,
+        "open_pr_refs": 0,
+        "warnings": [],
+        "working_comments": 0
+      },
+      "execution_score": 15,
+      "hidden": false,
+      "id": "synthetic_truncated_body",
+      "quality_reasons": [],
+      "rank_score": 41,
+      "risk_tags": [
+        "missing_maintainer_signal",
+        "weak_validation_path"
+      ]
+    }
+  ]
+}
