@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tar -czf dist/issue-finder-skills.tar.gz -C skills issue-finder-cli issue-finder
+          tar -czf dist/issue-finder-skills.tar.gz -C skills issue-finder-cli
 
       - name: Generate checksums
         shell: bash

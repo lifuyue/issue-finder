@@ -39,7 +39,7 @@ Read the installed argument schemas. Return actual installation, configuration,
 authentication, or network errors to the user when they block progress. No
 independent readiness call is required. An incompatible installed release must
 be updated in the execution environment; do not silently switch to another tool
-profile or the independent Python skill.
+profile.
 
 ## Parameters and bounded discovery
 

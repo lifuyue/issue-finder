@@ -47,36 +47,20 @@ issue-finder tools --profile session list
 issue-finder tools call issue-finder.scout --arguments '{"limit":5}'
 ```
 
-session 工具依次使用 `GITHUB_TOKEN`、可选配置中的凭据、当前宿主已登录的 `gh`，无需 `init` 或 status 前置检查。配置、认证和网络错误直接由业务调用返回；读取成功不代表拥有 PR 创建权限。CLI 状态默认位于 `~/.issue-finder`，可用 `ISSUE_FINDER_HOME` 指定独立目录。
+GitHub 凭据统一使用环境变量 `GH_TOKEN`，Issue Finder 不再读取 `GITHUB_TOKEN`。没有 `GH_TOKEN` 时，session 工具兼容可选配置中的凭据和宿主已有的 `gh` 登录；提供 `GH_TOKEN` 即可，无需安装 `gh`；无需 `init` 或 status 前置检查。配置、认证和网络错误直接由业务调用返回；读取成功不代表拥有 PR 创建权限。CLI 状态默认位于 `~/.issue-finder`，可用 `ISSUE_FINDER_HOME` 指定独立目录。
 
-GitHub 搜索的排序、查询、分页和 API 预算是明确的工具参数。CLI 对检索到的候选进行贡献价值排序，agent 阅读正文与讨论后选择适合用户的任务。仅推荐的请求会在准备工作区之前结束。所有用户交互都留在当前 agent 会话。工具约定与证据刷新规则见 [skill 集成说明](./docs/skills.md) 和 [CLI session 使用指南](./docs/usage.md#current-session-tools)。
+GitHub 搜索的排序、查询、分页和 API 预算是明确的工具参数。CLI 对检索到的候选进行贡献价值排序，agent 阅读正文与讨论后选择适合用户的任务。仅推荐的请求会在准备工作区之前结束。所有用户交互都留在当前 agent 会话。工具行为与本地状态见[现状与使用说明](./docs/README.md)。
 
 `tools` 和 `mcp` 默认仅暴露两个 session 工具。评分是评估信息，不是修复授权门槛。Codex 排序忽略历史 `dismissed`、`done` 和 `prepared` 事件，保留自动展示／阅读记录。旧事件和任务文件保留在磁盘，旧任务文件不再读取或续作。本契约不再提供跨聊天手动忽略／恢复或 CLI 完成记录。
 
-## 兼容保留的独立 skill
-
-[`skills/issue-finder/SKILL.md`](./skills/issue-finder/SKILL.md) 保留为独立选项。将整个目录安装或链接到 `~/.agents/skills/issue-finder` 或目标仓库的 `.agents/skills/issue-finder`，然后调用 `$issue-finder`。它需要 Python 3.9+、Git 和已认证的 `gh`。内置 Python helper 提供 `scout`、`prepare`、`finish`，不依赖 Rust CLI、不读取 CLI 状态，也不会回退到 CLI。
-
-```text
-$issue-finder 在 owner/repo 中找一个合适的 issue 并完成它。
-$issue-finder 推荐当前仓库的五个 issue，不要 clone 或修改代码。
-```
-
-它使用较小的粗粒度搜索过滤，不使用 CLI 推荐引擎。两种 skill 都由当前 agent 实现和验证；请明确选择一个 skill，并在同一任务中沿用其流程。详见[独立 skill 行为与命令](./docs/skills.md#legacy-standalone-skill)。
-
 ## 兼容保留的 CLI 流程
 
-CLI 还提供终端命令、handoff 生成、贡献记忆、JSON/MCP adapter 和独立的 dispatch 控制面。dispatch 管理原生 agent 会话及自身的审批流程；当前会话 skill 不调用它。这些共享兼容路径需要显式旧命令或 `--profile control` / `--profile worker`，不属于 Codex session 契约。详见[使用指南](./docs/usage.md)。
+CLI 还提供终端命令、handoff 生成、贡献记忆、JSON/MCP adapter 和独立的 dispatch 控制面。dispatch 管理原生 agent 会话及自身的审批流程；当前会话 skill 不调用它。这些共享兼容路径需要显式旧命令或 `--profile control` / `--profile worker`，不属于 Codex session 契约。详见[使用指南](./docs/README.md)。
 
 ## 文档
 
 - [CLI skill](./skills/issue-finder-cli/SKILL.md)
-- [独立 skill](./skills/issue-finder/SKILL.md)
-- [Skill 安装与行为](./docs/skills.md)
-- [CLI 使用指南](./docs/usage.md)
-- [Dispatch Agent Loop 架构](./docs/agent-loop-target-architecture.md)
-- [Handoff 准备运行时](./docs/agent-safe-preparation-runtime.md)
-- [历史设计档案](./docs/superpowers/README.md)
+- [现状与使用说明](./docs/README.md)
 - [仓库指南](./AGENTS.md)
 
 ## 开发
@@ -86,7 +70,6 @@ cargo build
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-python3 -m unittest discover -s tests -p 'test_skill_native.py' -v
 ```
 
 隔离运行 CLI 时，设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo`。

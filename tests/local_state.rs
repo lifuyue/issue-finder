@@ -84,7 +84,8 @@ fn writes_handoff_inbox_and_report_under_issue_finder_home() {
     assert!(handoff_value["value_assessment"]["opportunity_type"].is_null());
 
     let codex = std::fs::read_to_string(&written.codex_md_path).unwrap();
-    assert!(codex.contains("Use the local skill at:"));
+    assert!(!codex.contains("Use the local skill at:"));
+    assert!(handoff_value["context_pack"].get("skill").is_none());
     assert!(codex.contains(item_dir.to_string_lossy().as_ref()));
     assert!(codex.contains("/context/entry.md"));
     assert!(codex.contains("/context/safety.md"));
@@ -124,15 +125,15 @@ fn writes_handoff_inbox_and_report_under_issue_finder_home() {
     .unwrap();
     assert_eq!(probe_json["kind"], "issue_finder_probe_pack");
     assert!(item_dir.join("prepare-events.jsonl").exists());
-    let skill =
-        std::fs::read_to_string(item_dir.join(".agents/skills/issue-finder/SKILL.md")).unwrap();
-    assert!(skill.starts_with("# issue-finder"));
-    assert!(skill.contains("Read context/entry.md and context/safety.md first"));
-    let refs =
-        std::fs::read_to_string(item_dir.join(".agents/skills/issue-finder/refs.json")).unwrap();
-    let refs = serde_json::from_str::<serde_json::Value>(&refs).unwrap();
-    assert_eq!(refs["skill"], "issue-finder");
-    assert_eq!(refs["default_load"][0], "context/entry.md");
+    assert!(!item_dir.join(".agents").exists());
+    // Previously saved handoffs remain readable with their extra skill metadata.
+    let mut previous = handoff_value.clone();
+    previous["context_pack"]["skill"] = serde_json::json!({
+        "name": "issue-finder",
+        "path": "./.agents/skills/issue-finder/SKILL.md"
+    });
+    let restored: Handoff = serde_json::from_value(previous).unwrap();
+    assert_eq!(restored.context_pack, handoff.context_pack);
 
     let index = load_index(&paths).unwrap();
     assert_eq!(index.items.len(), 1);

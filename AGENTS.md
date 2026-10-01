@@ -4,11 +4,10 @@
 
 Issue Finder 面向 Codex 提供 GitHub issue 发现与评估，CLI 使用 Rust 2021 实现。Codex 负责选择、工作区准备、复现、修复、验证、审查及 PR 交付。
 
-CLI skill 的 session 工具接口仅提供 `scout` 和 `assess`（contract version 2），配置及认证错误直接由业务调用返回。Cloud 环境负责安装、依赖、PATH 和支持的认证配置。旧 control/dispatch、handoff、贡献记忆和独立 Python skill 暂为兼容保留，不属于 Codex 默认工具契约；清理共享模块前必须检查这些调用方。
+CLI skill 的 session 工具接口仅提供 `scout` 和 `assess`（contract version 2），配置及认证错误直接由业务调用返回。Cloud 环境负责安装、依赖、PATH 和支持的认证配置。旧 control/dispatch、handoff 和贡献记忆暂为兼容保留，不属于 Codex 默认工具契约；清理共享模块前必须检查这些调用方。
 
 ## 项目简要导览
 
-- `skills/issue-finder/`：独立 skill 包，包含 `SKILL.md`、`scripts/issue_finder.py` 和展示元数据 `agents/openai.yaml`。
 - `skills/issue-finder-cli/`：CLI 流程指引、安装说明、工具参考和展示元数据。
 - `src/main.rs`、`src/lib.rs`、`src/cli.rs`：CLI 入口、库导出和命令行参数定义。
 - `src/workflow.rs`、`src/prepare_gate.rs`：工作流编排、issue 选择和 prepare gate 策略。
@@ -18,9 +17,8 @@ CLI skill 的 session 工具接口仅提供 `scout` 和 `assess`（contract vers
 - `src/tool_specs.rs`、`src/tool_runtime.rs`、`src/tool_outputs.rs`、`src/tool_context.rs`、`src/tool_adapters/`：工具定义、执行、结构化输出、上下文读取和协议适配。
 - `src/dispatch/`、`src/memory/`：执行调度、任务与结果管理，以及贡献记忆。
 - `src/paths.rs`、`src/config.rs`、`src/doctor.rs`、`src/inbox.rs`、`src/report.rs`、`src/handoff.rs`、`src/context_pack.rs`：本地路径、配置、诊断、收件箱、报告和交接上下文。
-- `tests/`：Rust 集成测试、独立 skill 的 Python 测试及离线评测 fixtures。
-- `README.md`、`README.zh-CN.md`、`docs/skills.md`、`docs/usage.md`：项目介绍、安装和使用说明。
-- `docs/recommendation-evals/`：推荐评测记录；`docs/superpowers/`：历史设计文档及索引。
+- `tests/`：Rust 集成测试及离线评测 fixtures。
+- `README.md`、`README.zh-CN.md`、`docs/README.md`：项目介绍、安装和使用说明。
 - `.github/workflows/`：CI 和发布工作流。
 
 ## 常用命令
@@ -35,7 +33,6 @@ CLI skill 的 session 工具接口仅提供 `scout` 和 `assess`（contract vers
 - `cargo fmt --all`：格式化 Rust 代码。
 - `cargo fmt --all -- --check`：检查 Rust 代码格式。
 - `cargo install --path .`：从当前 checkout 安装 CLI。
-- `python3 -m unittest discover -s tests -p 'test_skill_native.py' -v`：运行使用 mock GitHub 和临时 Git 仓库的独立 skill 测试，无第三方 Python 依赖。
 
 Rust CLI 默认将本地状态写入 `~/.issue-finder`；设置 `ISSUE_FINDER_HOME=/tmp/issue-finder-demo` 可使用独立的状态目录。
 

@@ -308,7 +308,6 @@ async fn explicit_prepare_writes_low_execution_warning_and_assessment_fields() {
     assert!(handoff.contains("\"context_pack\""));
     assert!(handoff.contains("Explicit prepare bypassed low execution score 20"));
     let codex = fs::read_to_string(item.codex_md_path).unwrap();
-    assert!(codex.contains("Use the local skill at:"));
     assert!(codex.contains("context/entry.md"));
     assert!(codex.contains("context/safety.md"));
 }

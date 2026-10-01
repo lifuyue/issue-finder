@@ -9,11 +9,8 @@ use crate::handoff::Handoff;
 use crate::paths::atomic_write;
 
 const PACK_KIND: &str = "issue_finder_progressive_handoff_pack";
-const SKILL_NAME: &str = "issue-finder";
 const CODEX_ENTRY: &str = "codex.md";
 const CONTEXT_DIR: &str = "context";
-const SKILL_PATH: &str = ".agents/skills/issue-finder/SKILL.md";
-const REFS_PATH: &str = ".agents/skills/issue-finder/refs.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextPack {
@@ -22,14 +19,7 @@ pub struct ContextPack {
     pub disclosure: String,
     pub entrypoint: String,
     pub context_dir: String,
-    pub skill: ContextPackSkill,
     pub files: Vec<ContextPackFile>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ContextPackSkill {
-    pub name: String,
-    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,22 +35,6 @@ pub struct WrittenContextPack {
     pub codex_md_path: String,
 }
 
-#[derive(Debug, Serialize)]
-struct SkillRefs {
-    version: u8,
-    skill: String,
-    handoff_id: String,
-    default_load: Vec<String>,
-    deferred: Vec<DeferredRef>,
-}
-
-#[derive(Debug, Serialize)]
-struct DeferredRef {
-    id: String,
-    path: String,
-    load_when: String,
-}
-
 pub fn default_context_pack() -> ContextPack {
     ContextPack {
         version: 1,
@@ -68,10 +42,6 @@ pub fn default_context_pack() -> ContextPack {
         disclosure: "progressive".to_string(),
         entrypoint: format!("./{CODEX_ENTRY}"),
         context_dir: format!("./{CONTEXT_DIR}"),
-        skill: ContextPackSkill {
-            name: SKILL_NAME.to_string(),
-            path: format!("./{SKILL_PATH}"),
-        },
         files: vec![
             context_file("entry", true, false),
             context_file("safety", true, false),
@@ -91,10 +61,8 @@ pub fn write_context_pack(
 ) -> Result<WrittenContextPack> {
     let codex_path = dir.join(CODEX_ENTRY);
     let context_dir = dir.join(CONTEXT_DIR);
-    let skill_path = dir.join(SKILL_PATH);
-    let refs_path = dir.join(REFS_PATH);
 
-    atomic_write(&codex_path, render_codex_md(dir, handoff, &skill_path)?)?;
+    atomic_write(&codex_path, render_codex_md(dir, handoff)?)?;
     atomic_write(&context_dir.join("entry.md"), render_entry_md(handoff))?;
     atomic_write(&context_dir.join("value.md"), render_value_md(handoff))?;
     atomic_write(
@@ -108,8 +76,6 @@ pub fn write_context_pack(
     )?;
     atomic_write(&context_dir.join("safety.md"), render_safety_md(handoff))?;
     atomic_write(&context_dir.join("probe.md"), render_probe_md(handoff))?;
-    atomic_write(&skill_path, render_skill_md())?;
-    atomic_write(&refs_path, serde_json::to_vec_pretty(&skill_refs(handoff))?)?;
 
     Ok(WrittenContextPack {
         codex_md_path: display_path(&codex_path)?,
@@ -125,9 +91,8 @@ fn context_file(id: &str, default_visible: bool, defer_loading: bool) -> Context
     }
 }
 
-fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<String> {
+fn render_codex_md(dir: &Path, handoff: &Handoff) -> Result<String> {
     let dir = display_path(dir)?;
-    let skill_path = display_path(skill_path)?;
     let entry_path = display_path(&PathBuf::from(&dir).join("context/entry.md"))?;
     let safety_path = display_path(&PathBuf::from(&dir).join("context/safety.md"))?;
     let probe_path = display_path(&PathBuf::from(&dir).join("context/probe.md"))?;
@@ -170,10 +135,6 @@ fn render_codex_md(dir: &Path, handoff: &Handoff, skill_path: &Path) -> Result<S
         format!("- Handoff Markdown: {handoff_md_path}"),
         format!("- Agent policy: {agent_policy_path}"),
         format!("- Probe pack: {probe_json_path}"),
-        format!("- Skill: {skill_path}"),
-        String::new(),
-        "Use the local skill at:".to_string(),
-        skill_path,
         String::new(),
         "Start with:".to_string(),
         entry_path,
@@ -716,61 +677,6 @@ fn render_safety_md(handoff: &Handoff) -> String {
         "- If validation needs network access, long-running commands, dependency installation, or destructive operations, explain the tradeoff and get user confirmation first.".to_string(),
     ]
     .join("\n")
-}
-
-fn render_skill_md() -> String {
-    vec![
-        "# issue-finder".to_string(),
-        String::new(),
-        "Use this skill when the user provides a Issue Finder handoff directory, codex.md, or inbox item.".to_string(),
-        String::new(),
-        "1. Read context/entry.md and context/safety.md first.".to_string(),
-        "2. Do not read every context file at once.".to_string(),
-        "3. Read context/probe.md before deciding which commands to run.".to_string(),
-        "4. Read context/value.md only when assessing why the issue is worth doing or explaining priority.".to_string(),
-        "5. Read context/issue.md when you need the original issue body and issue metadata.".to_string(),
-        "6. Read context/repo.md before planning code changes.".to_string(),
-        "7. Read context/validation.md before running validation.".to_string(),
-        "8. Keep Issue Finder and coding-agent responsibilities separate: Issue Finder prepares evidence and local handoff files; the coding agent performs user-directed code work in the target workspace.".to_string(),
-        String::new(),
-        "Issue Finder-generated inbox files are context, not target repository source files.".to_string(),
-    ]
-    .join("\n")
-}
-
-fn skill_refs(handoff: &Handoff) -> SkillRefs {
-    SkillRefs {
-        version: 1,
-        skill: SKILL_NAME.to_string(),
-        handoff_id: handoff.id.clone(),
-        default_load: vec![
-            "context/entry.md".to_string(),
-            "context/safety.md".to_string(),
-            "context/probe.md".to_string(),
-        ],
-        deferred: vec![
-            DeferredRef {
-                id: "value".to_string(),
-                path: "context/value.md".to_string(),
-                load_when: "Assessing why this issue is worth doing".to_string(),
-            },
-            DeferredRef {
-                id: "issue".to_string(),
-                path: "context/issue.md".to_string(),
-                load_when: "Reading the original issue context".to_string(),
-            },
-            DeferredRef {
-                id: "repo".to_string(),
-                path: "context/repo.md".to_string(),
-                load_when: "Planning code changes".to_string(),
-            },
-            DeferredRef {
-                id: "validation".to_string(),
-                path: "context/validation.md".to_string(),
-                load_when: "Choosing or running validation".to_string(),
-            },
-        ],
-    }
 }
 
 fn push_candidate_files(lines: &mut Vec<String>, handoff: &Handoff, limit: usize) {

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Issue Finder"
-  short_description: "Find and complete a worthwhile GitHub issue"
-  default_prompt: "Use $issue-finder to find and complete one suitable GitHub issue in the current session."
