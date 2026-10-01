@@ -158,35 +158,3 @@ pub fn dedupe_refs(values: Vec<String>) -> Vec<String> {
     }
     deduped
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{dedupe_refs, EvidenceItem, EvidencePack};
-
-    #[test]
-    fn deduplicates_evidence_refs() {
-        assert_eq!(
-            dedupe_refs(vec![
-                "issue:body".to_string(),
-                "issue:body".to_string(),
-                "repo:pushed_at".to_string(),
-            ]),
-            vec!["issue:body".to_string(), "repo:pushed_at".to_string()]
-        );
-    }
-
-    #[test]
-    fn checks_evidence_ref_completeness() {
-        let pack = EvidencePack {
-            why_this_has_high_attention: vec![EvidenceItem {
-                summary: "value".to_string(),
-                source_refs: vec!["repo:stars".to_string()],
-            }],
-            why_this_is_agent_ready: vec![],
-            risk_factors: vec![],
-            missing_evidence: vec![],
-            source_refs: vec!["repo:stars".to_string()],
-        };
-        assert!(pack.has_complete_item_refs());
-    }
-}

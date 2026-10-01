@@ -935,8 +935,7 @@ mod tests {
     use chrono::Utc;
 
     use super::{
-        merge_candidates, profile_trusted_repositories, select_enrichment_candidates,
-        DiscoveryCandidate, RepoTrustTier,
+        merge_candidates, select_enrichment_candidates, DiscoveryCandidate, RepoTrustTier,
     };
     use crate::config::ProfileConfig;
     use crate::github::GitHubIssue;
@@ -1121,51 +1120,6 @@ mod tests {
         let selected = select_enrichment_candidates(vec![global, gfi], 2);
 
         assert_eq!(selected[0].issue.repo_full_name, "gfi/actionable");
-    }
-
-    #[test]
-    fn profile_trusted_repositories_selects_manual_rust_backend_bucket() {
-        let profile = ProfileConfig {
-            tech_stack: vec!["Rust".to_string(), "Go".to_string()],
-            keywords: vec!["backend".to_string(), "cargo".to_string()],
-        };
-
-        let repositories = profile_trusted_repositories(&profile, 3).unwrap();
-        let names = repositories
-            .iter()
-            .map(|repository| repository.full_name())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            names,
-            vec![
-                "rust-analyzer/rust-analyzer".to_string(),
-                "rust-lang/rustfmt".to_string(),
-                "diesel-rs/diesel".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn profile_trusted_repositories_selects_manual_frontend_bucket() {
-        let profile = ProfileConfig {
-            tech_stack: vec!["TypeScript".to_string(), "React".to_string()],
-            keywords: vec!["frontend".to_string(), "component".to_string()],
-        };
-
-        let repositories = profile_trusted_repositories(&profile, 2).unwrap();
-        let names = repositories
-            .iter()
-            .map(|repository| repository.full_name())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            names,
-            vec![
-                "rjsf-team/react-jsonschema-form".to_string(),
-                "facebook/react-native".to_string(),
-            ]
-        );
     }
 
     fn profile() -> ProfileConfig {

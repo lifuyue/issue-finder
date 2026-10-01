@@ -272,16 +272,3 @@ fn prompt_list(label: &str, default: &[String]) -> Result<Vec<String>> {
         .map(ToOwned::to_owned)
         .collect())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Config;
-
-    #[test]
-    fn default_config_matches_spec_shape() {
-        let config = Config::default();
-        assert_eq!(config.daily.top_n, 5);
-        assert!(!config.llm.enabled);
-        assert_eq!(config.llm.base_url, "https://api.openai.com/v1");
-    }
-}

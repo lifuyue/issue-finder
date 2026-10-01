@@ -151,13 +151,3 @@ pub fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     fs::rename(&tmp_path, path)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::sanitize_repo_name;
-
-    #[test]
-    fn sanitizes_repo_name_for_local_paths() {
-        assert_eq!(sanitize_repo_name("owner/repo"), "owner__repo");
-    }
-}

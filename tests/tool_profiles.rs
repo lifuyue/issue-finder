@@ -9,8 +9,6 @@ fn worker_catalog_exposes_exactly_the_two_task_local_tools() {
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(names, ["read_context", "submit_result"]);
-    assert!(!names.iter().any(|name| name.contains("dispatch")));
-    assert!(!names.iter().any(|name| name.contains("github")));
 }
 
 #[test]

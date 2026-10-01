@@ -14,21 +14,26 @@ use tempfile::tempdir;
 #[test]
 fn session_cli_exposes_only_current_agent_tools_and_reports_errors_as_json() {
     let temp = tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
-        .env("ISSUE_FINDER_HOME", temp.path())
-        .args(["tools", "--profile", "session", "list"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let catalog: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(catalog["sessionContractVersion"], 2);
-    let names = catalog["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(names, ["scout", "assess"]);
+    for args in [
+        vec!["tools", "list"],
+        vec!["tools", "--profile", "session", "list"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_issue-finder"))
+            .env("ISSUE_FINDER_HOME", temp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let catalog: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(catalog["sessionContractVersion"], 2);
+        let names = catalog["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["scout", "assess"]);
+    }
     let (ok, output) = call(
         temp.path(),
         "http://127.0.0.1:1",

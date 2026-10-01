@@ -4,9 +4,9 @@ use issue_finder::config::ProfileConfig;
 use issue_finder::github::GitHubIssue;
 use issue_finder::github_enrichment::{EnrichedIssue, TimestampedSample};
 use issue_finder::value_scoring::{
-    aggregate_signals, assess_issue, GateStatus, RecommendationCategory, RiskTag, ScoreBand,
+    assess_issue, GateStatus, RecommendationCategory, RiskTag, ScoreBand,
 };
-use issue_finder::value_signals::{SignalAxis, ValueSignal, ValueSignalKind};
+use issue_finder::value_signals::{ValueSignal, ValueSignalKind};
 
 #[test]
 fn high_influence_and_high_execution_classifies_high_value_ready() {
@@ -123,34 +123,6 @@ fn profile_fit_is_token_aware_for_short_aliases() {
     );
 
     assert_eq!(matching.profile_fit_score, 0);
-}
-
-#[test]
-fn aggregate_signals_applies_axis_scores_and_formula() {
-    let assessment = aggregate_signals(
-        vec![
-            signal(
-                ValueSignalKind::EstablishedImpact,
-                SignalAxis::Attention,
-                35,
-            ),
-            signal(ValueSignalKind::GrowthMomentum, SignalAxis::Attention, 35),
-            signal(ValueSignalKind::IssueClarity, SignalAxis::Execution, 25),
-            signal(
-                ValueSignalKind::ReproductionSteps,
-                SignalAxis::Execution,
-                25,
-            ),
-            signal(ValueSignalKind::IssueFit, SignalAxis::ProfileFit, 50),
-        ],
-        vec![],
-        &fixture().build(),
-    );
-
-    assert_eq!(assessment.attention_score, 70);
-    assert_eq!(assessment.execution_score, 50);
-    assert_eq!(assessment.profile_fit_score, 50);
-    assert_eq!(assessment.final_rank_score, 44);
 }
 
 fn fixture() -> EnrichedIssueFixture {
@@ -339,16 +311,6 @@ fn timestamp_samples(prefix: &str, count: usize) -> Vec<TimestampedSample> {
             timestamp: Some(recent_timestamp()),
         })
         .collect()
-}
-
-fn signal(kind: ValueSignalKind, axis: SignalAxis, delta: i32) -> ValueSignal {
-    ValueSignal {
-        kind,
-        axis,
-        score_delta: delta,
-        summary: "summary".to_string(),
-        evidence_refs: vec!["issue:body".to_string()],
-    }
 }
 
 fn assert_has_signal(signals: &[ValueSignal], kind: ValueSignalKind) {

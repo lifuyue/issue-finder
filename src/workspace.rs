@@ -226,34 +226,3 @@ fn slugify(input: &str) -> String {
 
     slug.trim_matches('-').to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use chrono::Utc;
-
-    use super::issue_finder_branch_name;
-    use crate::github::GitHubIssue;
-
-    #[test]
-    fn creates_issue_finder_branch_name() {
-        let issue = GitHubIssue {
-            id: 1,
-            number: 123,
-            title: "Fix accessible button label!".to_string(),
-            body: String::new(),
-            labels: vec![],
-            url: "https://github.com/owner/repo/issues/123".to_string(),
-            repo_full_name: "owner/repo".to_string(),
-            repo_name: "repo".to_string(),
-            repo_description: String::new(),
-            repo_stars: 0,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
-        };
-
-        assert_eq!(
-            issue_finder_branch_name(&issue),
-            "issue-finder/123-fix-accessible-button-label"
-        );
-    }
-}

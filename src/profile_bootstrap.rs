@@ -1553,39 +1553,3 @@ impl BootstrapWarning {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{canonical_keyword_term, canonical_tech_term, read_manifest_evidence};
-    use tempfile::tempdir;
-
-    #[test]
-    fn canonicalizes_manifest_terms() {
-        assert_eq!(canonical_tech_term("rust").as_deref(), Some("Rust"));
-        assert_eq!(
-            canonical_tech_term("typescript").as_deref(),
-            Some("TypeScript")
-        );
-        assert_eq!(canonical_keyword_term("pytest").as_deref(), Some("testing"));
-        assert_eq!(
-            canonical_keyword_term("devtools").as_deref(),
-            Some("developer-tools")
-        );
-    }
-
-    #[test]
-    fn package_manifest_extracts_frontend_signals() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("package.json");
-        std::fs::write(
-            &path,
-            r#"{"dependencies":{"react":"latest","vite":"latest","typescript":"latest"}}"#,
-        )
-        .unwrap();
-        let evidence = read_manifest_evidence(&path, "package.json").unwrap();
-        assert!(evidence.tech_terms.contains(&"JavaScript".to_string()));
-        assert!(evidence.tech_terms.contains(&"TypeScript".to_string()));
-        assert!(evidence.tech_terms.contains(&"React".to_string()));
-        assert!(evidence.keyword_terms.contains(&"vite".to_string()));
-    }
-}

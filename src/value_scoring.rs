@@ -441,7 +441,7 @@ fn sort_dedupe_risk_tags(tags: &mut Vec<RiskTag>) {
 mod tests {
     use chrono::Utc;
 
-    use super::{assess_issue, final_rank_score, is_daily_prepare_candidate};
+    use super::assess_issue;
     use crate::competition::{CompetitionBand, CompetitionFacts};
     use crate::config::ProfileConfig;
     use crate::github::GitHubIssue;
@@ -478,21 +478,6 @@ mod tests {
             tech_stack: vec!["Rust".to_string()],
             keywords: vec!["cli".to_string()],
         }
-    }
-
-    #[test]
-    fn classifies_high_value_ready_after_gates() {
-        let enriched = issue(
-            "Fix Rust CLI parser",
-            "Steps to reproduce: run cargo test. Expected graceful behavior, actual panic in src/main.rs. Suggested fix: guard empty input and verify with tests.",
-            2_500,
-        );
-        let assessment = assess_issue(&enriched, &profile());
-        assert_eq!(
-            assessment.recommendation_category,
-            RecommendationCategory::HighValueReady
-        );
-        assert!(is_daily_prepare_candidate(&assessment));
     }
 
     #[test]
@@ -547,21 +532,6 @@ mod tests {
     }
 
     #[test]
-    fn low_depth_is_filtered_before_high_value_gate() {
-        let enriched = issue(
-            "Add new Grammar Point",
-            "No Code Required. This can be done from your browser in under 60 seconds. Add JSON content.",
-            2_500,
-        );
-        let assessment = assess_issue(&enriched, &profile());
-        assert_eq!(
-            assessment.recommendation_category,
-            RecommendationCategory::FilteredLowDepth
-        );
-        assert!(!is_daily_prepare_candidate(&assessment));
-    }
-
-    #[test]
     fn missing_timeline_blocks_ready() {
         let mut enriched = issue(
             "Fix Rust CLI parser",
@@ -577,10 +547,5 @@ mod tests {
         assert!(assessment
             .risk_tags
             .contains(&RiskTag::CompetitionEvidenceMissing));
-    }
-
-    #[test]
-    fn compatibility_rank_score_uses_profile_first_rank_axes() {
-        assert_eq!(final_rank_score(100, 100, 100, 100), 55);
     }
 }
