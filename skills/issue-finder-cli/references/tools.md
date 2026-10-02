@@ -61,6 +61,23 @@ preferences determine their fit. Failed, unable-to-answer, and budget-skipped ca
 identifiable. There is no fallback to replaced semantic keyword hiding. See the
 [Decision model guide](../../../docs/decision.md) for configuration and the provider contract.
 
+For the configured Cloudflare provider, select an injected token by environment
+key name for one process; never put the token value in the selector:
+
+```bash
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder decision-check
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder scout --repo owner/repo
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder tools call issue-finder.scout --arguments '{"repo":"owner/repo"}'
+```
+
+The token must already be injected under `cf-fallback-1`. Omitting the selector
+uses `CLOUDFLARE_API_TOKEN`; a present selector must be nonempty and contain only
+ASCII letters, digits, underscores, or hyphens. A missing/empty selected token or
+invalid name returns an error without automatically trying another
+key. There is no selector CLI flag or TOML setting. If the selected token belongs
+to another account, also set `CLOUDFLARE_ACCOUNT_ID` to the matching account ID.
+See the [provider guide](../../../docs/decision-providers.md) for startup setup.
+
 ## Outputs and freshness
 
 Inspect the full JSON envelope: `success`, `status`, warnings, and error details.

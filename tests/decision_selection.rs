@@ -242,7 +242,12 @@ fn mock(model: &'static str, cloudflare: bool) -> (String, thread::JoinHandle<Va
 
 #[test]
 fn cli_uses_selected_native_provider_and_returns_one_json_object() {
-    for cloudflare in [false, true] {
+    for (cloudflare, credential_name) in [
+        (false, None),
+        (true, None),
+        (true, Some("cf-fallback-1")),
+        (true, Some("CF_FALLBACK_2")),
+    ] {
         let model = if cloudflare {
             "clef-flash"
         } else {
@@ -262,10 +267,19 @@ fn cli_uses_selected_native_provider_and_returns_one_json_object() {
         let fixture = Fixture::new(&config);
         let mut command = fixture.command();
         if cloudflare {
-            command.env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key");
+            if let Some(name) = credential_name {
+                command
+                    .env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", name)
+                    .env(name, "synthetic-selection-key")
+                    .env("CLOUDFLARE_API_TOKEN", "wrong-default-key");
+            } else {
+                command.env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key");
+            }
         } else {
             command
                 .env("DASHSCOPE_API_KEY", "synthetic-selection-key")
+                // A Cloudflare-only selector cannot change Alibaba authentication.
+                .env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", "missing-cf-key")
                 .env("ISSUE_FINDER_ALIYUN_DECISION_ENDPOINT", endpoint);
         }
         let output = result(command.output().unwrap(), true);
@@ -288,5 +302,37 @@ fn cli_uses_selected_native_provider_and_returns_one_json_object() {
             .as_str()
             .unwrap()
             .contains("systemone-v1"));
+    }
+}
+
+#[test]
+fn explicit_cloudflare_credential_never_falls_back_or_echoes_invalid_selector() {
+    let mut config = Config::default();
+    config.decision.provider = DecisionProvider::CloudflareClefFlash;
+    config.decision.cloudflare_clef_flash.account_id = "synthetic-account".into();
+    let fixture = Fixture::new(&config);
+    for (name, value) in [
+        ("cf-fallback-1", None),
+        ("cf-fallback-1", Some("")),
+        ("cf-fallback-1", Some("  ")),
+        ("", None),
+        ("bad=name", None),
+        ("Bearer synthetic-selection-key", None),
+    ] {
+        let mut command = fixture.command();
+        command
+            .env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key")
+            .env("cf-fallback-2", "synthetic-selection-key")
+            .env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", name);
+        if let Some(value) = value {
+            command.env(name, value);
+        }
+        let output = result(command.output().unwrap(), false);
+        let error = output["error"].as_str().unwrap();
+        assert!(error.contains(if name == "cf-fallback-1" {
+            "cf-fallback-1 is missing or empty"
+        } else {
+            "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV must name"
+        }));
     }
 }

@@ -22,7 +22,21 @@ done
 issue_finder_binary="$(command -v -- "$issue_finder_binary")"
 "$issue_finder_binary" decision-configure --help >/dev/null
 if [[ "$configure_only" == false ]]; then
-    [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo 'CLOUDFLARE_API_TOKEN is required at task startup' >&2; exit 1; }
+    # Python reads environment keys containing hyphens without shell indirection.
+    python3 - <<'PY'
+import os
+import re
+import sys
+
+selector = "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV"
+token_env = os.environ.get(selector, "CLOUDFLARE_API_TOKEN")
+if not re.fullmatch(r"[A-Za-z0-9_-]+", token_env):
+    print(f"{selector} must be a nonempty environment variable name containing only ASCII letters, digits, underscores, or hyphens", file=sys.stderr)
+    sys.exit(1)
+if not os.environ.get(token_env, "").strip():
+    print(f"{token_env} is required at task startup", file=sys.stderr)
+    sys.exit(1)
+PY
     [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || { echo 'CLOUDFLARE_ACCOUNT_ID is required at task startup' >&2; exit 1; }
 fi
 

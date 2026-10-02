@@ -51,7 +51,7 @@ impl ConfiguredProvider {
                 } else {
                     config.cloudflare_clef_flash.endpoint.trim().to_owned()
                 };
-                let key = credential("CLOUDFLARE_API_TOKEN")?;
+                let key = cloudflare_credential()?;
                 Ok(Self::Clef(Box::new(ClefProvider::new(
                     endpoint, key, timeout,
                 )?)))
@@ -98,6 +98,28 @@ fn configured_value(key: &str, configured: &str) -> Result<String, ProviderError
             format!("{key} must be UTF-8"),
         )),
     }
+}
+
+fn cloudflare_credential() -> Result<String, ProviderError> {
+    const SELECTOR: &str = "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV";
+    let name = match std::env::var(SELECTOR) {
+        Ok(name)
+            if !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')) =>
+        {
+            name
+        }
+        Err(std::env::VarError::NotPresent) => "CLOUDFLARE_API_TOKEN".to_owned(),
+        _ => {
+            return Err(ProviderError::new(
+                "invalid_configuration",
+                format!("{SELECTOR} must name an environment variable using ASCII letters, digits, underscores or hyphens"),
+            ));
+        }
+    };
+    credential(&name)
 }
 
 fn credential(key: &str) -> Result<String, ProviderError> {

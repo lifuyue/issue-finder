@@ -16,7 +16,7 @@ configuration files, chat, arguments, and logs.
 | Configuration provider | Fixed model | Authentication | Endpoint/account |
 | --- | --- | --- | --- |
 | `aliyun_decision` (default) | `decision-model-preview` | `DASHSCOPE_API_KEY` | Complete Workspace endpoint in `ISSUE_FINDER_ALIYUN_DECISION_ENDPOINT` or `[decision.aliyun_decision].endpoint` |
-| `cloudflare_clef_flash` | `clef-flash` | `CLOUDFLARE_API_TOKEN` | `CLOUDFLARE_ACCOUNT_ID` or `[decision.cloudflare_clef_flash].account_id` |
+| `cloudflare_clef_flash` | `clef-flash` | `CLOUDFLARE_API_TOKEN`, or the environment key selected by `ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV` | `CLOUDFLARE_ACCOUNT_ID` or `[decision.cloudflare_clef_flash].account_id` |
 | `codex` | `gpt-6-luna`, reasoning `none` | Existing CLI login or explicit `ISSUE_FINDER_CODEX_AUTH_JSON` bootstrap | CLI discovery, `[decision].codex_binary`, or `ISSUE_FINDER_CODEX_BIN` |
 
 Existing configurations that omit `provider` now select Alibaba.
@@ -63,6 +63,27 @@ mock servers; ordinary production setup does not need it. Use Cloudflare's
 for the intended account. The getting-started guide recommends Read and Edit;
 the Run API lists Read or Write as accepted permissions. Verify the actual
 request rather than inferring access from the existence of a token.
+
+To select another injected Cloudflare token for one command, set
+`ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV` to its environment **key name**, never
+its token value. The selected key must already exist in the process environment.
+For example, with a token injected under `cf-fallback-1`:
+
+```bash
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder decision-check
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder scout --repo owner/repo
+ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV=cf-fallback-1 issue-finder tools call issue-finder.scout --arguments '{"repo":"owner/repo"}'
+```
+
+These commands use the configured provider; select `cloudflare_clef_flash`
+before running them. The selector applies to runtime authentication for both
+CLI and tool calls, with no CLI flag or TOML persistence. If the selector is
+absent, the default key is `CLOUDFLARE_API_TOKEN`. If it is present, its name must
+be nonempty and contain only ASCII letters, digits, underscores, or hyphens.
+An invalid selector or a missing/empty selected token fails; no other token is
+tried automatically, even when the default key is populated. Switching token
+keys does not switch accounts: when a token belongs to another account, set
+`CLOUDFLARE_ACCOUNT_ID` to that account's ID as well.
 
 To use the Codex fallback for scout, explicitly set:
 
@@ -158,7 +179,7 @@ does not add fine-tuning or a broad quality benchmark.
 The versioned [Cloud startup helper](../scripts/decision-cloud.sh) owns the Cloud
 profile: `cloudflare_clef_flash`, concurrency 8, candidate budget 24, timeout 45
 seconds. The program's standalone defaults remain Alibaba and concurrency 4.
-Only credentials and the Cloudflare account ID belong in environment KV settings;
+Credentials, the optional token key selector, and the Cloudflare account ID belong in environment KV settings;
 the environment configuration task need not independently maintain TOML values.
 
 In the environment **installation script**, after installing the CLI from the
@@ -182,6 +203,9 @@ bash /workspace/issue-finder/scripts/decision-cloud.sh
 This must run for a new task even when the snapshot installation script was
 skipped. It re-applies the same profile and performs one real `decision-check`
 without a provider override. Missing runtime KV or a failed request stops startup.
+Before changing configuration, the helper checks the selected token key and
+`CLOUDFLARE_ACCOUNT_ID`; it follows the same selector validation and never prints
+token values. `--configure-only` requires no credentials or selector validation.
 Retain the rule that resuming active work does not synchronize main or reset the
 task's chosen configuration. Replace any wording that says application config
 is not prepared at startup with this non-interactive Cloud-profile step; do not
@@ -199,7 +223,9 @@ GitHub credentials, proxy, CA, PATH, and the two-tool session v2 contract.
 For the default Alibaba path, configure protected runtime `DASHSCOPE_API_KEY`
 and non-secret `ISSUE_FINDER_ALIYUN_DECISION_ENDPOINT` with the real Workspace
 URL. For a deliberately selected Cloudflare path, configure protected runtime
-`CLOUDFLARE_API_TOKEN` and non-secret `CLOUDFLARE_ACCOUNT_ID`. Do not copy
+`CLOUDFLARE_API_TOKEN` (or the explicitly selected token key), non-secret
+`CLOUDFLARE_ACCOUNT_ID`, and optionally the non-secret
+`ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV` key selector. Do not copy
 credentials into a saved image or source checkout. Do not enable paid service
 or select another provider merely to make a failed acceptance check pass.
 
