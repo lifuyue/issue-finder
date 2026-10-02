@@ -28,16 +28,29 @@ import os
 import re
 import sys
 
-selector = "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV"
-token_env = os.environ.get(selector, "CLOUDFLARE_API_TOKEN")
-if not re.fullmatch(r"[A-Za-z0-9_-]+", token_env):
-    print(f"{selector} must be a nonempty environment variable name containing only ASCII letters, digits, underscores, or hyphens", file=sys.stderr)
+token_selector = "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV"
+account_selector = "ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV"
+if (token_selector in os.environ) != (account_selector in os.environ):
+    print(f"{token_selector} and {account_selector} must be set together", file=sys.stderr)
     sys.exit(1)
-if not os.environ.get(token_env, "").strip():
-    print(f"{token_env} is required at task startup", file=sys.stderr)
+values = {}
+for selector, default_key in (
+    (token_selector, "CLOUDFLARE_API_TOKEN"),
+    (account_selector, "CLOUDFLARE_ACCOUNT_ID"),
+):
+    key = os.environ.get(selector, default_key)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
+        print(f"{selector} must be a nonempty environment variable name containing only ASCII letters, digits, underscores, or hyphens", file=sys.stderr)
+        sys.exit(1)
+    value = os.environ.get(key, "").strip()
+    if not value:
+        print(f"{key} is required at task startup", file=sys.stderr)
+        sys.exit(1)
+    values[selector] = value
+if not re.fullmatch(r"[A-Za-z0-9_-]+", values[account_selector]):
+    print("Selected Cloudflare account ID must contain only ASCII letters, digits, underscores, or hyphens", file=sys.stderr)
     sys.exit(1)
 PY
-    [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || { echo 'CLOUDFLARE_ACCOUNT_ID is required at task startup' >&2; exit 1; }
 fi
 
 configure() {

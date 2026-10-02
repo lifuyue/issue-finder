@@ -35,23 +35,44 @@ impl ConfiguredProvider {
                 )?)))
             }
             DecisionProvider::CloudflareClefFlash => {
+                let selection = cloudflare_selection()?;
+                let selected_account = selection
+                    .as_ref()
+                    .map(|(_, account_env)| configured_value(account_env, ""))
+                    .transpose()?;
+                if selected_account
+                    .as_deref()
+                    .is_some_and(|account| !valid_account(account))
+                {
+                    return Err(ProviderError::new("configuration_required", "The selected Cloudflare account environment variable must contain a nonempty valid account ID"));
+                }
                 let endpoint = if config.cloudflare_clef_flash.endpoint.trim().is_empty() {
-                    let account = configured_value(
-                        "CLOUDFLARE_ACCOUNT_ID",
-                        &config.cloudflare_clef_flash.account_id,
-                    )?;
-                    if account.is_empty()
-                        || !account
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-                    {
+                    let account = match &selected_account {
+                        Some(account) => account.clone(),
+                        None => configured_value(
+                            "CLOUDFLARE_ACCOUNT_ID",
+                            &config.cloudflare_clef_flash.account_id,
+                        )?,
+                    };
+                    if !valid_account(&account) {
                         return Err(ProviderError::new("configuration_required", "Set CLOUDFLARE_ACCOUNT_ID or decision.cloudflare_clef_flash.account_id to a valid account ID"));
                     }
                     format!("https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef-flash")
                 } else {
                     config.cloudflare_clef_flash.endpoint.trim().to_owned()
                 };
-                let key = cloudflare_credential()?;
+                if let Some(account) = selected_account {
+                    let expected_path =
+                        format!("/client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef-flash");
+                    if !url::Url::parse(&endpoint).is_ok_and(|url| url.path() == expected_path) {
+                        return Err(ProviderError::new("invalid_configuration", "Configured Cloudflare endpoint does not match the explicitly selected account"));
+                    }
+                }
+                let key = credential(
+                    selection
+                        .as_ref()
+                        .map_or("CLOUDFLARE_API_TOKEN", |(token_env, _)| token_env),
+                )?;
                 Ok(Self::Clef(Box::new(ClefProvider::new(
                     endpoint, key, timeout,
                 )?)))
@@ -100,26 +121,39 @@ fn configured_value(key: &str, configured: &str) -> Result<String, ProviderError
     }
 }
 
-fn cloudflare_credential() -> Result<String, ProviderError> {
-    const SELECTOR: &str = "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV";
-    let name = match std::env::var(SELECTOR) {
+fn valid_account(account: &str) -> bool {
+    !account.is_empty()
+        && account
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+}
+
+fn cloudflare_selection() -> Result<Option<(String, String)>, ProviderError> {
+    let token = environment_selector("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV")?;
+    let account = environment_selector("ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV")?;
+    match (token, account) {
+        (None, None) => Ok(None),
+        (Some(token), Some(account)) => Ok(Some((token, account))),
+        _ => Err(ProviderError::new("invalid_configuration", "Set both ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV and ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV when selecting Cloudflare credentials")),
+    }
+}
+
+fn environment_selector(selector: &str) -> Result<Option<String>, ProviderError> {
+    match std::env::var(selector) {
         Ok(name)
             if !name.is_empty()
                 && name
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')) =>
         {
-            name
+            Ok(Some(name))
         }
-        Err(std::env::VarError::NotPresent) => "CLOUDFLARE_API_TOKEN".to_owned(),
-        _ => {
-            return Err(ProviderError::new(
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        _ => Err(ProviderError::new(
                 "invalid_configuration",
-                format!("{SELECTOR} must name an environment variable using ASCII letters, digits, underscores or hyphens"),
-            ));
-        }
-    };
-    credential(&name)
+                format!("{selector} must name an environment variable using ASCII letters, digits, underscores or hyphens"),
+            )),
+    }
 }
 
 fn credential(key: &str) -> Result<String, ProviderError> {

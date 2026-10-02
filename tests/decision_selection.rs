@@ -271,6 +271,9 @@ fn cli_uses_selected_native_provider_and_returns_one_json_object() {
                 command
                     .env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", name)
                     .env(name, "synthetic-selection-key")
+                    .env("ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV", "cf-fallback-id")
+                    .env("cf-fallback-id", "synthetic-account")
+                    .env("CLOUDFLARE_ACCOUNT_ID", "wrong-default-account")
                     .env("CLOUDFLARE_API_TOKEN", "wrong-default-key");
             } else {
                 command.env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key");
@@ -323,6 +326,8 @@ fn explicit_cloudflare_credential_never_falls_back_or_echoes_invalid_selector() 
         command
             .env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key")
             .env("cf-fallback-2", "synthetic-selection-key")
+            .env("ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV", "cf-fallback-id")
+            .env("cf-fallback-id", "synthetic-account")
             .env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", name);
         if let Some(value) = value {
             command.env(name, value);
@@ -334,5 +339,75 @@ fn explicit_cloudflare_credential_never_falls_back_or_echoes_invalid_selector() 
         } else {
             "ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV must name"
         }));
+    }
+}
+
+#[test]
+fn manual_cloudflare_selection_requires_complete_account_pair_before_network() {
+    let mut config = Config::default();
+    config.decision.provider = DecisionProvider::CloudflareClefFlash;
+    config.decision.cloudflare_clef_flash.account_id = "default-account".into();
+    // A stale account-specific endpoint must not receive the new account's key.
+    config.decision.cloudflare_clef_flash.endpoint = "https://unused.invalid/client/v4/accounts/default-account/ai/run/@cf/cloudflare/clef-flash".into();
+    let fixture = Fixture::new(&config);
+    for (token_selector, account_selector, account_value, expected) in [
+        (Some("cf-api"), None, Some("default-account"), "Set both"),
+        (None, Some("cf-id"), Some("default-account"), "Set both"),
+        (
+            Some("cf-api"),
+            Some("cf-id"),
+            None,
+            "nonempty valid account ID",
+        ),
+        (
+            Some("cf-api"),
+            Some("cf-id"),
+            Some("  "),
+            "nonempty valid account ID",
+        ),
+        (
+            Some("cf-api"),
+            Some("cf-id"),
+            Some("bad/account"),
+            "nonempty valid account ID",
+        ),
+        (
+            Some("cf-api"),
+            Some(""),
+            None,
+            "ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV must name",
+        ),
+        (
+            Some("cf-api"),
+            Some("bad=name"),
+            None,
+            "ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV must name",
+        ),
+        (
+            Some("cf-api"),
+            Some("cf-id"),
+            Some("other-account"),
+            "endpoint does not match",
+        ),
+    ] {
+        let mut command = fixture.command();
+        command
+            .env("CLOUDFLARE_API_TOKEN", "synthetic-selection-key")
+            .env("CLOUDFLARE_ACCOUNT_ID", "default-account")
+            .env("cf-api", "synthetic-selection-key");
+        if let Some(name) = token_selector {
+            command.env("ISSUE_FINDER_CLOUDFLARE_API_TOKEN_ENV", name);
+        }
+        if let Some(name) = account_selector {
+            command.env("ISSUE_FINDER_CLOUDFLARE_ACCOUNT_ID_ENV", name);
+        }
+        if let Some(value) = account_value {
+            command.env("cf-id", value);
+        }
+        let output = result(command.output().unwrap(), false);
+        assert!(
+            output["error"].as_str().unwrap().contains(expected),
+            "{output}"
+        );
     }
 }
