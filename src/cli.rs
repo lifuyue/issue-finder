@@ -51,6 +51,8 @@ pub enum Command {
     Supervise(SuperviseArgs),
     /// Check local readiness.
     Doctor,
+    /// Persist explicit decision provider settings without contacting a model.
+    DecisionConfigure(DecisionConfigureArgs),
     /// Verify the selected decision model provider and authentication with a real decision request.
     #[command(visible_alias = "system1-check")]
     DecisionCheck {
@@ -67,6 +69,18 @@ pub enum Command {
         #[arg(long)]
         replace: bool,
     },
+}
+
+#[derive(Debug, Args)]
+pub struct DecisionConfigureArgs {
+    #[arg(long, value_enum)]
+    pub provider: DecisionProviderArg,
+    #[arg(long)]
+    pub concurrency: usize,
+    #[arg(long)]
+    pub candidate_budget: usize,
+    #[arg(long)]
+    pub timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

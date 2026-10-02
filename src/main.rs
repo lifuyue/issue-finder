@@ -41,6 +41,25 @@ async fn main() -> Result<()> {
     let paths = IssueFinderPaths::resolve()?;
 
     match cli.command {
+        Command::DecisionConfigure(args) => {
+            let result = issue_finder::config::configure_decision(
+                &paths,
+                args.provider.into(),
+                args.concurrency,
+                args.candidate_budget,
+                args.timeout_seconds,
+            );
+            match result {
+                Ok(result) => println!("{}", serde_json::to_string(&result)?),
+                Err(error) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"success":false,"error":error.to_string()})
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::DecisionAuthInit { replace } => {
             match issue_finder::decision::codex_auth::initialize(&paths, replace) {
                 Ok(result) => println!("{}", serde_json::to_string(&result)?),

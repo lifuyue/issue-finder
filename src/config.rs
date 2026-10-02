@@ -245,6 +245,107 @@ impl Config {
     }
 }
 
+/// Merge only explicit operational settings; credentials and user preferences stay untouched.
+pub fn configure_decision(
+    paths: &IssueFinderPaths,
+    provider: DecisionProvider,
+    concurrency: usize,
+    candidate_budget: usize,
+    timeout_seconds: u64,
+) -> Result<serde_json::Value> {
+    let metadata = match fs::symlink_metadata(&paths.config) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                metadata.is_file() && !metadata.file_type().is_symlink(),
+                "config.toml must be a regular file, not a symlink"
+            );
+            Some(metadata)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(_) => anyhow::bail!("unable to inspect config.toml"),
+    };
+    let mut value: toml::Value = if metadata.is_some() {
+        let raw = fs::read_to_string(&paths.config)
+            .map_err(|_| anyhow::anyhow!("unable to read config.toml"))?;
+        // TOML diagnostics may contain source lines with credentials.
+        toml::from_str(&raw).map_err(|_| anyhow::anyhow!("config.toml is not valid TOML"))?
+    } else {
+        toml::Value::try_from(Config::default())?
+    };
+    let root = value
+        .as_table_mut()
+        .context("config.toml must contain a table")?;
+    anyhow::ensure!(
+        !(root.contains_key("decision") && root.contains_key("system1")),
+        "config.toml contains both decision and system1; resolve the ambiguous configuration"
+    );
+    if let Some(legacy) = root.remove("system1") {
+        root.insert("decision".into(), legacy);
+    }
+    let decision = root
+        .entry("decision")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .context("decision must be a TOML table")?;
+    decision.insert("provider".into(), toml::Value::try_from(provider)?);
+    decision.insert("concurrency".into(), toml::Value::try_from(concurrency)?);
+    decision.insert(
+        "candidate_budget".into(),
+        toml::Value::try_from(candidate_budget)?,
+    );
+    decision.insert(
+        "timeout_seconds".into(),
+        toml::Value::try_from(timeout_seconds)?,
+    );
+
+    let config: Config = value.clone().try_into().map_err(|_| {
+        anyhow::anyhow!("config.toml has invalid or unsupported configuration fields")
+    })?;
+    config.decision.validate()?;
+    let raw = toml::to_string_pretty(&value)
+        .map_err(|_| anyhow::anyhow!("unable to encode config.toml"))?;
+    write_config_preserving_permissions(paths, raw, metadata)?;
+    Ok(serde_json::json!({
+        "success": true,
+        "provider": provider,
+        "concurrency": concurrency,
+        "candidate_budget": candidate_budget,
+        "timeout_seconds": timeout_seconds,
+    }))
+}
+
+fn write_config_preserving_permissions(
+    paths: &IssueFinderPaths,
+    raw: String,
+    metadata: Option<fs::Metadata>,
+) -> Result<()> {
+    paths.ensure_layout()?;
+    // Reserve the exact staging path used by atomic_write so it cannot follow an
+    // existing staging symlink or initially expose credentials with broad permissions.
+    let staging = paths.config.with_extension("toml.tmp");
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&staging)
+        .map_err(|_| anyhow::anyhow!("unable to create config.toml staging file"))?;
+    let result = (|| {
+        if let Some(metadata) = metadata {
+            file.set_permissions(metadata.permissions())
+                .context("unable to preserve config.toml permissions")?;
+        }
+        atomic_write(&paths.config, raw).context("unable to write config.toml")
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staging);
+    }
+    result
+}
+
 fn github_cli_token() -> Option<String> {
     let mut child = Command::new("gh")
         .args(["auth", "token", "--hostname", "github.com"])

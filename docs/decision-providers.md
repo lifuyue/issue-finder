@@ -155,6 +155,45 @@ does not add fine-tuning or a broad quality benchmark.
 
 ## Cloud rollout and acceptance
 
+The versioned [Cloud startup helper](../scripts/decision-cloud.sh) owns the Cloud
+profile: `cloudflare_clef_flash`, concurrency 8, candidate budget 24, timeout 45
+seconds. The program's standalone defaults remain Alibaba and concurrency 4.
+Only credentials and the Cloudflare account ID belong in environment KV settings;
+the environment configuration task need not independently maintain TOML values.
+
+In the environment **installation script**, after installing the CLI from the
+synchronized checkout and activating PATH, add:
+
+```bash
+bash /workspace/issue-finder/scripts/decision-cloud.sh --configure-only
+```
+
+This prepares non-secret configuration without requiring model credentials or
+making a model request during image preparation. It is not authentication
+acceptance. Keep the existing shell activation and two-tool contract checks.
+
+In **start_skill**, within the new-task install/validation Bash block, add this
+after CLI installation and before its final initialization-success message:
+
+```bash
+bash /workspace/issue-finder/scripts/decision-cloud.sh
+```
+
+This must run for a new task even when the snapshot installation script was
+skipped. It re-applies the same profile and performs one real `decision-check`
+without a provider override. Missing runtime KV or a failed request stops startup.
+Retain the rule that resuming active work does not synchronize main or reset the
+task's chosen configuration. Replace any wording that says application config
+is not prepared at startup with this non-interactive Cloud-profile step; do not
+introduce interactive `init`, a Codex login prerequisite, or a benchmark.
+
+The underlying `decision-configure` command merges only the four explicit fields,
+migrates `[system1]` to `[decision]`, preserves other values, validates before
+writing, and never copies environment credentials to disk. Repeated execution is
+safe. TOML formatting/comments may be normalized. Repository synchronization,
+Rust installation, PATH, GH_TOKEN checks and session contract validation remain
+owned by the surrounding install script/start_skill.
+
 Use the supported environment configuration workflow to preserve existing
 GitHub credentials, proxy, CA, PATH, and the two-tool session v2 contract.
 For the default Alibaba path, configure protected runtime `DASHSCOPE_API_KEY`
