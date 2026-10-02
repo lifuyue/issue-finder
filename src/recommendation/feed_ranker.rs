@@ -57,9 +57,9 @@ pub fn recommendation_assessment(
     let value = &item.value_assessment;
     let freshness = assess_freshness(&item.enriched_issue);
     let feedback = assess_feedback(state, &item.enriched_issue);
-    let quality = match &item.enriched_issue.system1 {
+    let quality = match &item.enriched_issue.decision {
         Some(snapshot) => {
-            crate::system1::policy::quality(&item.enriched_issue, snapshot.answers.as_ref())
+            crate::decision::policy::quality(&item.enriched_issue, snapshot.answers.as_ref())
         }
         None => assess_quality_policy(value, &item.enriched_issue),
     };
@@ -70,7 +70,7 @@ pub fn recommendation_assessment(
         visibility = RecommendationVisibility::HiddenFiltered;
     }
     if visibility == RecommendationVisibility::Visible
-        || (item.enriched_issue.system1.is_some()
+        || (item.enriched_issue.decision.is_some()
             && visibility == RecommendationVisibility::HiddenFiltered)
     {
         if let Some(quality_visibility) = quality.visibility {

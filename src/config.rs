@@ -15,14 +15,17 @@ pub struct Config {
     pub profile: ProfileConfig,
     pub daily: DailyConfig,
     pub llm: LlmConfig,
-    #[serde(default)]
-    pub system1: System1Config,
+    #[serde(default, alias = "system1")]
+    pub decision: DecisionConfig,
 }
 
 /// Screening is independent of the legacy optional LLM reviewer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
-pub struct System1Config {
+pub struct DecisionConfig {
+    pub provider: DecisionProvider,
+    pub aliyun_decision: AliyunDecisionConfig,
+    pub cloudflare_clef_flash: ClefFlashConfig,
     pub concurrency: usize,
     pub codex_binary: String,
     pub timeout_seconds: u64,
@@ -30,9 +33,12 @@ pub struct System1Config {
     pub task_preferences: String,
 }
 
-impl Default for System1Config {
+impl Default for DecisionConfig {
     fn default() -> Self {
         Self {
+            provider: DecisionProvider::default(),
+            aliyun_decision: AliyunDecisionConfig::default(),
+            cloudflare_clef_flash: ClefFlashConfig::default(),
             concurrency: 4,
             codex_binary: String::new(),
             timeout_seconds: 45,
@@ -42,20 +48,47 @@ impl Default for System1Config {
     }
 }
 
-impl System1Config {
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionProvider {
+    #[default]
+    AliyunDecision,
+    CloudflareClefFlash,
+    Codex,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AliyunDecisionConfig {
+    /// Full workspace-specific System One URL. Credentials are environment-only.
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClefFlashConfig {
+    pub account_id: String,
+    /// Optional full endpoint override, primarily for local offline mocks.
+    pub endpoint: String,
+}
+
+impl DecisionConfig {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.concurrency > 0, "system1.concurrency must be positive");
+        anyhow::ensure!(
+            self.concurrency > 0,
+            "decision.concurrency must be positive"
+        );
         anyhow::ensure!(
             (1..=300).contains(&self.timeout_seconds),
-            "system1.timeout_seconds must be between 1 and 300"
+            "decision.timeout_seconds must be between 1 and 300"
         );
         anyhow::ensure!(
             self.candidate_budget <= 100,
-            "system1.candidate_budget must be between 0 and 100"
+            "decision.candidate_budget must be between 0 and 100"
         );
         anyhow::ensure!(
             self.task_preferences.chars().count() <= 4_000,
-            "system1.task_preferences must not exceed 4000 characters"
+            "decision.task_preferences must not exceed 4000 characters"
         );
         Ok(())
     }
@@ -131,7 +164,7 @@ impl Default for Config {
                 api_key_env: String::new(),
                 model: "gpt-4o-mini".to_string(),
             },
-            system1: System1Config::default(),
+            decision: DecisionConfig::default(),
         }
     }
 }

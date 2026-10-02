@@ -11,6 +11,7 @@ use tokio::sync::OnceCell;
 mod transport;
 use transport::{Activity, Attempt, Session};
 
+use super::codex_auth;
 use super::contract::*;
 
 pub const MODEL: &str = "gpt-6-luna";
@@ -25,6 +26,7 @@ pub struct CodexProvider {
     workspace: PathBuf,
     session: OnceCell<Arc<Session>>,
     activity: Arc<Activity>,
+    auth_home: Option<PathBuf>,
 }
 
 impl CodexProvider {
@@ -35,14 +37,16 @@ impl CodexProvider {
                 "provider timeout must be positive",
             ));
         }
+        let auth_home = codex_auth::runtime_home()
+            .map_err(|error| ProviderError::new("authentication_setup", error.to_string()))?;
         let binary = discover_codex_binary(binary.as_deref())?;
-        let version = inspect_binary(&binary, &["--version"])?;
+        let version = inspect_binary(&binary, &["--version"], auth_home.as_deref())?;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|error| transport(error.to_string()))?
             .as_nanos();
         let workspace = std::env::temp_dir().join(format!(
-            "issue-finder-system1-{}-{timestamp}-{}",
+            "issue-finder-decision-{}-{timestamp}-{}",
             std::process::id(),
             WORKSPACE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -70,6 +74,7 @@ impl CodexProvider {
             workspace,
             session: OnceCell::new(),
             activity: Arc::new(Activity::default()),
+            auth_home,
         })
     }
 
@@ -91,7 +96,8 @@ impl CodexProvider {
         let session = tokio::time::timeout_at(
             deadline,
             self.session.get_or_try_init(|| async {
-                let session = Session::spawn(&self.binary, &self.workspace)?;
+                let session =
+                    Session::spawn(&self.binary, &self.workspace, self.auth_home.as_deref())?;
                 session.initialize().await?;
                 Ok::<_, ProviderError>(session)
             }),
@@ -134,7 +140,7 @@ impl CodexProvider {
 
 impl Provider for CodexProvider {
     fn fingerprint(&self) -> String {
-        format!("codex_app_server:contract={CONTRACT_VERSION}:adapter=2:model={MODEL}:effort={REASONING_EFFORT}:binary={}:version={}:timeout_ms={}", self.binary.display(), self.version, self.timeout.as_millis())
+        format!("codex_app_server:contract={CONTRACT_VERSION}:adapter=3:model={MODEL}:effort={REASONING_EFFORT}:binary={}:version={}:timeout_ms={}:auth_home={}", self.binary.display(), self.version, self.timeout.as_millis(), self.auth_home.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "inherited".into()))
     }
 
     fn decide<'a>(&'a self, request: &'a DecisionRequest) -> DecisionFuture<'a> {
@@ -164,6 +170,8 @@ fn timeout_error(timeout: Duration) -> ProviderError {
 /// Discover and validate a local installation without installing it or altering
 /// global Codex configuration or authentication.
 pub fn discover_codex_binary(explicit: Option<&str>) -> Result<PathBuf, ProviderError> {
+    let auth_home = codex_auth::runtime_home()
+        .map_err(|error| ProviderError::new("authentication_setup", error.to_string()))?;
     let configured = explicit
         .map(str::to_owned)
         .or_else(|| std::env::var("ISSUE_FINDER_CODEX_BIN").ok());
@@ -176,18 +184,18 @@ pub fn discover_codex_binary(explicit: Option<&str>) -> Result<PathBuf, Provider
         }
         let path = find_binary(configured.trim())
             .ok_or_else(|| transport("configured Codex binary does not exist"))?;
-        validate_binary(&path)?;
+        validate_binary(&path, auth_home.as_deref())?;
         return Ok(path);
     }
     if let Some(path) = find_binary("codex") {
-        if validate_binary(&path).is_ok() {
+        if validate_binary(&path, auth_home.as_deref()).is_ok() {
             return Ok(path);
         }
     }
     #[cfg(target_os = "macos")]
     {
         let path = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex");
-        if validate_binary(&path).is_ok() {
+        if validate_binary(&path, auth_home.as_deref()).is_ok() {
             return Ok(path);
         }
     }
@@ -210,14 +218,20 @@ fn find_binary(binary: &str) -> Option<PathBuf> {
     found.and_then(|path| std::fs::canonicalize(path).ok())
 }
 
-fn validate_binary(path: &Path) -> Result<(), ProviderError> {
-    inspect_binary(path, &["--version"])?;
-    inspect_binary(path, &["app-server", "--help"])?;
+fn validate_binary(path: &Path, auth_home: Option<&Path>) -> Result<(), ProviderError> {
+    inspect_binary(path, &["--version"], auth_home)?;
+    inspect_binary(path, &["app-server", "--help"], auth_home)?;
     Ok(())
 }
 
-fn inspect_binary(path: &Path, args: &[&str]) -> Result<String, ProviderError> {
-    let mut child = std::process::Command::new(path)
+fn inspect_binary(
+    path: &Path,
+    args: &[&str],
+    auth_home: Option<&Path>,
+) -> Result<String, ProviderError> {
+    let mut command = std::process::Command::new(path);
+    codex_auth::configure_command(&mut command, auth_home);
+    let mut child = command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -305,6 +319,7 @@ fn parse_response(
             reasoning_effort: REASONING_EFFORT.into(),
             duration_ms: Some(start.elapsed().as_millis().min(u64::MAX as u128) as u64),
             usage,
+            ..ProviderMetadata::default()
         },
     };
     response

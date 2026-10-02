@@ -13,7 +13,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use super::{output_schema, parse_response, transport, INSTRUCTIONS, MODEL, REASONING_EFFORT};
-use crate::system1::contract::{DecisionRequest, DecisionResponse, ProviderError};
+use crate::decision::contract::{DecisionRequest, DecisionResponse, ProviderError};
 
 const MAX_PROTOCOL_LINE: usize = 4 * 1024 * 1024;
 const MAX_EVENTS: usize = 256;
@@ -227,8 +227,17 @@ pub(super) struct Session {
     writer: tokio::task::JoinHandle<()>,
 }
 impl Session {
-    pub(super) fn spawn(binary: &Path, workspace: &Path) -> Result<Arc<Self>, ProviderError> {
-        let mut child = Command::new(binary)
+    pub(super) fn spawn(
+        binary: &Path,
+        workspace: &Path,
+        auth_home: Option<&Path>,
+    ) -> Result<Arc<Self>, ProviderError> {
+        let mut command = Command::new(binary);
+        crate::decision::codex_auth::configure_command(command.as_std_mut(), auth_home);
+        if auth_home.is_some() {
+            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        }
+        let mut child = command
             .args([
                 "app-server",
                 "--listen",
@@ -285,7 +294,7 @@ impl Session {
         RandomState::new().hash_one(self.shared.sequence.load(Ordering::Relaxed)) % 21
     }
     pub(super) async fn initialize(&self) -> Result<(), ProviderError> {
-        self.shared.rpc("initialize", json!({"clientInfo":{"name":"issue_finder_system1","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}), None).await.map_err(|failure| failure.error)?;
+        self.shared.rpc("initialize", json!({"clientInfo":{"name":"issue_finder_decision","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}), None).await.map_err(|failure| failure.error)?;
         self.shared
             .send(json!({"method":"initialized","params":{}}))
             .await
@@ -668,7 +677,7 @@ async fn read_loop(stdout: ChildStdout, shared: &Shared) -> Result<(), ProviderE
     loop {
         let value = read_line(&mut stdout).await?;
         if value.get("method").is_some() && value.get("id").is_some() {
-            shared.send(json!({"id":value["id"],"error":{"code":-32601,"message":"System 1 classification does not execute tools or approvals"}})).await?;
+            shared.send(json!({"id":value["id"],"error":{"code":-32601,"message":"Decision model classification does not execute tools or approvals"}})).await?;
             let error = ProviderError::new(
                 "unexpected_tool_request",
                 "Codex requested a tool or approval during classification",

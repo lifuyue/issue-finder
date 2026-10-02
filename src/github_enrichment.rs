@@ -16,12 +16,12 @@ use crate::competition::{
     TimelineIssueReference,
 };
 use crate::config::Config;
+use crate::decision::evidence::{
+    CommentEvidence, CommentsEvidence, EvidenceSnapshot, EvidenceText, COMMENT_SAMPLE_LIMIT,
+};
 use crate::github::GitHubIssue;
 use crate::github_budget::{GitHubApiBudget, GitHubApiBudgetReport, GitHubRequestSource};
 use crate::paths::{atomic_write, IssueFinderPaths};
-use crate::system1::evidence::{
-    CommentEvidence, CommentsEvidence, EvidenceSnapshot, EvidenceText, COMMENT_SAMPLE_LIMIT,
-};
 
 const ENRICHMENT_CACHE_TTL_MINUTES: i64 = 360;
 const COMPETITION_COMPLETION_CACHE_TTL_MINUTES: i64 = 360;
@@ -43,8 +43,8 @@ pub struct EnrichedIssue {
     pub growth: EnrichedGrowthFacts,
     pub warnings: Vec<String>,
     pub source_fetched_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system1: Option<crate::system1::JudgmentSnapshot>,
+    #[serde(default, alias = "system1", skip_serializing_if = "Option::is_none")]
+    pub decision: Option<crate::decision::JudgmentSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub availability: Option<AvailabilitySnapshot>,
 }
@@ -643,7 +643,7 @@ impl GitHubEnrichmentClient {
 
     /// Acquire full bodies independently from the legacy 500-character comment excerpts.
     /// Network requests share the client's authentication, timeout and GitHub request budget.
-    pub async fn system1_evidence(
+    pub async fn decision_evidence(
         &self,
         paths: &IssueFinderPaths,
         issue: &GitHubIssue,
@@ -652,7 +652,7 @@ impl GitHubEnrichmentClient {
     ) -> Result<EvidenceSnapshot> {
         let mut snapshot = EvidenceSnapshot::from_issue(issue, enriched);
         let (owner, repo) = split_repo_full_name(&snapshot.repo_full_name)
-            .context("Unable to split repository full name for System 1 evidence")?;
+            .context("Unable to split repository full name for decision model evidence")?;
         let details = self
             .fetch_issue_details_cached(paths, &owner, &repo, issue.number, refresh)
             .await;
@@ -671,12 +671,13 @@ impl GitHubEnrichmentClient {
             Err(error) => {
                 snapshot
                     .warnings
-                    .push(format!("System 1 issue details unavailable: {error}"));
+                    .push(format!("Decision model issue details unavailable: {error}"));
                 None
             }
         };
         snapshot.comments = CommentsEvidence::unavailable(total_count);
         let key = snapshot.material_hash();
+        // Keep the legacy cache namespace so existing fetched evidence remains reusable.
         let cache_path = paths.enrichment_source_cache_path("system1_comments_v1", &key);
         let cached: Option<Vec<CommentApiResponse>> = if refresh {
             None
@@ -686,7 +687,7 @@ impl GitHubEnrichmentClient {
                 Err(error) => {
                     snapshot
                         .warnings
-                        .push(format!("System 1 comment cache unavailable: {error}"));
+                        .push(format!("Decision model comment cache unavailable: {error}"));
                     None
                 }
             }
@@ -719,7 +720,7 @@ impl GitHubEnrichmentClient {
                         fetched = false;
                         snapshot
                             .warnings
-                            .push(format!("System 1 comments unavailable: {error}"));
+                            .push(format!("Decision model comments unavailable: {error}"));
                         break;
                     }
                 }
@@ -727,9 +728,9 @@ impl GitHubEnrichmentClient {
             if fetched {
                 let comments = tail_limited(comments, COMMENT_SAMPLE_LIMIT);
                 if let Err(error) = save_source_cache(&cache_path, &comments) {
-                    snapshot
-                        .warnings
-                        .push(format!("System 1 comment cache write failed: {error}"));
+                    snapshot.warnings.push(format!(
+                        "Decision model comment cache write failed: {error}"
+                    ));
                 }
                 Some(comments)
             } else {
@@ -1545,7 +1546,7 @@ impl EnrichedIssue {
             },
             warnings: Vec::new(),
             source_fetched_at: Utc::now().to_rfc3339(),
-            system1: None,
+            decision: None,
             availability: None,
         }
     }
@@ -2215,7 +2216,7 @@ mod availability_http_tests {
 }
 
 #[cfg(test)]
-mod system1_evidence_http_tests {
+mod decision_evidence_http_tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -2224,7 +2225,7 @@ mod system1_evidence_http_tests {
     use serde_json::{json, Value};
 
     use super::*;
-    use crate::system1::evidence::CommentFetchStatus;
+    use crate::decision::evidence::CommentFetchStatus;
 
     fn issue() -> GitHubIssue {
         GitHubIssue {
@@ -2321,7 +2322,7 @@ mod system1_evidence_http_tests {
         let issue = issue();
         let enriched = EnrichedIssue::from_issue(&issue);
         let snapshot = client
-            .system1_evidence(&paths, &issue, &enriched, false)
+            .decision_evidence(&paths, &issue, &enriched, false)
             .await
             .unwrap();
         let requests = handle.join().unwrap();
@@ -2339,7 +2340,7 @@ mod system1_evidence_http_tests {
         );
         assert_eq!(snapshot.github_status.linked_merged_pr_count, None);
         let cached = client
-            .system1_evidence(&paths, &issue, &enriched, false)
+            .decision_evidence(&paths, &issue, &enriched, false)
             .await
             .unwrap();
         assert_eq!(snapshot.material_hash(), cached.material_hash());
@@ -2348,7 +2349,7 @@ mod system1_evidence_http_tests {
         changed.updated_at = "2026-09-03T01:00:00Z".into();
         let changed_enrichment = EnrichedIssue::from_issue(&changed);
         let unavailable = client
-            .system1_evidence(&paths, &changed, &changed_enrichment, false)
+            .decision_evidence(&paths, &changed, &changed_enrichment, false)
             .await
             .unwrap();
         assert_eq!(unavailable.comments.status, CommentFetchStatus::Unavailable);
@@ -2366,7 +2367,7 @@ mod system1_evidence_http_tests {
             let dir = tempfile::tempdir().unwrap();
             let issue = issue();
             let snapshot = client
-                .system1_evidence(
+                .decision_evidence(
                     &paths(dir.path()),
                     &issue,
                     &EnrichedIssue::from_issue(&issue),

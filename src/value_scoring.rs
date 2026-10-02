@@ -19,8 +19,8 @@ use crate::value_signals::{
 };
 
 pub fn assess_issue(enriched: &EnrichedIssue, profile: &ProfileConfig) -> ValueAssessment {
-    if let Some(snapshot) = &enriched.system1 {
-        return crate::system1::policy::assess(enriched, snapshot.answers.as_ref(), profile);
+    if let Some(snapshot) = &enriched.decision {
+        return crate::decision::policy::assess(enriched, snapshot.answers.as_ref(), profile);
     }
     let signals = build_value_signals(enriched, profile);
     let mut risk_tags = build_risk_tags(enriched);

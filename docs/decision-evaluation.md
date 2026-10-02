@@ -1,4 +1,4 @@
-# System 1 evaluation — 2026-10-01
+# Decision model evaluation — 2026-10-01
 
 > The quality results below describe the historical eight-question
 > `scout-semantics-v1` run. They are not quality or concurrency results for the current
@@ -81,15 +81,16 @@ post-run logging edit was executed by the live run.
 
 Frozen dataset SHA-256:
 `5d2d604482890adf5187743da991537bc061b0d48f8ea13bec8c472fc16b75cb`.
-See [fixture provenance and rubric](../tests/fixtures/system1_eval/README.md).
+See [fixture provenance and rubric](../tests/fixtures/decision_eval/README.md).
 
 Offline reproduction:
 
 ```bash
-cargo test --test system1_evaluation
+cargo test --test decision_evaluation
 ```
 
-The exact acceptance command was:
+The exact historical acceptance command was (names and paths are preserved as
+recorded; this retired test target is no longer runnable):
 
 ```bash
 ISSUE_FINDER_CODEX_BIN=/home/agent/.local/bin/codex \
@@ -101,3 +102,5 @@ cargo test --test system1_evaluation live_luna_classifies_frozen_github_material
 A configured local CLI can omit `ISSUE_FINDER_CODEX_BIN`; the adapter then discovers
 it without installation or global configuration changes. Report output may use a
 local temporary path. The committed report above preserves this acceptance evidence.
+
+Current manual native-provider checks use the [benchmark helper](decision-providers.md#cloud-rollout-and-acceptance), separately from offline regression tests.

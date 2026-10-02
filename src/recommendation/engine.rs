@@ -135,7 +135,7 @@ pub struct RecommendationEngine<'a> {
     paths: &'a IssueFinderPaths,
     config: &'a Config,
     feedback_policy: FeedbackPolicy,
-    system1_provider: Option<std::sync::Arc<dyn crate::system1::contract::Provider>>,
+    decision_provider: Option<std::sync::Arc<dyn crate::decision::contract::Provider>>,
 }
 
 impl<'a> RecommendationEngine<'a> {
@@ -144,7 +144,7 @@ impl<'a> RecommendationEngine<'a> {
             paths,
             config,
             feedback_policy: FeedbackPolicy::LegacyLifecycle,
-            system1_provider: None,
+            decision_provider: None,
         }
     }
 
@@ -153,18 +153,18 @@ impl<'a> RecommendationEngine<'a> {
             paths,
             config,
             feedback_policy: FeedbackPolicy::CodexExposure,
-            system1_provider: None,
+            decision_provider: None,
         }
     }
 
     /// Same material engineering and policy for any provider, including offline replay fakes.
-    pub fn with_system1_provider(
+    pub fn with_decision_provider(
         paths: &'a IssueFinderPaths,
         config: &'a Config,
-        provider: std::sync::Arc<dyn crate::system1::contract::Provider>,
+        provider: std::sync::Arc<dyn crate::decision::contract::Provider>,
     ) -> Self {
         let mut engine = Self::for_codex(paths, config);
-        engine.system1_provider = Some(provider);
+        engine.decision_provider = Some(provider);
         engine
     }
 
@@ -307,7 +307,7 @@ impl<'a> RecommendationEngine<'a> {
         let completion_statuses = self
             .complete_competition_evidence(&enrichment, &mut ranked, refresh, limit)
             .await;
-        self.apply_system1(&enrichment, &mut ranked, refresh, &mut diagnostics)
+        self.apply_decision(&enrichment, &mut ranked, refresh, &mut diagnostics)
             .await;
         self.recheck_shortlist(
             &enrichment,
@@ -514,7 +514,7 @@ impl<'a> RecommendationEngine<'a> {
             }
         }
 
-        self.apply_system1(enrichment, &mut ranked, refresh, &mut diagnostics)
+        self.apply_decision(enrichment, &mut ranked, refresh, &mut diagnostics)
             .await;
         self.recheck_shortlist(
             enrichment,
@@ -671,7 +671,7 @@ impl<'a> RecommendationEngine<'a> {
 
         diagnostics.fallback_exhausted =
             display_count(&ranked, limit, include_filtered, DisplayMode::Repository) < limit;
-        self.apply_system1(enrichment, &mut ranked, refresh, &mut diagnostics)
+        self.apply_decision(enrichment, &mut ranked, refresh, &mut diagnostics)
             .await;
         self.recheck_shortlist(
             enrichment,
@@ -802,8 +802,8 @@ impl<'a> RecommendationEngine<'a> {
                     .await,
             );
         }
-        if let Some(snapshot) = &mut ranked.enriched_issue.system1 {
-            snapshot.status = crate::system1::JudgmentStatus::NotEvaluated;
+        if let Some(snapshot) = &mut ranked.enriched_issue.decision {
+            snapshot.status = crate::decision::JudgmentStatus::NotEvaluated;
             snapshot.error = Some("assess fetched current GitHub evidence; any prior scout judgment applies only to its saved material and has not been revalidated here".to_string());
             ranked.value_assessment = assess_issue(&ranked.enriched_issue, &self.config.profile);
             self.apply_feed_ranking(std::slice::from_mut(&mut ranked));
@@ -1032,7 +1032,7 @@ impl<'a> RecommendationEngine<'a> {
             };
             item.enriched_issue = enriched.clone();
             if self.feedback_policy == FeedbackPolicy::CodexExposure {
-                crate::system1::factual_competition_only(&mut item.enriched_issue);
+                crate::decision::factual_competition_only(&mut item.enriched_issue);
             }
             canonicalize_ranked_issue(item);
             item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
@@ -1083,10 +1083,10 @@ impl<'a> RecommendationEngine<'a> {
         if self.feedback_policy == FeedbackPolicy::CodexExposure {
             // Tag before the first assessment, so legacy semantics cannot hide
             // candidates before they reach the bounded model pool.
-            enriched.system1 = Some(crate::system1::JudgmentSnapshot::pending(
+            enriched.decision = Some(crate::decision::JudgmentSnapshot::pending(
                 "Semantic screening has not run for this material",
             ));
-            crate::system1::factual_competition_only(&mut enriched);
+            crate::decision::factual_competition_only(&mut enriched);
         }
         let value_assessment = assess_issue(&enriched, &self.config.profile);
         let mut ranked = RankedValueIssue {
@@ -1127,13 +1127,13 @@ impl<'a> RecommendationEngine<'a> {
         let states = load_state_map_with_policy(self.paths, self.feedback_policy)?;
         apply_recommendation_assessments(ranked, &states);
         sort_by_feed(ranked);
-        let replay = crate::system1::replay::ScoutReplay::capture(
+        let replay = crate::decision::replay::ScoutReplay::capture(
             &self.config.profile,
             ranked,
             &states,
             self.feedback_policy,
         )?;
-        diagnostics.system1_replay_path = Some(replay.save(self.paths)?.display().to_string());
+        diagnostics.decision_replay_path = Some(replay.save(self.paths)?.display().to_string());
         Ok(())
     }
 
@@ -1205,23 +1205,23 @@ impl<'a> RecommendationEngine<'a> {
         select_enrichment_candidates_for_mode(candidates, budget, mode)
     }
 
-    async fn apply_system1(
+    async fn apply_decision(
         &self,
         enrichment: &GitHubEnrichmentClient,
         ranked: &mut [RankedValueIssue],
         refresh: bool,
         diagnostics: &mut DiscoveryDiagnostics,
     ) {
-        use crate::system1::{self, JudgmentSnapshot, JudgmentStatus};
+        use crate::decision::{self, JudgmentSnapshot, JudgmentStatus};
         if self.feedback_policy != FeedbackPolicy::CodexExposure || ranked.is_empty() {
             return;
         }
-        if let Err(error) = self.config.system1.validate() {
+        if let Err(error) = self.config.decision.validate() {
             diagnostics.stage_errors.push(error.to_string());
             for item in ranked.iter_mut() {
                 let mut snapshot = JudgmentSnapshot::pending(&error.to_string());
                 snapshot.status = JudgmentStatus::Failed;
-                item.enriched_issue.system1 = Some(snapshot);
+                item.enriched_issue.decision = Some(snapshot);
                 item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
             }
             return;
@@ -1231,7 +1231,7 @@ impl<'a> RecommendationEngine<'a> {
             .enumerate()
             .filter_map(|(index, item)| (!facts_block_new_work(item)).then_some(index))
             .collect::<Vec<_>>();
-        let budget = self.config.system1.candidate_budget.min(eligible.len());
+        let budget = self.config.decision.candidate_budget.min(eligible.len());
         // Include a deterministic spread beyond the top segment. No legacy
         // semantic tags, counters or text keywords enter pool selection.
         let indices = semantic_pool_indices(eligible.len(), budget)
@@ -1240,7 +1240,7 @@ impl<'a> RecommendationEngine<'a> {
             .collect::<Vec<_>>();
         for item in ranked.iter_mut() {
             let mut snapshot = JudgmentSnapshot::pending(
-                "System 1 candidate budget did not cover this item; semantic state is unknown",
+                "Decision model candidate budget did not cover this item; semantic state is unknown",
             );
             if facts_block_new_work(item) {
                 snapshot.status = JudgmentStatus::SkippedFacts;
@@ -1248,24 +1248,21 @@ impl<'a> RecommendationEngine<'a> {
             } else {
                 snapshot.status = JudgmentStatus::SkippedBudget;
             }
-            item.enriched_issue.system1 = Some(snapshot);
+            item.enriched_issue.decision = Some(snapshot);
         }
-        let owned = if self.system1_provider.is_none() && budget > 0 {
-            let binary = (!self.config.system1.codex_binary.trim().is_empty())
-                .then(|| self.config.system1.codex_binary.clone());
-            Some(crate::system1::codex::CodexProvider::new(
-                binary,
-                std::time::Duration::from_secs(self.config.system1.timeout_seconds),
+        let owned = if self.decision_provider.is_none() && budget > 0 {
+            Some(crate::decision::provider::ConfiguredProvider::new(
+                &self.config.decision,
             ))
         } else {
             None
         };
-        let provider: Option<&dyn crate::system1::contract::Provider> =
-            self.system1_provider.as_deref().or_else(|| {
+        let provider: Option<&dyn crate::decision::contract::Provider> =
+            self.decision_provider.as_deref().or_else(|| {
                 owned
                     .as_ref()
                     .and_then(|p| p.as_ref().ok())
-                    .map(|p| p as &dyn crate::system1::contract::Provider)
+                    .map(|p| p as &dyn crate::decision::contract::Provider)
             });
         let initialization_error = owned
             .as_ref()
@@ -1296,17 +1293,17 @@ impl<'a> RecommendationEngine<'a> {
                 } else {
                     let result = async {
                         let evidence = enrichment
-                            .system1_evidence(
+                            .decision_evidence(
                                 self.paths,
                                 &item.issue,
                                 &item.enriched_issue,
                                 refresh,
                             )
                             .await?
-                            .with_user_requirements(&self.config.system1.task_preferences);
-                        system1::judge(
+                            .with_user_requirements(&self.config.decision.task_preferences);
+                        decision::judge(
                             self.paths,
-                            provider.context("System 1 provider unavailable")?,
+                            provider.context("Decision model provider unavailable")?,
                             evidence,
                             &self.config.profile,
                             refresh,
@@ -1324,7 +1321,7 @@ impl<'a> RecommendationEngine<'a> {
                     }
                 };
                 active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                let timing = system1::TaskTiming {
+                let timing = decision::TaskTiming {
                     candidate: candidate_key(&item.issue),
                     queue_wait_ms,
                     execution_ms: started.elapsed().as_millis() as u64,
@@ -1341,7 +1338,7 @@ impl<'a> RecommendationEngine<'a> {
                 (index, snapshot, timing)
             }
         }))
-        .buffer_unordered(self.config.system1.concurrency)
+        .buffer_unordered(self.config.decision.concurrency)
         .collect::<Vec<_>>()
         .await;
         let mut results = results;
@@ -1353,7 +1350,7 @@ impl<'a> RecommendationEngine<'a> {
             if snapshot.status == JudgmentStatus::Failed {
                 failures += 1;
                 diagnostics.stage_errors.push(format!(
-                    "System 1 {}: {}",
+                    "Decision model {}: {}",
                     candidate_key(&item.issue),
                     snapshot.error.as_deref().unwrap_or("provider failed")
                 ));
@@ -1365,40 +1362,40 @@ impl<'a> RecommendationEngine<'a> {
             if snapshot.status == JudgmentStatus::Pending {
                 snapshot.status = JudgmentStatus::Failed;
             }
-            item.enriched_issue.system1 = Some(snapshot);
+            item.enriched_issue.decision = Some(snapshot);
         }
-        diagnostics.system1_execution = Some(system1::ExecutionReport {
-            concurrency: self.config.system1.concurrency,
+        diagnostics.decision_execution = Some(decision::ExecutionReport {
+            concurrency: self.config.decision.concurrency,
             peak_in_flight: peak.load(std::sync::atomic::Ordering::SeqCst),
             tasks: timings,
         });
         // Refresh every assessment, including budget-skipped entries, so saved
         // inputs replay the same uncertainty notes and frozen ranking clock.
         for item in ranked.iter_mut() {
-            system1::factual_competition_only(&mut item.enriched_issue);
+            decision::factual_competition_only(&mut item.enriched_issue);
             item.value_assessment = assess_issue(&item.enriched_issue, &self.config.profile);
         }
         if let Some(Ok(provider)) = owned.as_ref() {
             provider.close().await;
         }
         if failures > 0 {
-            diagnostics.stage_errors.push(format!("System 1: {failures} candidates failed semantic screening; failures are isolated and no keyword fallback was used. {}", initialization_error.unwrap_or_default()));
+            diagnostics.stage_errors.push(format!("Decision model: {failures} candidates failed semantic screening; failures are isolated and no keyword fallback was used. {}", initialization_error.unwrap_or_default()));
         }
         if budget < eligible.len() {
-            diagnostics.stage_errors.push(format!("System 1: {} candidates were outside the {budget}-candidate budget and remain explicitly unassessed", eligible.len() - budget));
+            diagnostics.stage_errors.push(format!("Decision model: {} candidates were outside the {budget}-candidate budget and remain explicitly unassessed", eligible.len() - budget));
         }
         let partial = ranked
             .iter()
             .filter(|item| {
                 item.enriched_issue
-                    .system1
+                    .decision
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.status == JudgmentStatus::Partial)
             })
             .count();
         if partial > 0 {
             diagnostics.stage_errors.push(format!(
-                "System 1: {partial} candidates have unanswered semantic questions"
+                "Decision model: {partial} candidates have unanswered semantic questions"
             ));
         }
     }

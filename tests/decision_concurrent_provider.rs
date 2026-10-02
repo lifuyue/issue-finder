@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use issue_finder::system1::codex::CodexProvider;
-use issue_finder::system1::contract::*;
+use issue_finder::decision::codex::CodexProvider;
+use issue_finder::decision::contract::*;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 

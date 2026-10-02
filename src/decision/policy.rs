@@ -26,9 +26,9 @@ pub fn assess(
     let answers = answers.unwrap_or(&unknown);
     let mut missing_evidence = enriched.warnings.clone();
     missing_evidence.extend(enriched.competition.warnings.clone());
-    if let Some(snapshot) = &enriched.system1 {
+    if let Some(snapshot) = &enriched.decision {
         if let Some(error) = &snapshot.error {
-            missing_evidence.push(format!("System 1: {error}"));
+            missing_evidence.push(format!("Decision model: {error}"));
         }
         if let Some(evidence) = &snapshot.evidence {
             missing_evidence.extend(evidence.warnings.clone());
@@ -80,7 +80,7 @@ pub fn assess(
     ] {
         if missing {
             missing_evidence.push(format!(
-                "System 1 {id} was not answered; semantic state is unknown"
+                "Decision model {id} was not answered; semantic state is unknown"
             ));
         }
     }
@@ -231,7 +231,7 @@ pub fn assess(
             } else {
                 GateBand::Acceptable
             },
-            format!("System 1 task type {:?}", answers.task_type),
+            format!("Decision model task type {:?}", answers.task_type),
         ),
         repo_influence: verdict(
             if factual_low_trust {
@@ -263,7 +263,7 @@ pub fn assess(
                 GateBand::Acceptable
             },
             format!(
-                "{} actual open PR references; System 1 contribution {:?}",
+                "{} actual open PR references; Decision model contribution {:?}",
                 open_pr_count, answers.contribution_signal
             ),
         ),
@@ -278,12 +278,15 @@ pub fn assess(
             } else {
                 GateBand::Weak
             },
-            format!("System 1 preference match {:?}", answers.preference_match),
+            format!(
+                "Decision model preference match {:?}",
+                answers.preference_match
+            ),
         ),
     };
     let explanation = vec![
-        format!("System 1: task={:?}, description={:?}, scope={:?}", answers.task_type, answers.description_quality, answers.scope),
-        format!("System 1 discussion expression={:?}, preference={:?}", answers.contribution_signal, answers.preference_match),
+        format!("Decision model: task={:?}, description={:?}, scope={:?}", answers.task_type, answers.description_quality, answers.scope),
+        format!("Decision model discussion expression={:?}, preference={:?}", answers.contribution_signal, answers.preference_match),
         "Semantic answers guide selection; reproduction, fix verification and execution remain with the main Agent".into(),
         format!("GitHub facts: issue_closed={closed}, assigned={assigned}, open_pr_count={open_pr_count}, merged_resolution_evidence={merged_resolution}"),
     ];
@@ -291,7 +294,7 @@ pub fn assess(
         .iter()
         .map(|summary| ValueEvidence {
             summary: summary.clone(),
-            evidence_refs: vec!["system1:snapshot".into()],
+            evidence_refs: vec!["decision:snapshot".into()],
         })
         .collect();
     ValueAssessment {
@@ -345,7 +348,7 @@ pub fn quality(
     } else if strong_open_pr_count(enriched) > 0 {
         Some("GitHub confirms a linked PR is open; prefer an uncontested issue")
     } else if answers.is_some_and(|a| a.preference_match == Some(PreferenceMatch::Mismatch)) {
-        Some("System 1 identifies a mismatch with the supplied task preferences")
+        Some("Decision model identifies a mismatch with the supplied task preferences")
     } else {
         None
     };
@@ -386,7 +389,7 @@ fn strong_open_pr_count(enriched: &EnrichedIssue) -> usize {
 
 fn github_status(enriched: &EnrichedIssue) -> Option<&super::evidence::GitHubStatusEvidence> {
     enriched
-        .system1
+        .decision
         .as_ref()?
         .evidence
         .as_ref()
@@ -452,7 +455,7 @@ fn band(score: i32) -> ScoreBand {
 }
 
 fn verdict(status: GateStatus, band: GateBand, reason: String) -> GateVerdict {
-    GateVerdict::new(status, band, vec![reason], vec!["system1:snapshot".into()])
+    GateVerdict::new(status, band, vec![reason], vec!["decision:snapshot".into()])
 }
 
 #[cfg(test)]
@@ -664,7 +667,7 @@ mod tests {
         evidence.warnings.push("Discussion was sampled".into());
         let mut snapshot = super::super::JudgmentSnapshot::pending("Provider unavailable");
         snapshot.evidence = Some(evidence);
-        enriched.system1 = Some(snapshot);
+        enriched.decision = Some(snapshot);
         let assigned = assess(
             &enriched,
             Some(&clear()),
@@ -684,7 +687,7 @@ mod tests {
             .any(|s| s.contains("Discussion was sampled")));
         assert_eq!(quality(&enriched, Some(&clear())).visibility, None);
         enriched
-            .system1
+            .decision
             .as_mut()
             .unwrap()
             .evidence
@@ -735,7 +738,7 @@ mod tests {
     }
     #[test]
     fn legacy_task_form_and_discussion_expressions_cannot_establish_unavailability() {
-        use crate::system1::questions::TaskShape;
+        use crate::decision::questions::TaskShape;
         let enriched = issue("A concrete, bounded repository correction");
         let baseline = assess(
             &enriched,

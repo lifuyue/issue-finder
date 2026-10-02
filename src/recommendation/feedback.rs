@@ -43,7 +43,7 @@ pub fn assess_feedback(
         };
     }
 
-    let now = crate::system1::ranking_time(enriched);
+    let now = crate::decision::ranking_time(enriched);
     let mut penalty =
         shown_penalty(state, now) + read_penalty(state, now) + prepared_penalty(state, now);
     let mut reactivation_boost = 0;

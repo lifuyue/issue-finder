@@ -16,7 +16,7 @@ two business tools:
 
 | Tool | Result |
 | --- | --- |
-| `issue-finder.scout` | Ranked candidates, seven v2 System 1 answers, fresh availability facts, material snapshots, diagnostics and budgets |
+| `issue-finder.scout` | Ranked candidates, seven v2 Decision model answers, fresh availability facts, material snapshots, diagnostics and budgets |
 | `issue-finder.assess` | Issue body, one discussion page, fresh final-depth availability and repository evidence, warnings; no model request |
 
 ```bash
@@ -29,12 +29,31 @@ The installed catalog defines argument bounds and defaults. Calls return a JSON
 envelope with `success`, `status`, and `structured_content`. Parameter and output
 semantics are documented in the [tool reference](../skills/issue-finder-cli/references/tools.md).
 
-The [System 1 guide](system1.md) describes finite semantic questions, the
-provider boundary, independent issue threads, default concurrency 4, material-scoped
+The [Decision model guide](decision.md) describes finite semantic questions, the
+provider boundary, default concurrency 4, material-scoped
 caching, failure isolation and runtime verification. One request per issue carries
 all seven questions and their own material. Concurrency must be positive, with no
-additional upper cap; the adapter retries at most once for a retryable server
+additional upper cap; the Codex adapter retries at most once for a retryable server
 response within its original timeout.
+
+The [decision provider guide](decision-providers.md) covers the default Alibaba
+`decision-model-preview`, Cloudflare `clef-flash`, and explicit Codex fallback.
+Configure `[decision].provider` as `aliyun_decision`, `cloudflare_clef_flash`, or
+`codex`. Native providers use typed System One requests and service probabilities;
+they do not require Codex CLI authentication. No failure silently changes providers.
+`decision-check` checks the configured provider; `--provider aliyun-decision`,
+`--provider cloudflare-clef-flash`, or `--provider codex` selects a diagnostic.
+
+For the Codex fallback, Cloud can bind a complete raw `auth.json` as the secret
+`ISSUE_FINDER_CODEX_AUTH_JSON`. Each task's runtime startup explicitly runs
+`issue-finder decision-auth-init` before `decision-check --provider codex`;
+runtime calls consume initialized credentials without writing the seed.
+`ISSUE_FINDER_CODEX_HOME` optionally selects a private writable home used only
+by Codex child processes. Initialization preserves existing refreshed auth unless
+`--replace` is requested. Static secrets do not receive token refreshes; preserve
+the runtime copy and avoid sharing one refresh credential across concurrent
+environments. See [authentication limits](decision.md#injected-codex-authentication)
+and the [Cloud configuration task prompt](cloud-codex-auth-prompt.md).
 
 ## Evidence and state
 

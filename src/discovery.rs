@@ -48,8 +48,8 @@ impl DiscoveryScope {
                 repository: None,
                 discovery_stages: Vec::new(),
                 stage_errors: Vec::new(),
-                system1_replay_path: None,
-                system1_execution: None,
+                decision_replay_path: None,
+                decision_execution: None,
                 fallback_exhausted: false,
                 search: None,
             },
@@ -58,8 +58,8 @@ impl DiscoveryScope {
                 repository: Some(repository.full_name()),
                 discovery_stages: Vec::new(),
                 stage_errors: Vec::new(),
-                system1_replay_path: None,
-                system1_execution: None,
+                decision_replay_path: None,
+                decision_execution: None,
                 fallback_exhausted: false,
                 search: None,
             },
@@ -335,10 +335,18 @@ pub struct SearchDiagnosticCandidate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveryDiagnostics {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system1_execution: Option<crate::system1::ExecutionReport>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system1_replay_path: Option<String>,
+    #[serde(
+        default,
+        alias = "system1Execution",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub decision_execution: Option<crate::decision::ExecutionReport>,
+    #[serde(
+        default,
+        alias = "system1ReplayPath",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub decision_replay_path: Option<String>,
     pub scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,

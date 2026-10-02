@@ -41,15 +41,39 @@ async fn main() -> Result<()> {
     let paths = IssueFinderPaths::resolve()?;
 
     match cli.command {
-        Command::System1Check { codex_binary } => {
+        Command::DecisionAuthInit { replace } => {
+            match issue_finder::decision::codex_auth::initialize(&paths, replace) {
+                Ok(result) => println!("{}", serde_json::to_string(&result)?),
+                Err(error) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"success":false,"error":error.to_string()})
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::DecisionCheck {
+            provider,
+            codex_binary,
+        } => {
             let result: Result<serde_json::Value> = async {
-                let config = Config::load_or_default(&paths)?;
-                config.system1.validate()?;
-                let binary = codex_binary.or_else(|| {
-                    (!config.system1.codex_binary.is_empty())
-                        .then(|| config.system1.codex_binary.clone())
-                });
-                issue_finder::system1::probe(binary, config.system1.timeout_seconds).await
+                let mut config = Config::load_or_default(&paths)?;
+                if let Some(provider) = provider {
+                    config.decision.provider = provider.into();
+                }
+                if let Some(binary) = codex_binary {
+                    anyhow::ensure!(
+                        provider.is_none()
+                            || config.decision.provider
+                                == issue_finder::config::DecisionProvider::Codex,
+                        "--codex-binary cannot be combined with a non-Codex --provider"
+                    );
+                    config.decision.provider = issue_finder::config::DecisionProvider::Codex;
+                    config.decision.codex_binary = binary;
+                }
+                config.decision.validate()?;
+                issue_finder::decision::probe(&config.decision).await
             }
             .await;
             match result {

@@ -74,7 +74,7 @@ impl ScoutReplay {
         self.validate()?;
         let encoded = serde_json::to_vec_pretty(self)?;
         let key = format!("{:x}", Sha256::digest(&encoded));
-        let path = paths.system1_replay_path(&key);
+        let path = paths.decision_replay_path(&key);
         atomic_write(&path, encoded)
             .with_context(|| format!("save scout replay {}", path.display()))?;
         Ok(path)
@@ -99,7 +99,7 @@ impl ScoutReplay {
         for item in &mut ranked {
             let snapshot = item
                 .enriched_issue
-                .system1
+                .decision
                 .as_mut()
                 .context("missing semantic judgment")?;
             if let Some(response) = &snapshot.response {
@@ -158,7 +158,7 @@ impl ScoutReplay {
             );
             let snapshot = item
                 .enriched_issue
-                .system1
+                .decision
                 .as_ref()
                 .context("scout replay requires a semantic judgment for every candidate")?;
             ensure!(

@@ -139,7 +139,8 @@ async fn codex_scout_recovers_legacy_hidden_candidates_without_rewriting_feedbac
     }
     let original_events = load_events(&paths).unwrap();
     let mut config = Config::default();
-    config.system1.codex_binary = dir.path().join("missing-codex").display().to_string();
+    config.decision.codex_binary = dir.path().join("missing-codex").display().to_string();
+    config.decision.provider = issue_finder::config::DecisionProvider::Codex;
     let scope = DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap());
     let options = ScoutOptions {
         include_filtered: true,
@@ -414,13 +415,13 @@ fn write_response(stream: &mut std::net::TcpStream, body: &str) {
     stream.write_all(response.as_bytes()).unwrap();
 }
 
-struct InspectableSystem1Provider {
-    requests: Mutex<Vec<issue_finder::system1::contract::DecisionRequest>>,
+struct InspectableDecisionProvider {
+    requests: Mutex<Vec<issue_finder::decision::contract::DecisionRequest>>,
     fail: bool,
     version: &'static str,
 }
 
-impl issue_finder::system1::contract::Provider for InspectableSystem1Provider {
+impl issue_finder::decision::contract::Provider for InspectableDecisionProvider {
     fn fingerprint(&self) -> String {
         format!(
             "offline-alternate-provider:semantic-integration-{}",
@@ -430,9 +431,9 @@ impl issue_finder::system1::contract::Provider for InspectableSystem1Provider {
 
     fn decide<'a>(
         &'a self,
-        request: &'a issue_finder::system1::contract::DecisionRequest,
-    ) -> issue_finder::system1::contract::DecisionFuture<'a> {
-        use issue_finder::system1::contract::*;
+        request: &'a issue_finder::decision::contract::DecisionRequest,
+    ) -> issue_finder::decision::contract::DecisionFuture<'a> {
+        use issue_finder::decision::contract::*;
         Box::pin(async move {
             self.requests.lock().unwrap().push(request.clone());
             if self.fail {
@@ -592,11 +593,11 @@ fn start_semantic_mock_github_with(count: usize, close_first: Arc<AtomicBool>) -
 }
 
 #[tokio::test]
-async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_identical_input() {
+async fn decision_selects_boundary_correction_before_visibility_and_reuses_only_identical_input() {
+    use issue_finder::decision::contract::Provider;
+    use issue_finder::decision::questions::ContributionSignal;
+    use issue_finder::decision::{JudgmentSnapshot, JudgmentStatus};
     use issue_finder::recommendation::engine::RecommendationEngine;
-    use issue_finder::system1::contract::Provider;
-    use issue_finder::system1::questions::ContributionSignal;
-    use issue_finder::system1::{JudgmentSnapshot, JudgmentStatus};
 
     let _env_lock = env_lock::EnvLock::acquire();
     let _auth_guard = github_auth::GitHubAuthGuard::clear();
@@ -606,8 +607,8 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
     let directory = tempdir().unwrap();
     let paths = semantic_test_paths(directory.path());
     let mut config = Config::default();
-    config.system1.candidate_budget = 3;
-    let provider = Arc::new(InspectableSystem1Provider {
+    config.decision.candidate_budget = 3;
+    let provider = Arc::new(InspectableDecisionProvider {
         requests: Mutex::new(Vec::new()),
         fail: false,
         version: "v1",
@@ -618,7 +619,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
         source: RecommendationEventSource::ToolScout,
     };
     let scope = DiscoveryScope::repository(RepositoryScope::parse("owner/repo").unwrap());
-    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let engine = RecommendationEngine::with_decision_provider(&paths, &config, provider.clone());
     let selected = engine
         .scout(1, false, options, scope.clone())
         .await
@@ -626,7 +627,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
     assert_eq!(selected.ranked.len(), 1);
     assert_eq!(
         selected.ranked[0].issue.number, 3,
-        "a good candidate beyond the presentation cutoff must reach System 1"
+        "a good candidate beyond the presentation cutoff must reach decision model"
     );
     assert_eq!(
         provider.requests.lock().unwrap().len(),
@@ -644,7 +645,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
         .reasons
         .iter()
         .any(|reason| reason.contains("open PR") || reason.contains("thin task")));
-    let snapshot = correction.enriched_issue.system1.as_ref().unwrap();
+    let snapshot = correction.enriched_issue.decision.as_ref().unwrap();
     assert_eq!(snapshot.status, JudgmentStatus::Completed);
     let answers = snapshot.answers.as_ref().unwrap();
     assert_eq!(
@@ -686,7 +687,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
     assert!(
         cached.ranked[0]
             .enriched_issue
-            .system1
+            .decision
             .as_ref()
             .unwrap()
             .cache_hit
@@ -699,7 +700,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
         .keywords
         .push("explicit-new-user-interest".into());
     let changed_engine =
-        RecommendationEngine::with_system1_provider(&paths, &changed, provider.clone());
+        RecommendationEngine::with_decision_provider(&paths, &changed, provider.clone());
     let changed_result = changed_engine
         .scout(1, false, options, scope.clone())
         .await
@@ -711,7 +712,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
     );
     let changed_snapshot = changed_result.ranked[0]
         .enriched_issue
-        .system1
+        .decision
         .as_ref()
         .unwrap();
     assert!(!changed_snapshot.cache_hit);
@@ -721,18 +722,18 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
         evidence.material_hash(),
         "only question context changed, not the GitHub material"
     );
-    let replaced_provider = Arc::new(InspectableSystem1Provider {
+    let replaced_provider = Arc::new(InspectableDecisionProvider {
         requests: Mutex::new(Vec::new()),
         fail: false,
         version: "v2",
     });
     let replaced_engine =
-        RecommendationEngine::with_system1_provider(&paths, &changed, replaced_provider.clone());
+        RecommendationEngine::with_decision_provider(&paths, &changed, replaced_provider.clone());
     let replaced = replaced_engine
         .scout(1, false, options, scope)
         .await
         .unwrap();
-    let replaced_snapshot = replaced.ranked[0].enriched_issue.system1.as_ref().unwrap();
+    let replaced_snapshot = replaced.ranked[0].enriched_issue.decision.as_ref().unwrap();
     assert_eq!(
         replaced_provider.requests.lock().unwrap().len(),
         3,
@@ -746,11 +747,11 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
     );
 
     let mut changed_material = replaced_snapshot.evidence.clone().unwrap();
-    changed_material.body = issue_finder::system1::evidence::EvidenceText::bounded(
+    changed_material.body = issue_finder::decision::evidence::EvidenceText::bounded(
         "In docs/cli.md replace `adress` with `address`; also correct the corresponding heading.",
         12_000,
     );
-    let rejudged = issue_finder::system1::judge(
+    let rejudged = issue_finder::decision::judge(
         &paths,
         replaced_provider.as_ref(),
         changed_material.clone(),
@@ -766,7 +767,7 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
         4,
         "changed material must reach the provider even without a refresh flag"
     );
-    let same_material = issue_finder::system1::judge(
+    let same_material = issue_finder::decision::judge(
         &paths,
         replaced_provider.as_ref(),
         changed_material,
@@ -781,9 +782,9 @@ async fn system1_selects_boundary_correction_before_visibility_and_reuses_only_i
 }
 
 #[tokio::test]
-async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback() {
+async fn decision_failure_and_budget_skips_stay_visible_without_keyword_fallback() {
+    use issue_finder::decision::JudgmentStatus;
     use issue_finder::recommendation::engine::RecommendationEngine;
-    use issue_finder::system1::JudgmentStatus;
 
     let _env_lock = env_lock::EnvLock::acquire();
     let _auth_guard = github_auth::GitHubAuthGuard::clear();
@@ -793,13 +794,13 @@ async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback(
     let directory = tempdir().unwrap();
     let paths = semantic_test_paths(directory.path());
     let mut config = Config::default();
-    config.system1.candidate_budget = 2;
-    let provider = Arc::new(InspectableSystem1Provider {
+    config.decision.candidate_budget = 2;
+    let provider = Arc::new(InspectableDecisionProvider {
         requests: Mutex::new(Vec::new()),
         fail: true,
         version: "v1",
     });
-    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let engine = RecommendationEngine::with_decision_provider(&paths, &config, provider.clone());
     let result = engine
         .scout(
             3,
@@ -826,7 +827,7 @@ async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback(
     let statuses: Vec<_> = result
         .ranked
         .iter()
-        .map(|candidate| candidate.enriched_issue.system1.as_ref().unwrap().status)
+        .map(|candidate| candidate.enriched_issue.decision.as_ref().unwrap().status)
         .collect();
     assert_eq!(
         statuses
@@ -849,7 +850,7 @@ async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback(
         .any(|error| error.contains("authentication_failed")));
     assert!(result.ranked.iter().all(|candidate| candidate
         .enriched_issue
-        .system1
+        .decision
         .as_ref()
         .unwrap()
         .answers
@@ -858,16 +859,16 @@ async fn system1_failure_and_budget_skips_stay_visible_without_keyword_fallback(
 }
 
 #[test]
-fn system1_concurrency_defaults_to_four_and_has_no_product_upper_limit() {
-    use issue_finder::config::System1Config;
-    assert_eq!(System1Config::default().concurrency, 4);
+fn decision_concurrency_defaults_to_four_and_has_no_product_upper_limit() {
+    use issue_finder::config::DecisionConfig;
+    assert_eq!(DecisionConfig::default().concurrency, 4);
     for value in [1, 4, 9, 1024, 100_000] {
-        let config: System1Config = toml::from_str(&format!("concurrency = {value}")).unwrap();
+        let config: DecisionConfig = toml::from_str(&format!("concurrency = {value}")).unwrap();
         assert!(config.validate().is_ok());
     }
-    let config: System1Config = toml::from_str("concurrency = 0").unwrap();
+    let config: DecisionConfig = toml::from_str("concurrency = 0").unwrap();
     assert!(config.validate().is_err());
-    assert!(toml::from_str::<System1Config>("concurrency = -1").is_err());
+    assert!(toml::from_str::<DecisionConfig>("concurrency = -1").is_err());
 }
 
 struct ConcurrentSemanticProvider {
@@ -877,15 +878,15 @@ struct ConcurrentSemanticProvider {
     close_first: Arc<AtomicBool>,
 }
 
-impl issue_finder::system1::contract::Provider for ConcurrentSemanticProvider {
+impl issue_finder::decision::contract::Provider for ConcurrentSemanticProvider {
     fn fingerprint(&self) -> String {
         "offline-concurrent-v2".into()
     }
     fn decide<'a>(
         &'a self,
-        request: &'a issue_finder::system1::contract::DecisionRequest,
-    ) -> issue_finder::system1::contract::DecisionFuture<'a> {
-        use issue_finder::system1::contract::*;
+        request: &'a issue_finder::decision::contract::DecisionRequest,
+    ) -> issue_finder::decision::contract::DecisionFuture<'a> {
+        use issue_finder::decision::contract::*;
         Box::pin(async move {
             assert_eq!(request.questions.len(), 7);
             assert!(!request
@@ -946,6 +947,7 @@ impl issue_finder::system1::contract::Provider for ConcurrentSemanticProvider {
                     reasoning_effort: "none".into(),
                     duration_ms: Some(150),
                     usage: None,
+                    ..ProviderMetadata::default()
                 },
             })
         })
@@ -953,9 +955,9 @@ impl issue_finder::system1::contract::Provider for ConcurrentSemanticProvider {
 }
 
 #[tokio::test]
-async fn system1_runs_four_slots_refills_and_rechecks_facts_before_returning_recommendations() {
+async fn decision_runs_four_slots_refills_and_rechecks_facts_before_returning_recommendations() {
+    use issue_finder::decision::replay::ScoutReplay;
     use issue_finder::recommendation::engine::RecommendationEngine;
-    use issue_finder::system1::replay::ScoutReplay;
     let _lock = env_lock::EnvLock::acquire();
     let _auth = github_auth::GitHubAuthGuard::clear();
     let close_first = Arc::new(AtomicBool::new(false));
@@ -965,14 +967,14 @@ async fn system1_runs_four_slots_refills_and_rechecks_facts_before_returning_rec
     let directory = tempdir().unwrap();
     let paths = semantic_test_paths(directory.path());
     let mut config = Config::default();
-    config.system1.candidate_budget = 5;
+    config.decision.candidate_budget = 5;
     let provider = Arc::new(ConcurrentSemanticProvider {
         active: 0.into(),
         peak: 0.into(),
         events: Mutex::new(Vec::new()),
         close_first,
     });
-    let engine = RecommendationEngine::with_system1_provider(&paths, &config, provider.clone());
+    let engine = RecommendationEngine::with_decision_provider(&paths, &config, provider.clone());
     let result = tokio::time::timeout(
         Duration::from_secs(20),
         engine.scout(
@@ -1012,12 +1014,21 @@ async fn system1_runs_four_slots_refills_and_rechecks_facts_before_returning_rec
         .unwrap()
         .depth
         == issue_finder::availability::AvailabilityDepth::Final));
-    let execution = result.diagnostics.system1_execution.as_ref().unwrap();
+    let mut legacy = serde_json::to_value(&result.diagnostics).unwrap();
+    let object = legacy.as_object_mut().unwrap();
+    let execution_json = object.remove("decisionExecution").unwrap();
+    let replay_path_json = object.remove("decisionReplayPath").unwrap();
+    object.insert("system1Execution".into(), execution_json);
+    object.insert("system1ReplayPath".into(), replay_path_json);
+    let restored: issue_finder::discovery::DiscoveryDiagnostics =
+        serde_json::from_value(legacy).unwrap();
+    assert_eq!(restored, result.diagnostics);
+    let execution = result.diagnostics.decision_execution.as_ref().unwrap();
     assert_eq!(execution.peak_in_flight, 4);
     assert_eq!(execution.tasks.len(), 5);
     assert!(execution.tasks.iter().any(|task| task.queue_wait_ms >= 100));
     let replay = ScoutReplay::load(std::path::Path::new(
-        result.diagnostics.system1_replay_path.as_ref().unwrap(),
+        result.diagnostics.decision_replay_path.as_ref().unwrap(),
     ))
     .unwrap();
     let closed = replay

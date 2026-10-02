@@ -1,4 +1,4 @@
-# Frozen System 1 evaluation
+# Frozen decision model evaluation
 
 `samples.json` was hand-labelled before any Luna acceptance run. It contains five
 raw public GitHub snapshots and fourteen explicitly synthetic regression examples.
@@ -38,7 +38,7 @@ five real snapshots (one active contribution is intended to remain visible at lo
 Offline regression:
 
 ```bash
-cargo test --test system1_evaluation
+cargo test --test decision_evaluation
 ```
 
 The existing `recommendation_eval` datasets continue to cover control/dispatch compatibility;
@@ -50,26 +50,24 @@ baseline, tests rejected-material leakage and the quality of the first five cand
 and verifies JSON replay and neutral provider failure. It proves policy behavior given
 answers; it does **not** prove a model can produce those answers.
 
-Explicit live Luna acceptance (requires an already configured CLI and authentication):
+Manual native transport smoke/performance now lives outside the offline test suite:
 
 ```bash
-ISSUE_FINDER_SYSTEM1_LIVE_EVAL=1 \
-ISSUE_FINDER_SYSTEM1_EVAL_REPORT=/tmp/system1-live-eval.json \
-cargo test --test system1_evaluation live_luna_classifies_frozen_github_material_and_reports_quality -- --ignored --nocapture
+cargo run --example decision_benchmark -- smoke --provider aliyun-decision --report /tmp/decision-smoke.json --live
+cargo run --example decision_benchmark -- concurrency --provider aliyun-decision --report /tmp/decision-concurrency.json --live
+cargo run --example decision_benchmark -- workload --report /tmp/decision-workload.json
 ```
 
-The default live subset is all five real snapshots. `ISSUE_FINDER_SYSTEM1_EVAL_IDS` can
-select comma-separated sample IDs, including synthetic cases. The test sends actual
-bounded evidence through the business question builder and Codex adapter. It reports
-all current seven-question answer mismatches, persists responses/model metadata if a report path is supplied,
-and requires exact agreement on task type, description quality and contribution state,
-plus zero false hiding of good candidates. Additional-field disagreement remains visible
-for rubric review; it is not silently counted as a pass. Do not change labels to fit model
-outputs. Classifier failures or ambiguous rubrics should be investigated separately.
+Smoke uses at most the five frozen real snapshots; `--ids` selects real snapshot IDs.
+Concurrency uses 24 repeated logical calls per run in order `[4, 8, 8, 4]`, capped at
+96 logical calls. Both require explicit `--live`; workload export is offline. Native
+provider endpoint/credential environment variables are the same as the production CLI.
+The historical live Luna quality experiment and five-call transport experiment were
+retired. Their recorded evidence and original labels remain unchanged.
 
 The initial live five-case run matched all 15 core fields and 38/40 fields overall.
 The two additional-field disagreements and the unsupported frozen maintainer label
-are preserved in [the evaluation report](../../../docs/system1-evaluation.md).
+are preserved in [the evaluation report](../../../docs/decision-evaluation.md).
 The original labels remain unchanged.
 
 Initial frozen `samples.json` SHA-256:
@@ -88,9 +86,9 @@ GitHub facts determine availability and competition.
 
 `samples.json`, the original eight-question labels, legacy baseline and initial
 38/40 live report remain historical artifacts. They are not relabelled as v2 results.
-No additional live quality evaluation is part of this migration. A separate bounded
-five-request concurrency acceptance checks transport behavior without scoring labels;
-see the current section in [the evaluation report](../../../docs/system1-evaluation.md).
+No additional live quality evaluation is part of this migration. The manual native smoke example
+checks transport behavior without scoring model quality;
+see the current section in [the evaluation report](../../../docs/decision-evaluation.md).
 Schema 1 replay
 files validate the original v1 question contract and preserve their captured ranking;
 schema 2 captures explicitly identify v2 and recompute only under the current policy.

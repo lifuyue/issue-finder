@@ -51,11 +51,39 @@ pub enum Command {
     Supervise(SuperviseArgs),
     /// Check local readiness.
     Doctor,
-    /// Verify the System 1 CLI, model, structured output and authentication with a real request.
-    System1Check {
+    /// Verify the selected decision model provider and authentication with a real decision request.
+    #[command(visible_alias = "system1-check")]
+    DecisionCheck {
+        #[arg(long, value_enum)]
+        provider: Option<DecisionProviderArg>,
+        /// Select Codex and override its executable; incompatible with another explicit provider.
         #[arg(long)]
         codex_binary: Option<String>,
     },
+    /// Initialize isolated Codex file authentication from ISSUE_FINDER_CODEX_AUTH_JSON.
+    #[command(visible_alias = "system1-auth-init")]
+    DecisionAuthInit {
+        /// Replace the isolated runtime credential explicitly; otherwise preserve refreshed auth.
+        #[arg(long)]
+        replace: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DecisionProviderArg {
+    AliyunDecision,
+    CloudflareClefFlash,
+    Codex,
+}
+
+impl From<DecisionProviderArg> for crate::config::DecisionProvider {
+    fn from(value: DecisionProviderArg) -> Self {
+        match value {
+            DecisionProviderArg::AliyunDecision => Self::AliyunDecision,
+            DecisionProviderArg::CloudflareClefFlash => Self::CloudflareClefFlash,
+            DecisionProviderArg::Codex => Self::Codex,
+        }
+    }
 }
 
 #[derive(Debug, Args)]

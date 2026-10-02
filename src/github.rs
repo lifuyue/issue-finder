@@ -2136,7 +2136,7 @@ fn merge_fallback_candidates(
 ) -> Vec<DiscoveryCandidate> {
     let mut candidates = merge_candidates(candidates, profile);
     if factual_order {
-        // These caps precede System 1. Only facts may choose which material reaches it.
+        // These caps precede decision model. Only facts may choose which material reaches it.
         for candidate in &mut candidates {
             candidate.rough_score = candidate.issue.repo_stars.checked_ilog10().unwrap_or(0) as i32;
         }

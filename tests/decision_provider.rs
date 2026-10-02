@@ -4,8 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use issue_finder::system1::codex::CodexProvider;
-use issue_finder::system1::contract::*;
+use issue_finder::decision::codex::CodexProvider;
+use issue_finder::decision::contract::*;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -152,7 +152,7 @@ async fn persistent_adapter_uses_fixed_model_and_isolated_tool_free_threads() {
         assert!(params["cwd"]
             .as_str()
             .unwrap()
-            .contains("issue-finder-system1-"));
+            .contains("issue-finder-decision-"));
     }
     assert!(provider.fingerprint().contains("version=codex-cli 0.159.3"));
     provider.close().await;
@@ -335,50 +335,4 @@ fn unified_contract_keeps_scores_and_native_expectations_distinct() {
     response.answers[0].answer = None;
     response.status = ResponseStatus::Partial;
     response.validate(&request).unwrap();
-}
-
-struct AlternateProvider;
-impl Provider for AlternateProvider {
-    fn fingerprint(&self) -> String {
-        "alternate_native_provider:v1".into()
-    }
-    fn decide<'a>(&'a self, request: &'a DecisionRequest) -> DecisionFuture<'a> {
-        Box::pin(async move {
-            Ok(DecisionResponse {
-                candidate_id: request.candidate_id.clone(),
-                input_id: request.input_id.clone(),
-                status: ResponseStatus::Complete,
-                answers: vec![QuestionResponse {
-                    question_id: request.questions[0].id.clone(),
-                    status: AnswerStatus::Answered,
-                    answer: Some(Answer::Choice("concrete".into())),
-                    probabilities: Some(ProbabilityInfo::Choice {
-                        distribution: vec![
-                            AnswerProbability {
-                                answer: "concrete".into(),
-                                probability: 0.8,
-                            },
-                            AnswerProbability {
-                                answer: "unclear".into(),
-                                probability: 0.2,
-                            },
-                        ],
-                    }),
-                }],
-                metadata: ProviderMetadata {
-                    provider: "alternate".into(),
-                    ..ProviderMetadata::default()
-                },
-            })
-        })
-    }
-}
-
-#[tokio::test]
-async fn another_provider_consumes_identical_business_request_and_typed_results() {
-    let provider: Box<dyn Provider> = Box::new(AlternateProvider);
-    let request = request();
-    let response = provider.decide(&request).await.unwrap();
-    response.validate(&request).unwrap();
-    assert!(response.answers[0].probabilities.is_some());
 }

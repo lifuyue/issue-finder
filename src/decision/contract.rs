@@ -108,6 +108,12 @@ pub struct ProviderMetadata {
     pub reasoning_effort: String,
     pub duration_ms: Option<u64>,
     pub usage: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_latency_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_answers: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

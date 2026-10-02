@@ -55,8 +55,10 @@ captured `gh auth token --hostname github.com` lookup. The fallback does not pri
 or save the credential. Configure read access through the host's supported secret
 or authentication mechanism; never put tokens in JSON arguments or chat.
 `gh` is optional when another credential source is present. Python and MCP
-registration are not prerequisites. Scout's System 1 requires an authenticated
-Codex CLI, configured separately from the GitHub credential.
+registration are not prerequisites. Scout's Decision model requires credentials for
+its selected provider, separately from the GitHub credential. The default is
+Alibaba `decision-model-preview`; Cloudflare `clef-flash` and Codex CLI are
+explicit alternatives. Codex CLI is required only for the Codex fallback.
 
 Missing configuration is valid. Defaults and per-call `profile` preferences are
 sufficient; `issue-finder init` is optional and is not a hidden questionnaire.
@@ -68,20 +70,49 @@ push, and PR delivery with its normal tools and the environment's credentials;
 read access, successful local checks, or a pushed fork does not prove upstream
 PR permission.
 
-## Codex CLI: Cloud installation, local reuse
+## Native decision providers
 
-System 1 uses Codex app-server with `gpt-6-luna` and `reasoning.effort=none`.
+Choose `[decision].provider = "aliyun_decision"` (default) or
+`"cloudflare_clef_flash"` in the Issue Finder configuration. `decision-check`
+checks that configured choice; a `--provider` diagnostic override does not change
+scout configuration. Native keys are read only from their named runtime
+environment variables; do not write credentials into `config.toml`.
+
+| Provider | Secret environment key | Non-secret runtime input | Explicit acceptance |
+| --- | --- | --- | --- |
+| Alibaba | `DASHSCOPE_API_KEY` | `ISSUE_FINDER_ALIYUN_DECISION_ENDPOINT`, or `[decision.aliyun_decision].endpoint` | `issue-finder decision-check --provider aliyun-decision` |
+| Cloudflare | `CLOUDFLARE_API_TOKEN` | `CLOUDFLARE_ACCOUNT_ID`, or `[decision.cloudflare_clef_flash].account_id` | `issue-finder decision-check --provider cloudflare-clef-flash` |
+
+Alibaba needs the complete Workspace URL
+`https://{workspace}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`
+or its `ap-southeast-1` equivalent. A generic DashScope chat URL does not provide
+this decision API. Cloudflare generates the Workers AI endpoint from the account
+ID. Prefer its Workers AI REST API token template and verify access on the actual
+account. Preserve the host's proxy and CA settings. Provider failures remain
+visible; the program does not silently switch providers or activate paid plans.
+
+The [provider guide](../../../docs/decision-providers.md) includes full
+configuration, native probabilities, published costs, and live acceptance limits.
+Alibaba's current limited-time free offer has no published end date; Cloudflare's
+shared 10,000 Neurons/day allowance is not evidence of this user's unused quota.
+The Workers Paid $5 monthly minimum is a subscription fee, not gifted credits.
+Offline/mock checks do not validate either user's real service access.
+
+## Codex CLI fallback: Cloud installation, local reuse
+
+With `[decision].provider = "codex"`, Decision model uses Codex app-server with
+`gpt-6-luna` and `reasoning.effort=none`.
 The tested compatibility baseline is Codex CLI `0.159.3`. Version output or a
 login-status message alone does not validate model access, authentication,
 reasoning settings, or strict structured output.
 
-After installing an Issue Finder build that exposes `system1-check`, local use
+After installing an Issue Finder build that exposes `decision-check`, local use
 checks the existing Codex executable and login without installing or upgrading:
 
 ```bash
-/path/to/issue-finder/scripts/system1-codex.sh --check-only
+/path/to/issue-finder/scripts/decision-codex.sh --check-only
 # If the selected binaries are outside PATH:
-/path/to/issue-finder/scripts/system1-codex.sh --check-only \
+/path/to/issue-finder/scripts/decision-codex.sh --check-only \
   --codex-binary /absolute/path/to/codex \
   --issue-finder-binary /absolute/path/to/issue-finder
 ```
@@ -90,7 +121,7 @@ For an explicitly configured Cloud setup, install the pinned CLI into a private
 npm prefix and immediately run the same live acceptance check:
 
 ```bash
-/path/to/issue-finder/scripts/system1-codex.sh --cloud-install \
+/path/to/issue-finder/scripts/decision-codex.sh --cloud-install \
   --prefix /workspace/.issue-finder-runtime/codex-cli \
   --issue-finder-binary /absolute/path/to/issue-finder
 ```
@@ -99,13 +130,15 @@ Cloud installation requires Node.js/npm. It installs `@openai/codex@0.159.3`
 with `npm --prefix`, checks the exact installed version, and does not change the
 global npm install, shell profile, PATH, or Codex configuration. Supply that
 prefix's `node_modules/.bin/codex` through `ISSUE_FINDER_CODEX_BIN` in the supported
-Cloud runtime settings or `[system1].codex_binary`. Persist the setting in the
+Cloud runtime settings or `[decision].codex_binary`. Persist the setting in the
 saved environment and verify a fresh task. The repository script does not
 publish or edit Cloud settings. Do not set an existing Codex override during
 `--cloud-install`; that mode explicitly chooses its private installed binary.
 
-Both paths invoke the production `issue-finder system1-check --codex-binary PATH`
-adapter. This makes a real minimal schema-constrained request in an independent
+`--codex-binary` implies Codex selection and conflicts with an explicitly chosen
+native `--provider`. Both script paths invoke the production
+`issue-finder decision-check --codex-binary PATH` adapter. This makes a real
+minimal schema-constrained request in an independent
 context with no classification tools and checks protocol-confirmed model and
 reasoning settings plus typed answer validation. A successful request validates
 runtime authentication. The command returns one redacted JSON object on stdout;
@@ -115,39 +148,75 @@ versions may be compatible; verify the actual request instead of automatically
 installing the baseline version.
 
 Local discovery supports `ISSUE_FINDER_CODEX_BIN`, configured
-`[system1].codex_binary`, and the existing CLI's discoverable installation. It
+`[decision].codex_binary`, and the existing CLI's discoverable installation. It
 reuses the user's available login and leaves global configuration alone.
 The check-only script discovers PATH or an explicit executable override; use
-`issue-finder system1-check` directly to exercise configured binary discovery.
-A scout provider reuses one app-server process with independent threads per issue,
+`issue-finder decision-check --provider codex` directly to exercise configured
+binary discovery. The Codex scout provider reuses one app-server process
+with independent threads per issue,
 separate from the agent's working chat. Each issue sends all seven v2 questions in
 one request while retaining each question's material and criteria. Default
-`[system1].concurrency = 4` must be positive and has no additional upper cap;
+`[decision].concurrency = 4` must be positive and has no additional upper cap;
 `candidate_budget = 24` limits screened issues independently. Candidate failures
 are isolated; the adapter permits at most one retry for a retryable server response
-within the original timeout. A minimal `system1-check` validates runtime access;
+within the original timeout. A minimal `decision-check` validates runtime access;
 it does not establish batch throughput or v2 classification quality. Historical
 single-request and eight-question reports remain historical evidence.
-Default settings and screening behavior are in the [System 1 guide](../../../docs/system1.md).
+Default settings and screening behavior are in the [Decision model guide](../../../docs/decision.md).
 
 ### Codex authentication
 
-Provision Codex authentication through the host's supported credential mechanism;
-`GH_TOKEN` only authenticates GitHub. The script neither initializes login nor
-reads, prints, copies, or commits authentication tokens. Never pass credential
-values in command arguments, issue arguments, chat, logs, or repository files.
+`decision-auth-init` initializes the explicit Codex fallback only. Set the scout
+choice explicitly; this configuration is separate from a one-off diagnostic:
 
-If Cloud bootstrapping injects a Codex-managed `auth.json`, use a private writable
-`CODEX_HOME` distinct from the main agent's configuration, restrict file access,
-and avoid replacing an existing user's auth/configuration. The adapter uses the
-provisioned CLI authentication in its independent context. Do not treat a static
-injected JSON file as permanent login: CLI refreshes change the runtime copy,
-not the original injected value. Concurrent tasks initialized from the same
-refresh credential can conflict. Without refresh persistence, this is a
-transitional setup whose injected credential must be replaced after expiry.
-Long-lived cross-task credential management is a separate deployment choice.
-Acceptance requires a successful real model request, not file existence or
-`codex login status` alone.
+```toml
+[decision]
+provider = "codex"
+```
+
+Native Alibaba and Cloudflare providers do not need this auth initialization.
+
+`GH_TOKEN` only authenticates GitHub. By default the script reuses an existing
+Codex login. For explicit Cloud injection, store the complete original `auth.json`
+as `ISSUE_FINDER_CODEX_AUTH_JSON` in the host's protected **environment-variable**
+settings, available during task execution. Supply real JSON, not a file path,
+base64, or a Network secret placeholder. Never put the value in arguments, chat,
+logs, repository files, or a saved environment image.
+
+After installing a source revision supporting the new command, initialize at
+each task's runtime startup, then verify the real provider:
+
+```bash
+issue-finder decision-auth-init
+issue-finder decision-check --provider codex
+# Or use the repository wrapper (also supports --cloud-install):
+/path/to/issue-finder/scripts/decision-codex.sh --check-only --auth-from-env
+```
+
+The optional non-secret `ISSUE_FINDER_CODEX_HOME` chooses an absolute private,
+writable directory; the default is `system1/codex-home` under `ISSUE_FINDER_HOME`
+or `~/.issue-finder`. Bootstrap validates the credential shape, creates the Unix
+directory with mode `0700` and `auth.json` with mode `0600`, and preserves existing
+refreshed credentials. `--replace` is an explicit seed rotation operation to use
+while no Decision model calls are active, never a default startup flag. External
+`chatgptAuthTokens` caches require their own refresh owner and are not imported.
+
+The adapter sets `CODEX_HOME` and the file credential store only on its Codex
+children, removes the raw injection and competing auth environment variables
+there, and leaves the main agent login, proxy, and CA configuration intact.
+Opting into injection with a missing auth file fails with initialization guidance;
+runtime business calls never silently bootstrap or fall back to another login.
+
+CLI refresh updates the runtime file, not the static injected secret. Preserve
+that refreshed file between calls. Recreated environments need a current seed,
+and separate concurrent tasks must not reuse one rotating refresh credential.
+Without secure refresh persistence, this is a transitional setup whose injected
+credential must be replaced after expiry or rotation. See the
+[official CI/CD auth guidance](https://developers.openai.com/codex/auth/ci-cd-auth).
+Successful bootstrap only reports local storage; acceptance requires a successful
+real model request, not file existence or `codex login status` alone. A ready-to-use
+[Cloud configuration task prompt](../../../docs/cloud-codex-auth-prompt.md) describes
+the rollout and fresh-task checks.
 
 ## Standard Cloud credential setup
 

@@ -9,7 +9,7 @@ Use this skill for GitHub issue discovery and assessment in Codex. The business
 contract contains only `issue-finder.scout` and `issue-finder.assess`. Codex owns
 selection, workspace preparation, reproduction, repair, validation, review, and
 PR delivery according to the user's scope and repository instructions. The CLI
-provides evidence and bounded System 1 screening inside scout; its ranking never grants or withdraws repair authorization.
+provides evidence and bounded Decision model screening inside scout; its ranking never grants or withdraws repair authorization.
 
 ## Call conditions
 
@@ -74,14 +74,20 @@ issue-finder tools call issue-finder.assess --arguments '{"issue":"owner/repo#12
 
 ## Interpret evidence
 
-Scout uses Codex app-server (`gpt-6-luna`, reasoning disabled) for seven semantic
-questions (`scout-semantics-v2`). Default `[system1].concurrency = 4` is positive
-with no additional upper cap. One app-server process serves independent issue
-threads; each issue receives one request with all seven questions and their own
-criteria/material. Candidate failures are isolated, with at most one retry for a
+Scout defaults to Alibaba `decision-model-preview`; Cloudflare `clef-flash` and
+the Codex app-server (`gpt-6-luna`, reasoning disabled) are explicit alternatives.
+All use the seven semantic questions (`scout-semantics-v2`). Default
+`[decision].concurrency = 4` is positive with no additional upper cap. Each issue
+receives one request with all seven questions and their own criteria/material.
+The Codex fallback uses one app-server with independent issue threads. Native
+providers retain service probabilities; Codex does not supply them. Neither
+probabilities nor confidence establish verified GitHub facts. Provider errors
+do not silently switch models. Candidate failures are isolated, with at most one retry for a
 retryable server response within the original timeout. Inspect each candidate's
-`system1` status, question version, answers, material scope, input hash and snapshot
+`decision` status, question version, answers, material scope, input hash and snapshot
 path, plus execution diagnostics. Failure and budget-skipped screening remain visible; there is no semantic keyword fallback.
+See [provider configuration](../../docs/decision-providers.md) for credentials,
+explicit selection, and runtime acceptance; do not put secrets in tool arguments.
 These answers describe supplied material, not verified fixes or ownership.
 `working`, `fix_claimed` and `conflicting` are soft reminders to check current
 GitHub evidence, not automatic competition exclusions. Evaluate documentation,

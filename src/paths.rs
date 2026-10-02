@@ -82,12 +82,17 @@ impl IssueFinderPaths {
             .join(format!("{}.json", sanitize_repo_name(key)))
     }
 
-    pub fn system1_snapshot_path(&self, key: &str) -> PathBuf {
+    // Legacy directory names preserve existing decision snapshots, replays and Codex login.
+    pub fn decision_snapshot_path(&self, key: &str) -> PathBuf {
         // Keys are content digests, never caller-supplied paths.
         self.cache_dir.join("system1").join(format!("{key}.json"))
     }
 
-    pub fn system1_replay_path(&self, key: &str) -> PathBuf {
+    pub fn decision_codex_home(&self) -> PathBuf {
+        self.home.join("system1").join("codex-home")
+    }
+
+    pub fn decision_replay_path(&self, key: &str) -> PathBuf {
         self.cache_dir
             .join("system1")
             .join("replay")

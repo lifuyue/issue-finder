@@ -8,7 +8,7 @@ Issue Finder 面向 Codex 提供 GitHub issue 发现与评估。Codex 负责选�
 
 ## CLI + skill
 
-[`skills/issue-finder-cli/SKILL.md`](./skills/issue-finder-cli/SKILL.md) 是主要的 CLI 集成入口。当前会话的 tool profile 仅提供 `scout` 和 `assess`，用于发现、过滤、排序和证据评估。`scout` 在最终选择前，通过 Codex app-server 使用 `gpt-6-luna`、关闭推理的 System 1 一次回答七个固定语义问题（`scout-semantics-v2`），保留每题各自的材料和标准。筛选前先获取独立的 GitHub 可用性事实，展示前再次获取新事实，并在已有候选池和 API 预算内补足排除项。主 agent 负责实际修复。不需要 MCP server、dispatch 配置或交互式 Issue Finder 初始化。
+[`skills/issue-finder-cli/SKILL.md`](./skills/issue-finder-cli/SKILL.md) 是主要的 CLI 集成入口。当前会话的 tool profile 仅提供 `scout` 和 `assess`，用于发现、过滤、排序和证据评估。`scout` 在最终选择前，默认使用阿里云原生 `decision-model-preview` 一次回答七个固定语义问题（`scout-semantics-v2`），保留每题各自的材料和标准。筛选前先获取独立的 GitHub 可用性事实，展示前再次获取新事实，并在已有候选池和 API 预算内补足排除项。主 agent 负责实际修复。不需要 MCP server、dispatch 配置或交互式 Issue Finder 初始化。
 
 将本仓库加入 Codex project，直接按路径调用源码中的 skill：
 
@@ -34,7 +34,7 @@ $issue-finder-cli 在 owner/repo 中找一个合适的 issue 并完成它。
 $issue-finder-cli 完成 https://github.com/owner/repo/issues/123。
 ```
 
-agent 实际执行命令的环境需要 Git、兼容的 `issue-finder` 二进制，以及供 System 1 使用的已认证 Codex CLI。通过 Cargo 安装已发布的包：
+agent 实际执行命令的环境需要 Git、兼容的 `issue-finder` 二进制，以及所选决策模型 provider 的认证配置。通过 Cargo 安装已发布的包：
 
 ```bash
 cargo install issue-finder --locked
@@ -44,19 +44,23 @@ cargo install issue-finder --locked
 
 ```bash
 issue-finder tools --profile session list
-issue-finder system1-check
+issue-finder decision-check
 issue-finder tools call issue-finder.scout --arguments '{"limit":5}'
 ```
 
-Cloud 准备流程明确将经过验证的 Codex CLI `0.159.3` 安装到独立 npm prefix；本地只发现并复用已有 CLI 和登录。[仓库安装脚本](./scripts/system1-codex.sh) 支持 `--cloud-install` 和 `--check-only`，两条路径均通过真实模型请求验证结构化输出、模型、关闭推理与认证。详见[安装说明](./skills/issue-finder-cli/references/install.md)。
+默认 `aliyun_decision` 需要环境变量 `DASHSCOPE_API_KEY`，以及完整 Workspace System One endpoint，由 `ISSUE_FINDER_ALIYUN_DECISION_ENDPOINT` 或 `[decision.aliyun_decision].endpoint` 指定。`cloudflare_clef_flash` 使用 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。两个原生接口保留服务端概率。通过 `[decision].provider` 选择 scout provider，使用 `decision-check --provider aliyun-decision`、`--provider cloudflare-clef-flash` 或 `--provider codex` 显式验收某条路径；失败不会静默切换 provider 或开通付费服务。配置、费用与验收边界见 [provider 指南](./docs/decision-providers.md)。新配置使用 `[decision]`；旧 `[system1]` 与 CLI 别名继续兼容，见[命名迁移说明](./docs/decision.md#naming-and-compatibility)。
 
-GitHub 凭据统一使用环境变量 `GH_TOKEN`，Issue Finder 不再读取 `GITHUB_TOKEN`。没有 `GH_TOKEN` 时，session 工具兼容可选配置中的凭据和宿主已有的 `gh` 登录；提供 `GH_TOKEN` 即可，无需安装 `gh`；无需 `init` 或 status 前置检查。配置、认证和网络错误直接由业务调用返回；读取成功不代表拥有 PR 创建权限。CLI 状态默认位于 `~/.issue-finder`，可用 `ISSUE_FINDER_HOME` 指定独立目录。
+显式 `codex` 回退使用 `gpt-6-luna`、关闭推理。其 Cloud 准备流程将经过验证的 Codex CLI `0.159.3` 安装到独立 npm prefix；本地只发现并复用已有 CLI 和登录。[仓库安装脚本](./scripts/decision-codex.sh) 支持 `--cloud-install` 和 `--check-only`，两条路径均通过真实模型请求验证结构化输出、模型、关闭推理与认证。详见[安装说明](./skills/issue-finder-cli/references/install.md)。
+
+Codex 回退注入认证时，明确配置 `[decision].provider = "codex"`，将完整原始 Codex `auth.json` 保存为 secret `ISSUE_FINDER_CODEX_AUTH_JSON`，在每个 task 的运行期启动时先运行 `issue-finder decision-auth-init`，再运行 `issue-finder decision-check --provider codex`。可选的非 secret 变量 `ISSUE_FINDER_CODEX_HOME` 指定私有可写的 CLI home，默认使用 Issue Finder 状态目录下的 `system1/codex-home`；只为 Codex 子进程设置该 home。初始化默认保留已有的刷新后文件，`--replace` 显式替换种子；运行时调用不初始化凭据。CLI 刷新不会更新静态 secret，多个并发环境不能共享同一刷新凭据。持久化和验证限制见 [决策模型认证说明](./docs/decision.md#injected-codex-authentication)。
+
+GitHub 凭据统一使用环境变量 `GH_TOKEN`，Issue Finder 不再读取 `GITHUB_TOKEN`。没有 `GH_TOKEN` 时，session 工具兼容可选配置中的凭据和宿主已有的 `gh` 登录；提供 `GH_TOKEN` 即可，无需安装 `gh`；GitHub 无需 `init` 或 status 前置检查。配置、认证和网络错误直接由业务调用返回；读取成功不代表拥有 PR 创建权限。CLI 状态默认位于 `~/.issue-finder`，可用 `ISSUE_FINDER_HOME` 指定独立目录。
 
 GitHub 搜索的排序、查询、分页和 API 预算是明确的工具参数。CLI 对检索到的候选进行贡献价值排序，agent 阅读正文与讨论后选择适合用户的任务。仅推荐的请求会在准备工作区之前结束。所有用户交互都留在当前 agent 会话。
 
-`scout` 默认并发处理四个候选，一个 app-server 进程为每个 issue 使用独立 thread；并发配置必须为正数，没有额外上限。单候选失败独立隔离，仅对带重试延迟的可重试响应在原超时内最多重试一次。`scout` 展示语义答案、材料范围、可用性事实、失败和快照；失败或超预算未判断的候选保持可识别，不会静默恢复语义关键词过滤。`assess` 不调用模型，读取当前材料并执行最终层级的事实复核。六小时语义缓存不替代每次获取的新 GitHub 事实。
+`scout` 默认并发处理四个候选，每个 issue 一次请求保留七题各自的材料；原生接口按 question ID 映射，Codex 回退在一个 app-server 中使用独立 thread。并发配置必须为正数，没有额外上限。单候选失败独立隔离；Codex 仅对可重试响应在原超时内最多重试一次。`scout` 展示语义答案、材料范围、可用性事实、失败和快照；失败或超预算未判断的候选保持可识别，不会静默恢复语义关键词过滤。`assess` 不调用模型，读取当前材料并执行最终层级的事实复核。六小时语义缓存不替代每次获取的新 GitHub 事实。
 
-讨论中的 working、fix_claimed、conflicting 只作证据检查的软提醒，不能直接证明任务被认领或存在 open PR。实际 PR 身份、状态与明确解决关系才构成事实；关闭不等于合并，单纯提及、搜索线索和覆盖不完整保留为未知。文档、生成、活动与奖励任务依据具体目标、清晰度、范围和明确偏好评估，不按任务形式排除。原八题快照和报告仍属历史记录，v1 回放保留当时结果，不用 v2 重算。详见 [System 1](./docs/system1.md) 与[现状与使用说明](./docs/README.md)。
+讨论中的 working、fix_claimed、conflicting 只作证据检查的软提醒，不能直接证明任务被认领或存在 open PR。实际 PR 身份、状态与明确解决关系才构成事实；关闭不等于合并，单纯提及、搜索线索和覆盖不完整保留为未知。文档、生成、活动与奖励任务依据具体目标、清晰度、范围和明确偏好评估，不按任务形式排除。原八题快照和报告仍属历史记录，v1 回放保留当时结果，不用 v2 重算。详见 [决策模型](./docs/decision.md) 与[现状与使用说明](./docs/README.md)。
 
 `tools` 和 `mcp` 默认仅暴露两个 session 工具。评分是评估信息，不是修复授权门槛。Codex 排序忽略历史 `dismissed`、`done` 和 `prepared` 事件，保留自动展示／阅读记录。旧事件和任务文件保留在磁盘，旧任务文件不再读取或续作。本契约不再提供跨聊天手动忽略／恢复或 CLI 完成记录。
 

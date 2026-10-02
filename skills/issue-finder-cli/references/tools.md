@@ -42,9 +42,14 @@ gaps; do not present them as vetted recommendations.
 
 Scout checks fresh initial GitHub availability, screens eligible candidates with
 seven `scout-semantics-v2` questions, then freshly rechecks provisional results and
-backfills from the bounded pool within the existing API budget. Codex app-server
-uses `gpt-6-luna` with reasoning disabled: one process, independent issue threads,
-one seven-question request per issue with each question's criteria and material.
+backfills from the bounded pool within the existing API budget. The default
+provider is Alibaba `decision-model-preview`; Cloudflare `clef-flash` and Codex
+app-server (`gpt-6-luna`, reasoning disabled) are explicitly selectable alternatives.
+Each issue uses one seven-question request with each question's criteria and
+material. The Codex fallback uses one process and independent issue threads.
+Native providers preserve their service probabilities and confidence; these are
+model outputs, not verified facts. Codex probability fields remain empty, and
+provider errors do not cause an automatic model switch.
 Default configuration concurrency is 4 and must be positive; there is no extra
 upper cap. Single-candidate failures are isolated, with at most one retry for a
 retryable server response within the original timeout. GitHub facts and semantic
@@ -54,7 +59,7 @@ automatic contested categories. Task form does not exclude concrete documentatio
 content, generated, event or rewarded changes; goal, clarity, scope and explicit
 preferences determine their fit. Failed, unable-to-answer, and budget-skipped candidates remain
 identifiable. There is no fallback to replaced semantic keyword hiding. See the
-[System 1 guide](../../../docs/system1.md) for configuration and the provider contract.
+[Decision model guide](../../../docs/decision.md) for configuration and the provider contract.
 
 ## Outputs and freshness
 
@@ -62,7 +67,7 @@ Inspect the full JSON envelope: `success`, `status`, warnings, and error details
 Tool data is in `structured_content`:
 
 - Scout: `candidates`, `diagnostics.search`, `apiBudget`, and resolved `profile`.
-  Each candidate's `system1` exposes semantic status/answers, input hash, material
+  Each candidate's `decision` exposes semantic status/answers, input hash, material
   scope, question version and saved snapshot path; `availability` contains fresh
   issue/repository/PR facts and coverage. Diagnostics disclose failures, skips,
   concurrency, peak in-flight work and per-candidate timing/cache hits.

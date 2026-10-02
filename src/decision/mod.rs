@@ -1,8 +1,14 @@
 //! Provider-independent screening: material snapshots, finite questions and replayable results.
+pub mod aliyun;
+pub mod clef;
 pub mod codex;
+pub mod codex_auth;
 pub mod contract;
 pub mod evidence;
+mod http;
+mod native;
 pub mod policy;
+pub mod provider;
 pub mod questions;
 pub mod replay;
 
@@ -154,7 +160,7 @@ pub async fn judge(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&(&request.input_id, &fingerprint))?)
     );
-    let path = paths.system1_snapshot_path(&key);
+    let path = paths.decision_snapshot_path(&key);
     if !refresh && path.exists() {
         let raw = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
         if let Ok(mut snapshot) = serde_json::from_slice::<JudgmentSnapshot>(&raw) {
@@ -184,7 +190,7 @@ pub async fn judge(
             }
         }
     }
-    let mut snapshot = JudgmentSnapshot::pending("System 1 request has not completed");
+    let mut snapshot = JudgmentSnapshot::pending("Decision model request has not completed");
     snapshot.input_id = Some(request.input_id.clone());
     snapshot.provider_fingerprint = Some(fingerprint);
     snapshot.evidence = Some(evidence);
@@ -240,24 +246,24 @@ pub fn factual_competition_only(enriched: &mut EnrichedIssue) {
 /// Frozen clock for reproducible screening/feedback replay; legacy paths keep wall time.
 pub fn ranking_time(enriched: &EnrichedIssue) -> DateTime<Utc> {
     enriched
-        .system1
+        .decision
         .as_ref()
         .and_then(|snapshot| DateTime::parse_from_rfc3339(&snapshot.evaluated_at).ok())
         .map(|at| at.with_timezone(&Utc))
         .unwrap_or_else(Utc::now)
 }
 
-pub async fn probe(binary: Option<String>, timeout_seconds: u64) -> Result<Value> {
-    let provider =
-        codex::CodexProvider::new(binary, std::time::Duration::from_secs(timeout_seconds))?;
+pub async fn probe(config: &crate::config::DecisionConfig) -> Result<Value> {
+    let provider = provider::ConfiguredProvider::new(config)?;
     let request = DecisionRequest {
         candidate_id: "startup-probe".into(),
+        // Keep the probe identity stable across the terminology rename.
         input_id: "system1-startup-v1".into(),
         questions: vec![contract::Question {
             id: "health".into(),
             prompt: "Select ready.".into(),
             criteria: vec!["This is a schema and authentication check; answer ready.".into()],
-            context: json!({"purpose":"System 1 runtime verification"}),
+            context: json!({"purpose":"Decision model runtime verification"}),
             kind: contract::QuestionKind::Choice {
                 options: vec!["ready".into(), "unavailable".into()],
             },
@@ -269,7 +275,7 @@ pub async fn probe(binary: Option<String>, timeout_seconds: u64) -> Result<Value
     response.validate(&request)?;
     anyhow::ensure!(
         response.answers[0].answer == Some(contract::Answer::Choice("ready".into())),
-        "System 1 probe did not answer ready"
+        "Decision model probe did not answer ready"
     );
     Ok(json!({"success":true,"providerFingerprint":provider.fingerprint(),"response":response}))
 }

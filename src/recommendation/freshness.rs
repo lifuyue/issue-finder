@@ -9,7 +9,7 @@ pub struct FreshnessAssessment {
 }
 
 pub fn assess_freshness(enriched: &EnrichedIssue) -> FreshnessAssessment {
-    let now = crate::system1::ranking_time(enriched);
+    let now = crate::decision::ranking_time(enriched);
     let mut boost = issue_updated_boost(&enriched.issue.updated_at, now);
     let mut reasons = Vec::new();
 

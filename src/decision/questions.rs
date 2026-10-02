@@ -70,9 +70,9 @@ impl SemanticAnswers {
     pub fn from_response(request: &DecisionRequest, response: &DecisionResponse) -> Result<Self> {
         response
             .validate(request)
-            .context("Invalid System 1 response contract")?;
+            .context("Invalid decision model response contract")?;
         if request.candidate_id != response.candidate_id || request.input_id != response.input_id {
-            bail!("System 1 response does not identify the requested candidate and material");
+            bail!("Decision model response does not identify the requested candidate and material");
         }
         let mut answers = serde_json::Map::new();
         for result in &response.answers {
@@ -80,9 +80,9 @@ impl SemanticAnswers {
                 .questions
                 .iter()
                 .find(|q| q.id == result.question_id)
-                .context("System 1 response contains an unexpected question")?;
+                .context("Decision model response contains an unexpected question")?;
             if answers.contains_key(&result.question_id) {
-                bail!("System 1 response contains a duplicate question answer");
+                bail!("Decision model response contains a duplicate question answer");
             }
             let value = if result.status == AnswerStatus::Answered {
                 let Some(Answer::Choice(value)) = &result.answer else {
@@ -92,19 +92,19 @@ impl SemanticAnswers {
                     bail!("Business semantic question has an unexpected type");
                 };
                 if !options.contains(value) {
-                    bail!("System 1 response contains an illegal answer choice");
+                    bail!("Decision model response contains an illegal answer choice");
                 }
                 Value::String(value.clone())
             } else {
                 if result.answer.is_some() {
-                    bail!("Unanswered System 1 question unexpectedly contains an answer");
+                    bail!("Unanswered decision model question unexpectedly contains an answer");
                 }
                 Value::Null
             };
             answers.insert(result.question_id.clone(), value);
         }
         if answers.len() != request.questions.len() {
-            bail!("System 1 response is missing a question result");
+            bail!("Decision model response is missing a question result");
         }
         serde_json::from_value(Value::Object(answers)).context("Invalid business semantic answer")
     }

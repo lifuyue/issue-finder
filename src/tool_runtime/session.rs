@@ -19,7 +19,7 @@ impl ProfileArgs {
                     "profile.taskPreferences accepts at most 4000 characters",
                 ));
             }
-            config.system1.task_preferences = preferences;
+            config.decision.task_preferences = preferences;
         }
         for (value, target) in [
             (self.tech_stack, &mut config.profile.tech_stack),
@@ -102,10 +102,10 @@ impl IssueFinderToolRuntime {
         }
         config.github.token = token.token;
         // The legacy free-form LLM reviewer stays off. Scout's independent
-        // System 1 provider answers fixed screening questions inside discovery.
+        // Decision model provider answers fixed screening questions inside discovery.
         config.llm.enabled = false;
         profile.apply(&mut config)?;
-        config.system1.validate().map_err(RuntimeFailure::System)?;
+        config.decision.validate().map_err(RuntimeFailure::System)?;
         Ok(config)
     }
 
@@ -148,9 +148,9 @@ impl IssueFinderToolRuntime {
                 value["bodyTruncated"] = json!(candidate.issue.body.chars().count() > 700);
                 value["warnings"] = json!(candidate.enriched_issue.warnings);
                 value["availability"] = json!(candidate.enriched_issue.availability);
-                value["system1"] = candidate
+                value["decision"] = candidate
                     .enriched_issue
-                    .system1
+                    .decision
                     .as_ref()
                     .map(|s| s.summary())
                     .unwrap_or(Value::Null);
@@ -168,7 +168,7 @@ impl IssueFinderToolRuntime {
                         .is_some_and(|facts| !facts.checks_complete())
                     || candidate
                         .enriched_issue
-                        .system1
+                        .decision
                         .as_ref()
                         .is_some_and(|s| s.incomplete())
             });
@@ -185,7 +185,7 @@ impl IssueFinderToolRuntime {
             json!({
                 "candidates":candidates,"discoveryCount":result.discovery_count,"filteredCount":result.filtered_count,
                 "diagnostics":result.diagnostics,"apiBudget":result.api_budget,
-                "profile":{"techStack":config.profile.tech_stack,"keywords":config.profile.keywords,"taskPreferences":config.system1.task_preferences},
+                "profile":{"techStack":config.profile.tech_stack,"keywords":config.profile.keywords,"taskPreferences":config.decision.task_preferences},
                 "nextAction":"Inspect candidates with assess. If insufficient, refine search/profile or use diagnostics.search.nextPage; do not infer no competition from partial evidence."
             }),
             true,
@@ -260,7 +260,7 @@ impl IssueFinderToolRuntime {
                 "warnings":ranked.enriched_issue.warnings,"competition":ranked.enriched_issue.competition,
                 "repository":ranked.enriched_issue.repository,"activity":ranked.enriched_issue.activity,
                 "assessmentFetchedAt":ranked.enriched_issue.source_fetched_at,
-                "system1":ranked.enriched_issue.system1.as_ref().map(|s|s.summary()),
+                "decision":ranked.enriched_issue.decision.as_ref().map(|s|s.summary()),
                 "availability":ranked.enriched_issue.availability,
                 "nextAction":"Inspect current availability, linked PRs and search leads, then relevant comment pages and existing code before investing in reproduction. A merged PR is evidence to investigate, not proof of a fix. Codex owns repair, verification and authorized delivery."
             }),
